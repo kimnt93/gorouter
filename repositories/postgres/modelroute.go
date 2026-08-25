@@ -1,0 +1,211 @@
+package postgres
+
+import (
+	"context"
+	"time"
+
+	"github.com/kimnt93/gorouter/pkg/entities"
+)
+
+type ModelRouteRepo struct{ db *DB }
+
+func NewModelRouteRepo(db *DB) *ModelRouteRepo { return &ModelRouteRepo{db: db} }
+
+func (r *ModelRouteRepo) Upsert(ctx context.Context, m entities.ModelDef) error {
+	up := m.UpstreamModel
+	if up == "" {
+		up = m.Name
+	}
+	strategy := m.Strategy
+	if strategy == "" {
+		strategy = "priority"
+	}
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `INSERT INTO models (name,strategy,upstream_model,enabled) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (name) DO UPDATE SET strategy=EXCLUDED.strategy, upstream_model=EXCLUDED.upstream_model, enabled=EXCLUDED.enabled`,
+		m.Name, strategy, up, m.Enabled); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_routes WHERE model=$1`, m.Name); err != nil {
+		return err
+	}
+	for _, rt := range m.Routes {
+		w := rt.Weight
+		if w <= 0 {
+			w = 1
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_routes (model,credential_id,priority,weight,enabled) VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (model,credential_id) DO UPDATE SET priority=EXCLUDED.priority, weight=EXCLUDED.weight, enabled=EXCLUDED.enabled`,
+			m.Name, rt.CredentialID, rt.Priority, w, rt.Enabled); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *ModelRouteRepo) Delete(ctx context.Context, name string) error {
+	tag, err := r.db.Pool.Exec(ctx, `DELETE FROM models WHERE name=$1`, name)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return entities.ErrNotFound
+	}
+	return nil
+}
+
+func (r *ModelRouteRepo) List(ctx context.Context) ([]entities.ModelDef, error) {
+	rows, err := r.db.Pool.Query(ctx, `SELECT name,strategy,upstream_model,enabled FROM models ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []entities.ModelDef
+	for rows.Next() {
+		var m entities.ModelDef
+		if err := rows.Scan(&m.Name, &m.Strategy, &m.UpstreamModel, &m.Enabled); err != nil {
+			return nil, err
+		}
+		m.Routes = []entities.ModelRoute{}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	prices, err := r.ListPrices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	routeRows, err := r.db.Pool.Query(ctx, `SELECT model,credential_id,priority,weight,enabled FROM model_routes ORDER BY priority DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer routeRows.Close()
+	byModel := map[string][]entities.ModelRoute{}
+	for routeRows.Next() {
+		var name string
+		var rt entities.ModelRoute
+		if err := routeRows.Scan(&name, &rt.CredentialID, &rt.Priority, &rt.Weight, &rt.Enabled); err != nil {
+			return nil, err
+		}
+		byModel[name] = append(byModel[name], rt)
+	}
+	for i := range out {
+		out[i].Routes = byModel[out[i].Name]
+		if p, ok := prices[out[i].Name]; ok {
+			pp := p
+			out[i].Price = &pp
+		}
+	}
+	return out, nil
+}
+
+func (r *ModelRouteRepo) SetPrice(ctx context.Context, model string, p entities.Price) error {
+	_, err := r.db.Pool.Exec(ctx, `INSERT INTO prices (model,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m,updated_at)
+		VALUES ($1,$2,$3,$4,$5,now())
+		ON CONFLICT (model) DO UPDATE SET input_per_m=EXCLUDED.input_per_m, output_per_m=EXCLUDED.output_per_m,
+		cached_input_per_m=EXCLUDED.cached_input_per_m, cache_write_per_m=EXCLUDED.cache_write_per_m, updated_at=now()`,
+		model, p.InputPerM, p.OutputPerM, p.CachedInputPerM, p.CacheWritePerM)
+	return err
+}
+
+func (r *ModelRouteRepo) ListPrices(ctx context.Context) (map[string]entities.Price, error) {
+	rows, err := r.db.Pool.Query(ctx, `SELECT model,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m FROM prices`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]entities.Price{}
+	for rows.Next() {
+		var model string
+		var p entities.Price
+		if err := rows.Scan(&model, &p.InputPerM, &p.OutputPerM, &p.CachedInputPerM, &p.CacheWritePerM); err != nil {
+			return nil, err
+		}
+		out[model] = p
+	}
+	return out, rows.Err()
+}
+
+type UsageRepo struct{ db *DB }
+
+func NewUsageRepo(db *DB) *UsageRepo { return &UsageRepo{db: db} }
+
+func (r *UsageRepo) MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error) {
+	var spent float64
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_usd),0) FROM usage_events
+		WHERE api_key_id=$1 AND ts >= date_trunc('month', now())`, apiKeyID).Scan(&spent)
+	return spent, err
+}
+
+func (r *UsageRepo) Summary(ctx context.Context, since time.Time) (*entities.UsageSummary, error) {
+	s := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(cost_usd),0), COALESCE(SUM(prompt_tokens),0),
+		       COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		       COALESCE(SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN NOT priced THEN 1 ELSE 0 END),0)
+		FROM usage_events WHERE ts >= $1`, since).
+		Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheHits, &s.Unpriced)
+	if err != nil {
+		return nil, err
+	}
+	mrows, err := r.db.Pool.Query(ctx, `
+		SELECT model, COUNT(*), COALESCE(SUM(cost_usd),0), COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0)
+		FROM usage_events WHERE ts >= $1 GROUP BY model ORDER BY SUM(cost_usd) DESC LIMIT 50`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer mrows.Close()
+	for mrows.Next() {
+		var name string
+		var u entities.ModelU
+		if err := mrows.Scan(&name, &u.Requests, &u.CostUSD, &u.InTok, &u.OutTok); err != nil {
+			return nil, err
+		}
+		s.ByModel[name] = u
+	}
+	krows, err := r.db.Pool.Query(ctx, `
+		SELECT api_key_id, COUNT(*), COALESCE(SUM(cost_usd),0)
+		FROM usage_events WHERE ts >= $1 GROUP BY api_key_id ORDER BY SUM(cost_usd) DESC LIMIT 100`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer krows.Close()
+	for krows.Next() {
+		var kid string
+		var u entities.KeyU
+		if err := krows.Scan(&kid, &u.Requests, &u.CostUSD); err != nil {
+			return nil, err
+		}
+		s.ByKey[kid] = u
+	}
+	return s, nil
+}
+
+func (r *UsageRepo) Recent(ctx context.Context, limit int) ([]entities.RecentEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT ts,tenant_id,api_key_id,credential_id,model,cost_usd,priced,cache_hit,status_code,duration_ms,error
+		FROM usage_events ORDER BY seq DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []entities.RecentEvent
+	for rows.Next() {
+		var ev entities.RecentEvent
+		if err := rows.Scan(&ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}

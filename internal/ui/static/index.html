@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>new-router console</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<div id="login-view" class="login-wrap hidden">
+  <form id="login-form" class="card login-card">
+    <h1>new-router</h1>
+    <p class="muted">LLM gateway console</p>
+    <input type="password" id="master-key" placeholder="Master key" autocomplete="current-password" required>
+    <button type="submit" class="btn primary">Sign in</button>
+    <p id="login-error" class="error hidden"></p>
+  </form>
+</div>
+
+<div id="app-view" class="hidden">
+  <header>
+    <div class="brand">new-router</div>
+    <nav id="tabs">
+      <button data-tab="dashboard" class="active">Dashboard</button>
+      <button data-tab="keys">API Keys</button>
+      <button data-tab="credentials">Credentials</button>
+      <button data-tab="models">Models &amp; Routing</button>
+      <button data-tab="usage">Usage Log</button>
+      <button data-tab="cache">Cache</button>
+    </nav>
+    <button id="logout" class="btn ghost small">Log out</button>
+  </header>
+
+  <main>
+    <section id="tab-dashboard" class="tab">
+      <div class="cards" id="dash-cards"></div>
+      <h3>Spend by model (24h)</h3>
+      <div id="dash-models" class="table-wrap"></div>
+    </section>
+
+    <section id="tab-keys" class="tab hidden">
+      <div class="row-split">
+        <h2>API Keys</h2>
+        <button class="btn primary" id="key-new">New key</button>
+      </div>
+      <div id="keys-table" class="table-wrap"></div>
+      <form id="key-form" class="card form hidden">
+        <h3>Create API key</h3>
+        <label>Tenant
+          <select id="kf-tenant"></select>
+        </label>
+        <label>Name <input id="kf-name" required placeholder="my-app-key"></label>
+        <label>Allowed models (comma separated)
+          <input id="kf-models" required placeholder="gpt-4o-mini, claude-haiku">
+        </label>
+        <div class="grid2">
+          <label>Monthly quota USD (empty = unlimited)
+            <input id="kf-quota" type="number" step="0.01" min="0" placeholder="10.00">
+          </label>
+          <label>RPM limit (optional)
+            <input id="kf-rpm" type="number" min="1" placeholder="60">
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Create</button>
+          <button type="button" class="btn ghost" id="key-cancel">Cancel</button>
+        </div>
+      </form>
+      <div id="key-revealed" class="card highlight hidden"></div>
+    </section>
+
+    <section id="tab-credentials" class="tab hidden">
+      <div class="row-split">
+        <h2>Credentials</h2>
+        <button class="btn primary" id="cred-new">Add credential</button>
+      </div>
+      <div id="creds-table" class="table-wrap"></div>
+      <form id="cred-form" class="card form hidden">
+        <h3>Add credential</h3>
+        <div class="grid2">
+          <label>Name <input id="cf-name" required placeholder="openai-main"></label>
+          <label>Provider
+            <select id="cf-provider">
+              <option value="openai-compatible">openai-compatible</option>
+              <option value="anthropic">anthropic</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid2">
+          <label>Kind
+            <select id="cf-kind">
+              <option value="api_key">api_key</option>
+              <option value="oauth">oauth</option>
+            </select>
+          </label>
+          <label>Base URL (optional)
+            <input id="cf-baseurl" placeholder="https://api.openai.com/v1">
+          </label>
+        </div>
+        <label id="cf-key-label">API key <input id="cf-apikey" placeholder="sk-..."></label>
+        <div id="cf-oauth-fields" class="hidden">
+          <label>OAuth access token <input id="cf-access" placeholder="sk-ant-oat01-..."></label>
+          <label>OAuth refresh token <input id="cf-refresh" placeholder="sk-ant-ort01-..."></label>
+        </div>
+        <label>Owner tenant (empty = shared with all tenants)
+          <select id="cf-owner"><option value="">shared</option></select>
+        </label>
+        <div class="actions">
+          <button type="submit" class="btn primary">Save</button>
+          <button type="button" class="btn ghost" id="cred-cancel">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="tab-models" class="tab hidden">
+      <div class="row-split">
+        <h2>Models &amp; Routing</h2>
+        <button class="btn primary" id="model-new">Define model</button>
+      </div>
+      <div id="models-list"></div>
+      <form id="model-form" class="card form hidden">
+        <h3><span id="mf-title">Define model</span></h3>
+        <div class="grid2">
+          <label>Model name (client-facing)
+            <input id="mf-name" required placeholder="gpt-4o-mini">
+          </label>
+          <label>Upstream model (optional alias)
+            <input id="mf-upstream" placeholder="same as name">
+          </label>
+        </div>
+        <div class="grid2">
+          <label>Routing strategy
+            <select id="mf-strategy">
+              <option value="priority">priority (failover)</option>
+              <option value="round_robin">round robin</option>
+            </select>
+          </label>
+          <label>Enabled
+            <select id="mf-enabled"><option value="true">yes</option><option value="false">no</option></select>
+          </label>
+        </div>
+        <h4>Price (USD / 1M tokens)</h4>
+        <div class="grid4">
+          <label>Input <input id="mf-pin" type="number" step="0.0001" placeholder="0.15"></label>
+          <label>Output <input id="mf-pout" type="number" step="0.0001" placeholder="0.6"></label>
+          <label>Cache read <input id="mf-pcr" type="number" step="0.0001" placeholder="0.015"></label>
+          <label>Cache write <input id="mf-pcw" type="number" step="0.0001" placeholder="0.1875"></label>
+        </div>
+        <h4>Routes (credential candidates)</h4>
+        <div id="mf-routes"></div>
+        <button type="button" class="btn small" id="mf-add-route">+ add route</button>
+        <div class="actions">
+          <button type="submit" class="btn primary">Save model</button>
+          <button type="button" class="btn ghost" id="model-cancel">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="tab-usage" class="tab hidden">
+      <div class="row-split">
+        <h2>Recent requests</h2>
+        <button class="btn ghost small" id="usage-refresh">Refresh</button>
+      </div>
+      <div id="usage-table" class="table-wrap"></div>
+    </section>
+
+    <section id="tab-cache" class="tab hidden">
+      <div class="row-split">
+        <h2>Prompt cache</h2>
+        <button class="btn danger small" id="cache-flush">Flush cache</button>
+      </div>
+      <div class="cards" id="cache-cards"></div>
+      <p class="muted">Cache is exact-match on the request body and scoped per API key by default (no cross-tenant leakage). Only deterministic requests (temperature 0 / no tools) are cached.</p>
+    </section>
+  </main>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
