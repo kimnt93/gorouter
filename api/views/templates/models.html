@@ -1,0 +1,61 @@
+<!doctype html>
+<html>{{template "head" .}}
+
+<body>{{template "nav" .}}<main>
+        <div class="toolbar">
+            <div>
+                <h1>Models and routing</h1>
+                <p class="muted">Priority tries highest values first; round robin rotates the starting credential.</p>
+            </div>
+        </div>
+        {{range .Models}}<section class="panel" style="margin-bottom:14px">
+            <div class="toolbar">
+                <div>
+                    <h2><code>{{.Name}}</code></h2><span class="badge">{{.Strategy}}</span> → {{.UpstreamModel}}
+                </div>
+                <div class="actions"><span class="badge {{if .Enabled}}ok{{end}}">{{if
+                        .Enabled}}enabled{{else}}disabled{{end}}</span>{{if $.CanManageGlobal}}<button class="danger"
+                        hx-delete="/ui/models/{{.Name}}" hx-confirm="Delete this model and its routes?" hx-target="body"
+                        hx-swap="outerHTML">Delete</button>{{end}}</div>
+            </div>
+            <div class="table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Credential</th>
+                            <th>Priority</th>
+                            <th>Weight</th>
+                            <th>Enabled</th>
+                        </tr>
+                    </thead>
+                    <tbody>{{range .Routes}}<tr>
+                            <td>{{.CredentialID}}</td>
+                            <td>{{.Priority}}</td>
+                            <td>{{.Weight}}</td>
+                            <td>{{.Enabled}}</td>
+                        </tr>{{else}}<tr>
+                            <td colspan="4" class="muted">No routes</td>
+                        </tr>{{end}}</tbody>
+                </table>
+            </div>
+        </section>
+        {{else}}<div class="notice muted">No models configured.</div>{{end}}
+        {{if .CanManageGlobal}}<section class="panel">
+            <h2>Define model</h2>
+            <form class="stack" method="post" action="/ui/models" hx-post="/ui/models" hx-target="body"
+                hx-swap="outerHTML">
+                <div class="fields"><label>Client model name<input name="name" required></label><label>Upstream
+                        model<input name="upstream_model"></label><label>Strategy<select name="strategy">
+                            <option value="priority">priority</option>
+                            <option value="round_robin">round_robin</option>
+                        </select></label><label>Credential<select name="credential_id">{{range .Credentials}}<option
+                                value="{{.ID}}">{{.Name}} ({{.Provider}})</option>
+                            {{end}}</select></label><label>Priority<input name="priority" type="number"
+                            value="0"></label><label>Weight<input name="weight" type="number" min="1" value="1"></label>
+                </div><button class="primary">Save model and route</button>
+            </form>
+        </section>{{end}}
+    </main>
+</body>
+
+</html>

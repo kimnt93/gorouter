@@ -1,0 +1,70 @@
+<!doctype html>
+<html>{{template "head" .}}
+
+<body>{{template "nav" .}}<main>
+        <div class="toolbar">
+            <div>
+                <h1>API keys</h1>
+                <p class="muted">Plaintext secrets are displayed only after creation.</p>
+            </div>
+        </div>
+        {{if .CreatedSecret}}<div class="notice"><b>Copy this key now:</b> <code>{{.CreatedSecret}}</code></div>{{end}}
+        <div class="table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Tenant</th>
+                        <th>Prefix</th>
+                        <th>Models</th>
+                        <th>Scopes</th>
+                        <th>Quota</th>
+                        <th>RPM</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Keys}}<tr>
+                        <td>{{.Name}}</td>
+                        <td>{{.TenantName}}</td>
+                        <td><code>{{.SecretPrefix}}</code></td>
+                        <td>{{range .Models}}<span class="badge">{{.}}</span> {{end}}</td>
+                        <td>{{range .Scopes}}<span class="badge">{{.}}</span> {{end}}</td>
+                        <td>{{if .MonthlyQuotaUSD}}{{printf "$%.4f" .MonthlyQuotaUSD}}{{else}}—{{end}}</td>
+                        <td>{{if .RPM}}{{.RPM}}{{else}}—{{end}}</td>
+                        <td><span class="badge {{if .Enabled}}ok{{end}}">{{if
+                                .Enabled}}enabled{{else}}disabled{{end}}</span></td>
+                        <td>
+                            <div class="actions">
+                                <form hx-post="/ui/keys/{{.ID}}/toggle" hx-target="body" hx-swap="outerHTML"><input
+                                        type="hidden" name="enabled"
+                                        value="{{if .Enabled}}false{{else}}true{{end}}"><button>{{if
+                                        .Enabled}}Disable{{else}}Enable{{end}}</button></form><button class="danger"
+                                    hx-delete="/ui/keys/{{.ID}}" hx-confirm="Delete this API key?" hx-target="body"
+                                    hx-swap="outerHTML">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {{else}}<tr>
+                        <td colspan="9" class="muted">No API keys</td>
+                    </tr>{{end}}</tbody>
+            </table>
+        </div>
+        <section class="panel" style="margin-top:20px">
+            <h2>Create key</h2>
+            <form class="stack" method="post" action="/ui/keys" hx-post="/ui/keys" hx-target="body" hx-swap="outerHTML">
+                <div class="fields"><label>Name<input name="name" required></label><label>Tenant<select
+                            name="tenant_id">{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>
+                            {{end}}</select></label></div><label>Allowed models (comma separated)<input name="models"
+                        required placeholder="gpt-4o-mini, claude-haiku"></label><label>Scopes (comma separated)<input
+                        name="scopes" value="chat" required></label>
+                <div class="fields"><label>Monthly quota USD<input name="quota" type="number" min="0"
+                            step="0.0001"></label><label>Requests per minute<input name="rpm" type="number"
+                            min="1"></label></div><button class="primary">Create API key</button>
+            </form>
+        </section>
+    </main>
+</body>
+
+</html>
