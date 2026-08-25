@@ -19,6 +19,22 @@ type CredentialConnectivity struct {
 }
 
 func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+		credentials, listErr := h.Credentials.List(c.Context())
+		if listErr != nil {
+			return presenter.ServerError(c, "failed to authorize credential")
+		}
+		owned := false
+		for _, candidate := range credentials {
+			if candidate.ID == c.Params("id") && candidate.OwnerTenantID != nil && *candidate.OwnerTenantID == sess.TenantID {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			return presenter.NotFound(c, "credential not found")
+		}
+	}
 	result, err := h.Credentials.TestConnectivity(c.Context(), c.Params("id"), map[string]credential.ConnectivityProber{
 		entities.ProviderOpenAICompatible: h.OpenAI,
 		entities.ProviderAnthropic:        h.Anthropic,

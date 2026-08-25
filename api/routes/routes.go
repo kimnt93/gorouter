@@ -87,6 +87,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Post("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
 	mgmt.Get("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
+	mgmt.Put("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
 	mgmt.Delete("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
 	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic}
 	mgmt.Post("/credentials/:id/test", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Test)
@@ -99,6 +100,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Delete("/models/:name", handlers.Require(d.Auth, "models:manage"), admin.ModelDelete)
 	mgmt.Get("/prices", handlers.Require(d.Auth, "models:manage"), admin.Prices)
 	mgmt.Put("/prices/:model", handlers.Require(d.Auth, "models:manage"), admin.Price)
+	mgmt.Delete("/prices/:model", handlers.Require(d.Auth, "models:manage"), admin.Price)
 	mgmt.Get("/usage/summary", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageSummary)
 	mgmt.Get("/usage/recent", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageRecent)
 	mgmt.Get("/cache/stats", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.CacheStats)

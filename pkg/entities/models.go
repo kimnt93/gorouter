@@ -57,6 +57,19 @@ type CredentialInput struct {
 	OwnerTenant  *string
 }
 
+// CredentialUpdate replaces safe credential metadata and optionally rotates
+// the secret for the credential's existing kind. Provider and kind are
+// intentionally immutable so a partial update cannot reinterpret ciphertext.
+type CredentialUpdate struct {
+	Name         string
+	BaseURL      string
+	Status       string
+	APIKey       string
+	OAuthAccess  string
+	OAuthRefresh string
+	OwnerTenant  *string
+}
+
 type ApiKey struct {
 	ID              string    `json:"id"`
 	TenantID        string    `json:"tenant_id"`

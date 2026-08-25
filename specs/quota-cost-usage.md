@@ -9,7 +9,8 @@ Prices are per one million tokens:
 - Cache read
 - Cache write
 
-Prices may be set manually and later synchronized from OpenRouter or LiteLLM. External synchronization must not block request serving.
+Prices may be set manually and later synchronized from OpenRouter or LiteLLM. External synchronization must not block request serving. See https://openrouter.ai/api/frontend/v1/catalog/models
+
 
 ## Cost
 

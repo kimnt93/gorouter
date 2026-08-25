@@ -144,8 +144,32 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 }
 
 func (a *Admin) CredentialByID(c fiber.Ctx) error {
-	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() && !a.tenantOwnsCredential(c, sess.TenantID, c.Params("id")) {
+	sess := SessionFrom(c)
+	if sess != nil && !sess.IsMaster() && !a.tenantOwnsCredential(c, sess.TenantID, c.Params("id")) {
 		return presenter.NotFound(c, "credential not found")
+	}
+	if c.Method() == fiber.MethodPut {
+		var b struct {
+			Name, BaseURL, Status, APIKey, OAuthAccess, OAuthRefresh string
+			OwnerTenantID                                            *string `json:"owner_tenant_id"`
+		}
+		if err := c.Bind().Body(&b); err != nil {
+			return presenter.BadRequest(c, "invalid body")
+		}
+		if sess != nil && !sess.IsMaster() {
+			b.OwnerTenantID = &sess.TenantID
+		}
+		updated, err := a.CredsSvc.Update(c.Context(), c.Params("id"), entities.CredentialUpdate{
+			Name: b.Name, BaseURL: b.BaseURL, Status: b.Status, APIKey: b.APIKey,
+			OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: b.OwnerTenantID,
+		})
+		if errors.Is(err, entities.ErrNotFound) {
+			return presenter.NotFound(c, "credential not found")
+		}
+		if err != nil {
+			return presenter.BadRequest(c, err.Error())
+		}
+		return c.JSON(updated)
 	}
 	err := a.CredsSvc.Delete(c.Context(), c.Params("id"))
 	if errors.Is(err, entities.ErrNotFound) {
@@ -296,6 +320,15 @@ func (a *Admin) ModelDelete(c fiber.Ctx) error {
 func (a *Admin) Price(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can change global prices")
+	}
+	if c.Method() == fiber.MethodDelete {
+		if err := a.ModelsSvc.DeletePrice(c.Context(), c.Params("model")); err != nil {
+			if errors.Is(err, entities.ErrNotFound) {
+				return presenter.NotFound(c, "price not found")
+			}
+			return presenter.ServerError(c, "failed to delete price")
+		}
+		return c.JSON(okResponse{OK: true})
 	}
 	var p entities.Price
 	if err := c.Bind().Body(&p); err != nil {

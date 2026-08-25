@@ -113,6 +113,17 @@ func (r *ModelRouteRepo) SetPrice(ctx context.Context, model string, p entities.
 	return err
 }
 
+func (r *ModelRouteRepo) DeletePrice(ctx context.Context, model string) error {
+	tag, err := r.db.Pool.Exec(ctx, `DELETE FROM prices WHERE model=$1`, model)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return entities.ErrNotFound
+	}
+	return nil
+}
+
 func (r *ModelRouteRepo) ListPrices(ctx context.Context) (map[string]entities.Price, error) {
 	rows, err := r.db.Pool.Query(ctx, `SELECT model,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m FROM prices`)
 	if err != nil {

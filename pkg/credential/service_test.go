@@ -14,7 +14,10 @@ func (r credentialRepoStub) Create(context.Context, entities.CredentialInput, en
 	return nil, nil
 }
 func (r credentialRepoStub) List(context.Context) ([]entities.Credential, error) { return nil, nil }
-func (r credentialRepoStub) Delete(context.Context, string) error                { return nil }
+func (r credentialRepoStub) Update(context.Context, entities.SecretBox, string, entities.CredentialUpdate) (*entities.Credential, error) {
+	return nil, nil
+}
+func (r credentialRepoStub) Delete(context.Context, string) error { return nil }
 func (r credentialRepoStub) Runtime(context.Context, entities.SecretBox, string) (*entities.CredentialRuntime, error) {
 	return r.runtime, nil
 }

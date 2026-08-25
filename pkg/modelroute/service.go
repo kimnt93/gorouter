@@ -11,6 +11,7 @@ type Repository interface {
 	Delete(ctx context.Context, name string) error
 	List(ctx context.Context) ([]entities.ModelDef, error)
 	SetPrice(ctx context.Context, model string, p entities.Price) error
+	DeletePrice(ctx context.Context, model string) error
 	ListPrices(ctx context.Context) (map[string]entities.Price, error)
 }
 
@@ -28,6 +29,10 @@ func (s *Service) List(ctx context.Context) ([]entities.ModelDef, error) { retur
 
 func (s *Service) SetPrice(ctx context.Context, model string, p entities.Price) error {
 	return s.repo.SetPrice(ctx, model, p)
+}
+
+func (s *Service) DeletePrice(ctx context.Context, model string) error {
+	return s.repo.DeletePrice(ctx, model)
 }
 
 func (s *Service) Prices(ctx context.Context) (map[string]entities.Price, error) {

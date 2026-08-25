@@ -45,6 +45,7 @@ type TenantRepository interface {
 type CredentialRepository interface {
 	Create(ctx context.Context, in CredentialInput, box SecretBox) (*Credential, error)
 	List(ctx context.Context) ([]Credential, error)
+	Update(ctx context.Context, box SecretBox, id string, in CredentialUpdate) (*Credential, error)
 	Delete(ctx context.Context, id string) error
 	Runtime(ctx context.Context, box SecretBox, id string) (*CredentialRuntime, error)
 	UpdateOAuthTokens(ctx context.Context, box SecretBox, id, access, refresh string) error
@@ -71,6 +72,7 @@ type ModelRepository interface {
 	Delete(ctx context.Context, name string) error
 	List(ctx context.Context) ([]ModelDef, error)
 	SetPrice(ctx context.Context, model string, p Price) error
+	DeletePrice(ctx context.Context, model string) error
 	ListPrices(ctx context.Context) (map[string]Price, error)
 }
 

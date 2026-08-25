@@ -72,7 +72,10 @@ func (r gatewayCredRepo) Create(context.Context, entities.CredentialInput, entit
 	return nil, nil
 }
 func (r gatewayCredRepo) List(context.Context) ([]entities.Credential, error) { return nil, nil }
-func (r gatewayCredRepo) Delete(context.Context, string) error                { return nil }
+func (r gatewayCredRepo) Update(context.Context, entities.SecretBox, string, entities.CredentialUpdate) (*entities.Credential, error) {
+	return nil, nil
+}
+func (r gatewayCredRepo) Delete(context.Context, string) error { return nil }
 func (r gatewayCredRepo) Runtime(_ context.Context, _ entities.SecretBox, id string) (*entities.CredentialRuntime, error) {
 	return r.runtimes[id], nil
 }
@@ -91,6 +94,7 @@ func (r gatewayModelRepo) List(context.Context) ([]entities.ModelDef, error) {
 	return []entities.ModelDef{r.model}, nil
 }
 func (r gatewayModelRepo) SetPrice(context.Context, string, entities.Price) error { return nil }
+func (r gatewayModelRepo) DeletePrice(context.Context, string) error              { return nil }
 func (r gatewayModelRepo) ListPrices(context.Context) (map[string]entities.Price, error) {
 	return map[string]entities.Price{}, nil
 }

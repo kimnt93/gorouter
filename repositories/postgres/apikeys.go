@@ -51,6 +51,11 @@ func (r *TenantRepo) EnsureDefault(ctx context.Context) error {
 
 type CredentialRepo struct{ db *DB }
 
+type oauthBlob struct {
+	Access  string `json:"access"`
+	Refresh string `json:"refresh"`
+}
+
 func NewCredentialRepo(db *DB) *CredentialRepo { return &CredentialRepo{db: db} }
 
 const credColumns = `id,name,provider,kind,base_url,key_preview,coalesce(api_key_enc,''::bytea),coalesce(oauth_blob_enc,''::bytea),status,owner_tenant_id,created_at`
@@ -86,7 +91,7 @@ func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput
 		c.KeyPreview = preview(in.APIKey)
 	}
 	if in.OAuthAccess != "" || in.OAuthRefresh != "" {
-		blob, _ := json.Marshal(map[string]string{"access": in.OAuthAccess, "refresh": in.OAuthRefresh})
+		blob, _ := json.Marshal(oauthBlob{Access: in.OAuthAccess, Refresh: in.OAuthRefresh})
 		b, err := box.Seal(blob)
 		if err != nil {
 			return nil, err
@@ -103,6 +108,51 @@ func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput
 	}
 	c.SetSecrets(apiKeyEnc, oauthEnc)
 	return c, nil
+}
+
+func (r *CredentialRepo) Update(ctx context.Context, box entities.SecretBox, id string, in entities.CredentialUpdate) (*entities.Credential, error) {
+	existing, err := scanCredential(r.db.Pool.QueryRow(ctx, `SELECT `+credColumns+` FROM credentials WHERE id=$1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, entities.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	apiKeyEnc, oauthEnc := existing.APIKeySealed(), existing.OAuthSealed()
+	keyPreview := existing.KeyPreview
+	switch existing.Kind {
+	case entities.KindAPIKey:
+		if in.APIKey != "" {
+			apiKeyEnc, err = box.Seal([]byte(in.APIKey))
+			if err != nil {
+				return nil, err
+			}
+			keyPreview = preview(in.APIKey)
+		}
+	case entities.KindOAuth:
+		if in.OAuthAccess != "" || in.OAuthRefresh != "" {
+			if in.OAuthRefresh == "" {
+				return nil, errors.New("oauth_refresh is required when rotating OAuth tokens")
+			}
+			blob, marshalErr := json.Marshal(oauthBlob{Access: in.OAuthAccess, Refresh: in.OAuthRefresh})
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			oauthEnc, err = box.Seal(blob)
+			if err != nil {
+				return nil, err
+			}
+			keyPreview = preview(in.OAuthAccess)
+		}
+	}
+	row := r.db.Pool.QueryRow(ctx, `UPDATE credentials SET name=$1,base_url=$2,status=$3,owner_tenant_id=$4,
+		key_preview=$5,api_key_enc=$6,oauth_blob_enc=$7,updated_at=now() WHERE id=$8 RETURNING `+credColumns,
+		in.Name, in.BaseURL, in.Status, in.OwnerTenant, keyPreview, apiKeyEnc, oauthEnc, id)
+	updated, err := scanCredential(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, entities.ErrNotFound
+	}
+	return updated, err
 }
 
 func (r *CredentialRepo) List(ctx context.Context) ([]entities.Credential, error) {
@@ -157,12 +207,12 @@ func (r *CredentialRepo) Runtime(ctx context.Context, box entities.SecretBox, id
 		if oerr != nil {
 			return nil, wrapDecrypt(id, oerr)
 		}
-		var blob map[string]string
+		var blob oauthBlob
 		if jerr := json.Unmarshal(plain, &blob); jerr != nil {
 			return nil, wrapDecrypt(id, jerr)
 		}
-		rt.OAuthAccess = blob["access"]
-		rt.OAuthRefreh = blob["refresh"]
+		rt.OAuthAccess = blob.Access
+		rt.OAuthRefreh = blob.Refresh
 	default:
 		return nil, errors.New("unknown credential kind " + c.Kind)
 	}
@@ -170,7 +220,7 @@ func (r *CredentialRepo) Runtime(ctx context.Context, box entities.SecretBox, id
 }
 
 func (r *CredentialRepo) UpdateOAuthTokens(ctx context.Context, box entities.SecretBox, id, access, refresh string) error {
-	blob, _ := json.Marshal(map[string]string{"access": access, "refresh": refresh})
+	blob, _ := json.Marshal(oauthBlob{Access: access, Refresh: refresh})
 	sealed, err := box.Seal(blob)
 	if err != nil {
 		return err

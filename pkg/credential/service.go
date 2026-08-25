@@ -29,6 +29,7 @@ type ConnectivityProber interface {
 type Repository interface {
 	Create(ctx context.Context, in entities.CredentialInput, box entities.SecretBox) (*entities.Credential, error)
 	List(ctx context.Context) ([]entities.Credential, error)
+	Update(ctx context.Context, box entities.SecretBox, id string, in entities.CredentialUpdate) (*entities.Credential, error)
 	Delete(ctx context.Context, id string) error
 	Runtime(ctx context.Context, box entities.SecretBox, id string) (*entities.CredentialRuntime, error)
 	UpdateOAuthTokens(ctx context.Context, box entities.SecretBox, id, access, refresh string) error
@@ -92,6 +93,25 @@ func validate(in CreateInput) error {
 
 func (s *Service) List(ctx context.Context) ([]entities.Credential, error) {
 	return s.repo.List(ctx)
+}
+
+func (s *Service) Update(ctx context.Context, id string, in entities.CredentialUpdate) (*entities.Credential, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	in.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
+	in.Status = strings.ToLower(strings.TrimSpace(in.Status))
+	if in.Name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrInvalidCredential)
+	}
+	if in.Status != "active" && in.Status != "disabled" {
+		return nil, fmt.Errorf("%w: status must be active or disabled", ErrInvalidCredential)
+	}
+	if in.BaseURL != "" {
+		u, err := url.ParseRequestURI(in.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("%w: base_url must be an absolute HTTP(S) URL", ErrInvalidCredential)
+		}
+	}
+	return s.repo.Update(ctx, s.box, id, in)
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error { return s.repo.Delete(ctx, id) }
