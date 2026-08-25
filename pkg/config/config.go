@@ -45,7 +45,7 @@ func Load() (*Config, error) {
 		MasterKey:      os.Getenv("MASTER_KEY"),
 		EncryptionKey:  os.Getenv("ENCRYPTION_KEY"),
 		SessionSecret:  os.Getenv("SESSION_SECRET"),
-		RequestLimit:   int64(envInt("REQUEST_LIMIT_MB", 20)) << 20,
+		RequestLimit:   20 << 20,
 		RequestTimeout: 5 * time.Minute,
 		OAuthClientID:  env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
 		OAuthTokenURL:  os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
@@ -71,6 +71,13 @@ func Load() (*Config, error) {
 	if cfg.SessionSecret == "" {
 		cfg.SessionSecret = "nr-session::" + cfg.MasterKey
 	}
+	if v := os.Getenv("REQUEST_LIMIT_MB"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return nil, errors.New("REQUEST_LIMIT_MB must be a positive integer")
+		}
+		cfg.RequestLimit = int64(n) << 20
+	}
 	if v := os.Getenv("CACHE_ENABLED"); v != "" {
 		cfg.Cache.Enabled = strings.EqualFold(v, "true") || v == "1"
 	}
@@ -78,6 +85,9 @@ func Load() (*Config, error) {
 		d, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("invalid CACHE_TTL: %w", err)
+		}
+		if d <= 0 {
+			return nil, errors.New("CACHE_TTL must be a positive duration")
 		}
 		cfg.Cache.TTL = d
 	}
@@ -95,6 +105,13 @@ func Load() (*Config, error) {
 		}
 		cfg.Cache.MaxEntryBytes = n
 	}
+	if v := os.Getenv("CACHE_MAX_TOTAL_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return nil, errors.New("CACHE_MAX_TOTAL_BYTES must be a positive integer")
+		}
+		cfg.Cache.MaxTotalBytes = n
+	}
 	if v := os.Getenv("CACHE_MEMORY_FALLBACK"); v != "" {
 		cfg.Cache.AllowMemory = strings.EqualFold(v, "true") || v == "1"
 	}
@@ -107,12 +124,14 @@ func Load() (*Config, error) {
 		return nil, errors.New("REDIS_OUTAGE_POLICY must be strict or open")
 	}
 	switch strings.ToLower(os.Getenv("CACHE_SCOPE")) {
+	case "", "key":
+		cfg.Cache.Scope = "key"
 	case "tenant":
 		cfg.Cache.Scope = "tenant"
 	case "global":
 		cfg.Cache.Scope = "global"
 	default:
-		cfg.Cache.Scope = "key"
+		return nil, errors.New("CACHE_SCOPE must be key, tenant, or global")
 	}
 	return cfg, nil
 }
@@ -120,15 +139,6 @@ func Load() (*Config, error) {
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
-	}
-	return def
-}
-
-func envInt(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
 	}
 	return def
 }

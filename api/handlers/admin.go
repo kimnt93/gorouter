@@ -121,8 +121,14 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 		return c.JSON(v)
 	}
 	var b struct {
-		Name, Provider, Kind, BaseURL, APIKey, OAuthAccess, OAuthRefresh string
-		OwnerTenant                                                      *string `json:"owner_tenant_id"`
+		Name         string  `json:"name"`
+		Provider     string  `json:"provider"`
+		Kind         string  `json:"kind"`
+		BaseURL      string  `json:"base_url"`
+		APIKey       string  `json:"api_key"`
+		OAuthAccess  string  `json:"oauth_access"`
+		OAuthRefresh string  `json:"oauth_refresh"`
+		OwnerTenant  *string `json:"owner_tenant_id"`
 	}
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
@@ -150,8 +156,13 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 	}
 	if c.Method() == fiber.MethodPut {
 		var b struct {
-			Name, BaseURL, Status, APIKey, OAuthAccess, OAuthRefresh string
-			OwnerTenantID                                            *string `json:"owner_tenant_id"`
+			Name          string  `json:"name"`
+			BaseURL       string  `json:"base_url"`
+			Status        string  `json:"status"`
+			APIKey        string  `json:"api_key"`
+			OAuthAccess   string  `json:"oauth_access"`
+			OAuthRefresh  string  `json:"oauth_refresh"`
+			OwnerTenantID *string `json:"owner_tenant_id"`
 		}
 		if err := c.Bind().Body(&b); err != nil {
 			return presenter.BadRequest(c, "invalid body")
@@ -197,8 +208,10 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 }
 func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	var b struct {
-		TenantID, Name  string
-		Models, Scopes  []string
+		TenantID        string   `json:"tenant_id"`
+		Name            string   `json:"name"`
+		Models          []string `json:"models"`
+		Scopes          []string `json:"scopes"`
 		MonthlyQuotaUSD *float64 `json:"monthly_quota_usd"`
 		RPM             *int     `json:"rpm"`
 	}
@@ -216,6 +229,9 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	var v *entities.ApiKey
 	var err error
 	if sess != nil && !sess.IsMaster() {
+		if !scopesAllowedBySession(sess, b.Scopes) {
+			return presenter.Forbidden(c, "cannot grant scopes not held by the current session")
+		}
 		v, err = a.KeysSvc.CreateForTenant(c.Context(), sess.TenantID, in)
 	} else {
 		v, err = a.KeysSvc.Create(c.Context(), in)
@@ -239,6 +255,9 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	var err error
 	if sess != nil && !sess.IsMaster() {
+		if b.Scopes != nil && !scopesAllowedBySession(sess, *b.Scopes) {
+			return presenter.Forbidden(c, "cannot grant scopes not held by the current session")
+		}
 		err = a.KeysSvc.PatchForTenant(c.Context(), sess.TenantID, c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM)
 	} else {
 		err = a.KeysSvc.Patch(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM)
@@ -388,7 +407,9 @@ func (a *Admin) CacheStats(c fiber.Ctx) error {
 	return c.JSON(a.Cache.Stats())
 }
 func (a *Admin) CacheFlush(c fiber.Ctx) error {
-	a.Cache.Flush()
+	if a.Cache != nil {
+		a.Cache.Flush()
+	}
 	return c.JSON(okResponse{OK: true})
 }
 
@@ -403,4 +424,16 @@ func (a *Admin) tenantOwnsCredential(c fiber.Ctx, tenantID, credentialID string)
 		}
 	}
 	return false
+}
+
+func scopesAllowedBySession(session *entities.Session, scopes []string) bool {
+	if session == nil {
+		return false
+	}
+	for _, scope := range scopes {
+		if !session.Has(scope) {
+			return false
+		}
+	}
+	return true
 }

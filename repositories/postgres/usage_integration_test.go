@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kimnt93/gorouter/platform/database"
 )
 
 func TestTenantUsageQueriesAreIsolated(t *testing.T) {
@@ -16,14 +16,15 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 		t.Skip("TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
+	pg, err := database.Connect(ctx, url)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
 		t.Skipf("test PostgreSQL unavailable: %v", err)
 	}
+	defer pg.Close()
+	if err := pg.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pool := pg.Pool
 	id := fmt.Sprintf("usage-isolation-%d", time.Now().UnixNano())
 	keyA, keyB := id+"-a", id+"-b"
 	t.Cleanup(func() {

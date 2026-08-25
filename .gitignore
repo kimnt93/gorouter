@@ -12,6 +12,7 @@ bin/
 coverage.*
 *.coverprofile
 profile.cov
+node_modules/
 
 # Go workspace files
 go.work

@@ -108,6 +108,9 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	in := apikey.CreateInput{TenantID: c.FormValue("tenant_id"), Name: c.FormValue("name"), Models: splitCSV(c.FormValue("models")), Scopes: splitCSV(c.FormValue("scopes")), MonthlyQuotaUSD: quota, RPM: rpm}
 	var key *entities.ApiKey
 	if sess != nil && !sess.IsMaster() {
+		if !scopesAllowedBySession(sess, in.Scopes) {
+			return presenter.Forbidden(c, "cannot grant scopes not held by the current session")
+		}
 		in.TenantID = sess.TenantID
 		key, err = u.Keys.CreateForTenant(c.Context(), sess.TenantID, in)
 	} else {

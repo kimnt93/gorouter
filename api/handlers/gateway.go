@@ -180,7 +180,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if (result.StatusCode < 200 || result.StatusCode >= 300) && !retryableStatus(result.StatusCode) {
 			status := result.StatusCode
 			drainAndClose(result.Body)
-			g.record(key, model, runtime.ID, llm.Usage{}, false, status, started)
+			g.recordError(key, model, runtime.ID, status, started, "upstream rejected request")
 			c.Set("X-Cache", "bypass")
 			return presenter.Err(c, status, "upstream rejected the request", "upstream_error", "upstream_rejected")
 		}
@@ -198,7 +198,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		return g.nonStream(c, key, model, runtime, result, raw, deterministic, started, pricePtr, reservation)
 	}
 	c.Set("X-Cache", "bypass")
-	g.record(key, model, lastCredential, llm.Usage{}, false, lastStatus, started)
+	g.recordError(key, model, lastCredential, lastStatus, started, "all credentials failed")
 	responseStatus := fiber.StatusBadGateway
 	if lastStatus == fiber.StatusTooManyRequests {
 		responseStatus = fiber.StatusTooManyRequests
@@ -262,14 +262,14 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 	defer result.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(result.Body, 32<<20))
 	if err != nil {
-		g.record(key, model, runtime.ID, llm.Usage{}, false, fiber.StatusBadGateway, started)
+		g.recordError(key, model, runtime.ID, fiber.StatusBadGateway, started, "upstream read failed")
 		return presenter.Err(c, 502, "upstream read failed", "upstream_error", "")
 	}
 	usage := llm.ExtractUsage(body)
 	if runtime.Provider == entities.ProviderAnthropic {
 		resp, err := llm.FromAnthropic(body, model.Name)
 		if err != nil {
-			g.record(key, model, runtime.ID, llm.Usage{}, false, fiber.StatusBadGateway, started)
+			g.recordError(key, model, runtime.ID, fiber.StatusBadGateway, started, "response translation failed")
 			return presenter.Err(c, 502, "response translation failed", "upstream_error", "")
 		}
 		body, _ = json.Marshal(resp)
@@ -428,10 +428,18 @@ func (g *Gateway) record(key *entities.ApiKey, model *entities.ModelDef, cred st
 }
 
 func (g *Gateway) recordCost(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost) {
+	g.recordCostError(key, model, cred, u, hit, status, started, cost, "")
+}
+
+func (g *Gateway) recordError(key *entities.ApiKey, model *entities.ModelDef, cred string, status int, started time.Time, summary string) {
+	g.recordCostError(key, model, cred, llm.Usage{}, false, status, started, entities.Cost{}, summary)
+}
+
+func (g *Gateway) recordCostError(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
 	if g.Usage == nil {
 		return
 	}
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: key.ID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds()})
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: key.ID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/kimnt93/gorouter/platform/llm"
 )
 
 var (
@@ -20,17 +22,76 @@ var (
 	requests atomic.Int64
 )
 
+type mockModelList struct {
+	Object string          `json:"object"`
+	Data   []llm.ModelInfo `json:"data"`
+}
+
+type mockErrorEnvelope struct {
+	Error mockError `json:"error"`
+}
+
+type mockError struct {
+	Type    string `json:"type,omitempty"`
+	Message string `json:"message"`
+}
+
+type anthropicResponse struct {
+	ID           string             `json:"id"`
+	Type         string             `json:"type"`
+	Role         string             `json:"role"`
+	Model        string             `json:"model"`
+	Content      []anthropicContent `json:"content"`
+	StopReason   string             `json:"stop_reason"`
+	StopSequence *string            `json:"stop_sequence"`
+	Usage        anthropicUsage     `json:"usage"`
+}
+
+type anthropicContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type anthropicUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+}
+
+type anthropicEvent struct {
+	Type         string             `json:"type"`
+	Index        int                `json:"index,omitempty"`
+	Message      *anthropicResponse `json:"message,omitempty"`
+	ContentBlock *anthropicContent  `json:"content_block,omitempty"`
+	Delta        *anthropicDelta    `json:"delta,omitempty"`
+	Usage        *anthropicUsage    `json:"usage,omitempty"`
+}
+
+type anthropicDelta struct {
+	Type       string `json:"type,omitempty"`
+	Text       string `json:"text,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+type oauthTokenRequest struct {
+	GrantType    string `json:"grant_type"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type oauthTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+}
+
 func main() {
 	flag.Parse()
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	log.Printf("mock upstream on http://%s (openai /v1/chat/completions + /v1/models, anthropic /v1/messages)", addr)
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"object": "list", "data": []any{
-			map[string]any{"id": "mock-gpt", "object": "model"},
-			map[string]any{"id": "mock-mini", "object": "model"},
-		}})
+	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, mockModelList{Object: "list", Data: []llm.ModelInfo{{ID: "mock-gpt", Object: "model"}, {ID: "mock-mini", Object: "model"}}})
 	})
 	mux.HandleFunc("POST /v1/chat/completions", handleOpenAI)
 	mux.HandleFunc("POST /v1/messages", handleAnthropic)
@@ -44,153 +105,117 @@ func maybeFail() bool {
 }
 
 func handleOpenAI(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Model    string `json:"model"`
-		Stream   bool   `json:"stream"`
-		Messages []struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
-	}
+	var req llm.ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":{"message":"bad json"}}`, 400)
+		writeStatusJSON(w, http.StatusBadRequest, mockErrorEnvelope{Error: mockError{Message: "bad json"}})
 		return
 	}
 	time.Sleep(time.Duration(*latency) * time.Millisecond)
 	if maybeFail() {
-		w.WriteHeader(500)
-		_, _ = w.Write([]byte(`{"error":{"message":"mock upstream failure"}}`))
+		writeStatusJSON(w, http.StatusInternalServerError, mockErrorEnvelope{Error: mockError{Message: "mock upstream failure"}})
 		return
 	}
 	var promptText strings.Builder
-	for _, m := range req.Messages {
-		promptText.Write(m.Content)
+	for _, message := range req.Messages {
+		promptText.Write(message.Content)
 	}
-	inTok := int64(len(promptText.String())/4 + 3)
-	outTok := int64(5 + rand.Intn(10))
-
+	usage := llm.Usage{PromptTokens: int64(len(promptText.String())/4 + 3), CompletionTokens: int64(5 + rand.Intn(10))}
 	content := fmt.Sprintf("mock reply from %s (req #%d)", req.Model, requests.Load())
-	usage := map[string]any{
-		"prompt_tokens": inTok, "completion_tokens": outTok, "total_tokens": inTok + outTok,
-	}
+	id := fmt.Sprintf("chatcmpl-mock%d", time.Now().UnixNano())
 	if !req.Stream || !*stream {
-		writeJSON(w, map[string]any{
-			"id": fmt.Sprintf("chatcmpl-mock%d", time.Now().UnixNano()), "object": "chat.completion",
-			"created": time.Now().Unix(), "model": req.Model,
-			"choices": []any{map[string]any{
-				"index":         0,
-				"message":       map[string]any{"role": "assistant", "content": content},
-				"finish_reason": "stop",
-			}},
-			"usage": usage,
-		})
+		writeJSON(w, llm.Response{ID: id, Object: "chat.completion", Created: time.Now().Unix(), Model: req.Model,
+			Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: content}, FinishReason: "stop"}}, Usage: usage})
 		return
 	}
-	fl, _ := w.(http.Flusher)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.WriteHeader(200)
-	send := func(v any) {
-		b, _ := json.Marshal(v)
-		fmt.Fprintf(w, "data: %s\n\n", b)
-		fl.Flush()
+	w.WriteHeader(http.StatusOK)
+	send := func(chunk llm.Chunk) {
+		body, _ := json.Marshal(chunk)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", body)
+		flusher.Flush()
 	}
-	id := fmt.Sprintf("chatcmpl-mock%d", time.Now().UnixNano())
-	send(map[string]any{"id": id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": req.Model,
-		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant"}}}})
+	base := llm.Chunk{ID: id, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: req.Model}
+	base.Choices = []llm.ChunkChoice{{Index: 0, Delta: llm.Delta{Role: "assistant"}}}
+	send(base)
 	for _, word := range strings.Fields(content) {
-		send(map[string]any{"id": id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": req.Model,
-			"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": word + " "}}}})
+		chunk := base
+		chunk.Choices = []llm.ChunkChoice{{Index: 0, Delta: llm.Delta{Content: word + " "}}}
+		send(chunk)
 	}
-	send(map[string]any{"id": id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": req.Model,
-		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"}},
-		"usage":   usage})
-	fmt.Fprint(w, "data: [DONE]\n\n")
-	fl.Flush()
+	final := base
+	final.Choices = []llm.ChunkChoice{{Index: 0, Delta: llm.Delta{}, FinishReason: "stop"}}
+	final.Usage = &usage
+	send(final)
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	flusher.Flush()
 }
 
 func handleAnthropic(w http.ResponseWriter, r *http.Request) {
-	authz := r.Header.Get("Authorization")
-	xkey := r.Header.Get("x-api-key")
-	if authz == "" && xkey == "" {
-		w.WriteHeader(401)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"no auth"}}`))
+	if r.Header.Get("Authorization") == "" && r.Header.Get("x-api-key") == "" {
+		writeStatusJSON(w, http.StatusUnauthorized, mockErrorEnvelope{Error: mockError{Type: "authentication_error", Message: "no auth"}})
 		return
 	}
-	var req struct {
-		Model     string `json:"model"`
-		MaxTokens int64  `json:"max_tokens"`
-		Stream    bool   `json:"stream"`
-		System    any    `json:"system"`
-		Messages  []struct {
-			Role    string `json:"role"`
-			Content any    `json:"content"`
-		} `json:"messages"`
-	}
+	var req llm.AnthropicRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"bad json"}}`))
+		writeStatusJSON(w, http.StatusBadRequest, mockErrorEnvelope{Error: mockError{Type: "invalid_request_error", Message: "bad json"}})
 		return
 	}
 	time.Sleep(time.Duration(*latency) * time.Millisecond)
 	if maybeFail() {
-		w.WriteHeader(529)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"mock overloaded"}}`))
+		writeStatusJSON(w, 529, mockErrorEnvelope{Error: mockError{Type: "overloaded_error", Message: "mock overloaded"}})
 		return
 	}
 	content := fmt.Sprintf("anthropic mock reply for %s", req.Model)
-	base := map[string]any{
-		"id": fmt.Sprintf("msg_mock%d", time.Now().UnixNano()), "type": "message", "role": "assistant",
-		"model":       req.Model,
-		"content":     []any{map[string]any{"type": "text", "text": content}},
-		"stop_reason": "end_turn", "stop_sequence": nil,
-		"usage": map[string]any{
-			"input_tokens": 21, "output_tokens": 11,
-			"cache_read_input_tokens": 4, "cache_creation_input_tokens": 7,
-		},
-	}
+	response := anthropicResponse{ID: fmt.Sprintf("msg_mock%d", time.Now().UnixNano()), Type: "message", Role: "assistant", Model: req.Model,
+		Content: []anthropicContent{{Type: "text", Text: content}}, StopReason: "end_turn",
+		Usage: anthropicUsage{InputTokens: 21, OutputTokens: 11, CacheReadInputTokens: 4, CacheCreationInputTokens: 7}}
 	if !req.Stream {
-		writeJSON(w, base)
+		writeJSON(w, response)
 		return
 	}
-	fl, _ := w.(http.Flusher)
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.WriteHeader(200)
-	send := func(event string, v any) {
-		b, _ := json.Marshal(v)
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
-		fl.Flush()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
 	}
-	msgID := base["id"].(string)
-	send("message_start", map[string]any{"type": "message_start", "message": map[string]any{
-		"id": msgID, "type": "message", "role": "assistant", "model": req.Model, "content": []any{},
-		"usage": map[string]any{"input_tokens": 21, "output_tokens": 1},
-	}})
-	send("content_block_start", map[string]any{"type": "content_block_start", "index": 0,
-		"content_block": map[string]any{"type": "text", "text": ""}})
-	send("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0,
-		"delta": map[string]any{"type": "text_delta", "text": content}})
-	send("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
-	send("message_delta", map[string]any{"type": "message_delta",
-		"delta": map[string]any{"stop_reason": "end_turn"},
-		"usage": map[string]any{"output_tokens": 11}})
-	send("message_stop", map[string]any{"type": "message_stop"})
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	send := func(event string, value anthropicEvent) {
+		body, _ := json.Marshal(value)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
+		flusher.Flush()
+	}
+	startMessage := response
+	startMessage.Content = []anthropicContent{}
+	startMessage.Usage = anthropicUsage{InputTokens: 21, OutputTokens: 1}
+	send("message_start", anthropicEvent{Type: "message_start", Message: &startMessage})
+	send("content_block_start", anthropicEvent{Type: "content_block_start", ContentBlock: &anthropicContent{Type: "text"}})
+	send("content_block_delta", anthropicEvent{Type: "content_block_delta", Delta: &anthropicDelta{Type: "text_delta", Text: content}})
+	send("content_block_stop", anthropicEvent{Type: "content_block_stop"})
+	send("message_delta", anthropicEvent{Type: "message_delta", Delta: &anthropicDelta{StopReason: "end_turn"}, Usage: &anthropicUsage{OutputTokens: 11}})
+	send("message_stop", anthropicEvent{Type: "message_stop"})
 }
 
 func handleOAuthToken(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-	if r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") == "" {
-		w.WriteHeader(400)
-		_, _ = w.Write([]byte(`{"error":"invalid_request"}`))
+	var req oauthTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.GrantType != "refresh_token" || req.RefreshToken == "" {
+		writeStatusJSON(w, http.StatusBadRequest, mockErrorEnvelope{Error: mockError{Type: "invalid_request", Message: "refresh token required"}})
 		return
 	}
-	writeJSON(w, map[string]any{
-		"access_token":  "sk-ant-oat01-refreshed-" + fmt.Sprint(time.Now().Unix()),
-		"refresh_token": r.FormValue("refresh_token"),
-		"expires_in":    3600,
-	})
+	writeJSON(w, oauthTokenResponse{AccessToken: "sk-ant-oat01-refreshed-" + fmt.Sprint(time.Now().Unix()), RefreshToken: req.RefreshToken, ExpiresIn: 3600})
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeStatusJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	writeStatusJSON(w, http.StatusOK, value)
 }

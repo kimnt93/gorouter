@@ -1,0 +1,11 @@
+{
+  "name": "gorouter-ui",
+  "private": true,
+  "scripts": {
+    "css": "tailwindcss -i ./ui/tailwind.css -o ./api/views/static/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.12",
+    "tailwindcss": "^4.1.12"
+  }
+}

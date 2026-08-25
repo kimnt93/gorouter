@@ -41,9 +41,8 @@ for response models when a struct can represent the response shape.
 ## Quick start
 
 ```bash
-docker compose --env-file .env -f docker-compose.postgres.yml up -d --build
 cp .env.example .env          # edit MASTER_KEY / ENCRYPTION_KEY
-make run                      # builds and starts on :8090
+docker compose up -d --build  # router + PostgreSQL + Redis
 ```
 
 Container profiles:
@@ -55,7 +54,10 @@ make compose-postgres
 make compose-clickhouse
 ```
 
-The ClickHouse profile still includes PostgreSQL for transactional configuration. ClickHouse is not a drop-in replacement for PostgreSQL authorization/configuration queries; it is the analytics usage store profile and is initialized with `platform/database/clickhouse/001_usage_events.sql`.
+The optional ClickHouse profile provisions an analytics database and initializes
+`platform/database/clickhouse/001_usage_events.sql`. The current runtime still writes usage
+to PostgreSQL; ClickHouse is prepared for a future sink behind the existing usage repository
+boundary and is not a replacement for transactional PostgreSQL configuration.
 
 Open http://localhost:8090/ and sign in with your master key.
 
@@ -76,10 +78,19 @@ curl http://localhost:8090/v1/chat/completions \
 | `MASTER_KEY` | required during setup | admin API + UI login; has every scope |
 | `ENCRYPTION_KEY` | required during setup | 32-byte base64 or any passphrase. Stored credentials cannot be decrypted without it. |
 | `LISTEN` | `:8090` | |
+| `APP_ENV` | `development` | Production disables implicit memory-cache fallback. |
+| `SESSION_SECRET` | derived from master key | Explicit session-cookie signing secret. |
+| `REQUEST_TIMEOUT` | `5m` | Fiber request/read timeout. |
 | `CACHE_ENABLED` | `true` | |
 | `CACHE_TTL` | `24h` | |
 | `CACHE_SCOPE` | `key` | `key`, `tenant`, or `global` |
+| `CACHE_MAX_ENTRY_BYTES` | `1048576` | Maximum cached response size. |
+| `CACHE_MAX_TOTAL_BYTES` | `268435456` | Memory fallback capacity. |
+| `CACHE_MEMORY_FALLBACK` | environment-dependent | Allowed only for local development. |
+| `REDIS_OUTAGE_POLICY` | `strict` | `strict` fails quota/RPM closed; `open` is an explicit bypass policy. |
 | `REQUEST_LIMIT_MB` | `20` | max request body |
+| `ANTHROPIC_OAUTH_CLIENT_ID` | built-in client ID | OAuth refresh client ID. |
+| `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint | Optional compatible/test override. |
 
 ## PostgreSQL vs ClickHouse
 
@@ -102,20 +113,28 @@ pkg/chat               priority / round-robin selection + health cooldown + cach
 platform/promptcache  memory and Redis prompt-cache implementations
 api/handlers           Fiber delivery controllers and scoped admin API
 api/views               embedded html/template + HTMX console
-internal/integration  legacy integration tests against real Postgres
+api/routes             Fiber app integration tests against PostgreSQL and Redis
+ui                     Tailwind source; compiled CSS is embedded under api/views/static
 ```
 
 ## Testing
 
 ```bash
-docker compose up -d
-TEST_DATABASE_URL="postgres://gorouter:change-me-postgres-password@127.0.0.1:54329/gorouter" make test
+cp .env.example .env
+docker compose up -d postgres redis
+TEST_DATABASE_URL="postgres://gorouter:change-me-postgres-password@127.0.0.1:54329/gorouter" \
+TEST_REDIS_URL="redis://127.0.0.1:63899/0" go test ./...
 ```
 
 Covers: unit (crypto, cost, routing, cache isolation, Anthropic translation/SSE) and
 integration (passthrough + cost math, SSE usage extraction, round-robin distribution,
 priority failover, quota reserve/settle, cross-tenant cache isolation, OAuth refresh,
 sealed-at-rest verification).
+
+The administration API supports tenant, credential, API-key, model/route, price, usage,
+cache, and credential-connectivity operations under `/admin`. Credential secrets are
+accepted only on create/update and never returned. The embedded HTMX console exposes the
+same scope-aware management flows without placing management secrets in JavaScript.
 
 ## Security notes
 

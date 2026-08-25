@@ -11,8 +11,8 @@ services:
       LISTEN: ":8090"
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       REDIS_URL: "redis://redis:6379/0"
+      APP_ENV: "production"
       CLICKHOUSE_URL: "http://clickhouse:8123"
-      USAGE_BACKEND: "clickhouse"
     ports:
       - "${ROUTER_BIND_IP:-127.0.0.1}:${ROUTER_PORT:-8090}:8090"
     depends_on:

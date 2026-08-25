@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
@@ -38,6 +39,17 @@ func TestTamperedTokenRejected(t *testing.T) {
 	token, _ := s.IssueToken(&entities.Session{Role: entities.RoleMaster, Expires: 9999999999})
 	if _, err := s.VerifyToken(token + "x"); err == nil {
 		t.Fatal("tampered token accepted")
+	}
+}
+
+func TestExpiredTokenRejected(t *testing.T) {
+	service := NewService("master", "secret", keyLookup{})
+	token, err := service.IssueToken(&entities.Session{Role: entities.RoleMaster, Expires: time.Now().Add(-time.Second).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.VerifyToken(token); err != ErrExpired {
+		t.Fatalf("expired token error=%v", err)
 	}
 }
 

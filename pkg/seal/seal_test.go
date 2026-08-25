@@ -36,6 +36,21 @@ func TestWrongKeyFails(t *testing.T) {
 	}
 }
 
+func TestSealUsesUniqueNonces(t *testing.T) {
+	sealer, _ := New("nonce-test-key")
+	first, err := sealer.Seal([]byte("same plaintext"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := sealer.Seal([]byte("same plaintext"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(first, second) {
+		t.Fatal("AES-GCM ciphertext was reused for identical plaintext")
+	}
+}
+
 func TestEmptyKeyRejected(t *testing.T) {
 	if _, err := New(""); err == nil {
 		t.Fatal("expected error for empty key")

@@ -225,8 +225,14 @@ func (r *CredentialRepo) UpdateOAuthTokens(ctx context.Context, box entities.Sec
 	if err != nil {
 		return err
 	}
-	_, err = r.db.Pool.Exec(ctx, `UPDATE credentials SET oauth_blob_enc=$1, updated_at=now() WHERE id=$2`, sealed, id)
-	return err
+	tag, err := r.db.Pool.Exec(ctx, `UPDATE credentials SET oauth_blob_enc=$1, updated_at=now() WHERE id=$2`, sealed, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return entities.ErrNotFound
+	}
+	return nil
 }
 
 func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]entities.RouteCandidate, error) {
