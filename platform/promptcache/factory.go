@@ -16,7 +16,7 @@ func New(cfg config.CacheConfig, redisURL string) (chat.PromptCache, *redis.Clie
 	}
 	if redisURL == "" {
 		if !cfg.AllowMemory {
-			return nil, nil, errors.New("REDIS_URL is required when cache is enabled outside development")
+			return nil, nil, errors.New("Redis connection settings are required when cache is enabled outside development")
 		}
 		return NewMemory(Config{TTL: cfg.TTL, Scope: cfg.Scope, MaxEntryBytes: cfg.MaxEntryBytes, MaxTotalBytes: cfg.MaxTotalBytes}), nil, nil
 	}

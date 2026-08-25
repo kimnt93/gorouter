@@ -20,7 +20,7 @@ type Postgres struct {
 func Connect(ctx context.Context, url string) (*Postgres, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
-		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+		return nil, fmt.Errorf("parse PostgreSQL configuration: %w", err)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

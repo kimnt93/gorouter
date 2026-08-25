@@ -2,7 +2,7 @@
 
 ## Backend
 
-Redis is the production cache and must be shared by all router nodes. A memory implementation may be used when `REDIS_URL` is absent for local development only.
+Redis is the production cache and must be shared by all router nodes. A memory implementation may be used when Redis connection settings are absent for local development only.
 
 ## Cache Key
 

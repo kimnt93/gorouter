@@ -1,8 +1,12 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -10,18 +14,19 @@ import (
 )
 
 type Config struct {
-	Listen         string
-	DatabaseURL    string
-	RedisURL       string
-	MasterKey      string
-	EncryptionKey  string
-	SessionSecret  string
-	RequestLimit   int64
-	RequestTimeout time.Duration
-	Cache          CacheConfig
-	Quota          QuotaConfig
-	OAuthClientID  string
-	OAuthTokenURL  string
+	Listen          string
+	DatabaseBackend string
+	DatabaseURL     string
+	RedisURL        string
+	MasterKey       string
+	EncryptionKey   string
+	SessionSecret   string
+	RequestLimit    int64
+	RequestTimeout  time.Duration
+	Cache           CacheConfig
+	Quota           QuotaConfig
+	OAuthClientID   string
+	OAuthTokenURL   string
 }
 
 type CacheConfig struct {
@@ -40,11 +45,7 @@ type QuotaConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Listen:         env("LISTEN", ":8090"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		RedisURL:       os.Getenv("REDIS_URL"),
 		MasterKey:      os.Getenv("MASTER_KEY"),
-		EncryptionKey:  os.Getenv("ENCRYPTION_KEY"),
-		SessionSecret:  os.Getenv("SESSION_SECRET"),
 		RequestLimit:   20 << 20,
 		RequestTimeout: 5 * time.Minute,
 		OAuthClientID:  env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
@@ -59,17 +60,30 @@ func Load() (*Config, error) {
 		},
 		Quota: QuotaConfig{RedisPolicy: "strict"},
 	}
-	if cfg.DatabaseURL == "" {
-		return nil, errors.New("DATABASE_URL is required (postgres://...)")
-	}
 	if cfg.MasterKey == "" {
 		return nil, errors.New("MASTER_KEY is required; set it during setup")
 	}
-	if cfg.EncryptionKey == "" {
-		return nil, errors.New("ENCRYPTION_KEY is required; set it during setup")
+	cfg.EncryptionKey = deriveKey(cfg.MasterKey, "credential-encryption")
+	cfg.SessionSecret = deriveKey(cfg.MasterKey, "session-signing")
+
+	backend := strings.ToLower(env("DB_BACKEND", "postgresql"))
+	if backend == "postgres" {
+		backend = "postgresql"
 	}
-	if cfg.SessionSecret == "" {
-		cfg.SessionSecret = "nr-session::" + cfg.MasterKey
+	cfg.DatabaseBackend = backend
+	switch backend {
+	case "postgresql":
+		cfg.DatabaseURL = connectionURL("postgres", env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"))
+	case "clickhouse":
+		return nil, errors.New("DB_BACKEND=clickhouse is not supported as the primary store; ClickHouse is currently an analytics sink and PostgreSQL is required for transactional configuration")
+	default:
+		return nil, errors.New("DB_BACKEND must be postgresql or clickhouse")
+	}
+	if os.Getenv("DB_USER") == "" || os.Getenv("DB_PASSWORD") == "" || os.Getenv("DB_NAME") == "" {
+		return nil, errors.New("DB_USER, DB_PASSWORD, and DB_NAME are required")
+	}
+	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" {
+		cfg.RedisURL = connectionURL("redis", redisHost, env("REDIS_PORT", "6379"), os.Getenv("REDIS_USER"), os.Getenv("REDIS_PASSWORD"), "0")
 	}
 	if v := os.Getenv("REQUEST_LIMIT_MB"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -134,6 +148,19 @@ func Load() (*Config, error) {
 		return nil, errors.New("CACHE_SCOPE must be key, tenant, or global")
 	}
 	return cfg, nil
+}
+
+func connectionURL(scheme, host, port, user, password, name string) string {
+	u := &url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port), Path: "/" + name}
+	if user != "" || password != "" {
+		u.User = url.UserPassword(user, password)
+	}
+	return u.String()
+}
+
+func deriveKey(masterKey, purpose string) string {
+	sum := sha256.Sum256([]byte("gorouter:" + purpose + ":" + masterKey))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func env(k, def string) string {

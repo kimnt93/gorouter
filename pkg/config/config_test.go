@@ -4,9 +4,17 @@ import "testing"
 
 func requiredEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("MASTER_KEY", "master")
-	t.Setenv("ENCRYPTION_KEY", "encryption")
+	t.Setenv("DB_BACKEND", "postgresql")
+	t.Setenv("DB_HOST", "database.internal")
+	t.Setenv("DB_PORT", "5432")
+	t.Setenv("DB_USER", "gorouter")
+	t.Setenv("DB_PASSWORD", "secret")
+	t.Setenv("DB_NAME", "gorouter")
+	t.Setenv("REDIS_HOST", "redis.internal")
+	t.Setenv("REDIS_PORT", "6379")
+	t.Setenv("REDIS_USER", "gorouter")
+	t.Setenv("REDIS_PASSWORD", "redis-secret")
 	t.Setenv("CACHE_MEMORY_FALLBACK", "")
 	t.Setenv("CACHE_MAX_ENTRY_BYTES", "")
 	t.Setenv("CACHE_MAX_TOTAL_BYTES", "")
@@ -22,9 +30,10 @@ func TestRequiredEnvironment(t *testing.T) {
 		name string
 		key  string
 	}{
-		{"database", "DATABASE_URL"},
 		{"master", "MASTER_KEY"},
-		{"encryption", "ENCRYPTION_KEY"},
+		{"database user", "DB_USER"},
+		{"database password", "DB_PASSWORD"},
+		{"database name", "DB_NAME"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -34,6 +43,43 @@ func TestRequiredEnvironment(t *testing.T) {
 				t.Fatalf("missing %s was accepted", test.key)
 			}
 		})
+	}
+}
+
+func TestBuildsConnectionURLsAndDerivesSecrets(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL != "postgres://gorouter:secret@database.internal:5432/gorouter" {
+		t.Fatalf("database URL = %q", cfg.DatabaseURL)
+	}
+	if cfg.RedisURL != "redis://gorouter:redis-secret@redis.internal:6379/0" {
+		t.Fatalf("redis URL = %q", cfg.RedisURL)
+	}
+	if cfg.EncryptionKey == "" || cfg.SessionSecret == "" || cfg.EncryptionKey == cfg.SessionSecret {
+		t.Fatal("master key did not produce distinct internal keys")
+	}
+}
+
+func TestRedisIsOptionalForDevelopment(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("REDIS_HOST", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RedisURL != "" {
+		t.Fatalf("Redis URL = %q, want empty", cfg.RedisURL)
+	}
+}
+
+func TestRejectsClickHouseAsPrimaryStore(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("DB_BACKEND", "clickhouse")
+	if _, err := Load(); err == nil {
+		t.Fatal("unsupported ClickHouse primary store was accepted")
 	}
 }
 

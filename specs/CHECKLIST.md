@@ -26,7 +26,7 @@ Agents may work in parallel only when their file ownership does not overlap. Eac
 ### B. Configuration and Database
 
 - [x] Implement required environment configuration.
-- [x] Require `DATABASE_URL`, `MASTER_KEY`, and `ENCRYPTION_KEY`.
+- [x] Require `MASTER_KEY` and structured `DB_*` settings; derive encryption and session keys from the master key.
 - [x] Add idempotent PostgreSQL migrations.
 - [x] Add tenants, credentials, API keys, scopes, models, routes, prices, and usage tables.
 - [x] Add indexes required by quota and usage queries.

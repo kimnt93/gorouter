@@ -36,13 +36,13 @@ for response models when a struct can represent the response shape.
 - **Usage log**: every request recorded (tokens incl. provider cache read/write, cost,
   latency, status) via batched async inserts.
 - **Master-key admin API + embedded UI** (login with master key or scoped API key).
-- **Distributed cache**: Redis is used when `REDIS_URL` is configured; local memory cache is the development fallback.
+- **Distributed cache**: Redis uses structured `REDIS_*` settings; local memory cache is the development fallback.
 
 ## Quick start
 
 ```bash
-cp .env.example .env          # edit MASTER_KEY / ENCRYPTION_KEY
-docker compose up -d --build  # router + PostgreSQL + Redis
+cp .env.example .env          # edit MASTER_KEY and database/Redis passwords
+docker compose up -d --build  # Traefik + router + PostgreSQL + Redis
 ```
 
 Container profiles:
@@ -59,12 +59,13 @@ The optional ClickHouse profile provisions an analytics database and initializes
 to PostgreSQL; ClickHouse is prepared for a future sink behind the existing usage repository
 boundary and is not a replacement for transactional PostgreSQL configuration.
 
-Open http://localhost:8090/ and sign in with your master key.
+Open <http://gorouter.localhost/> and sign in with your master key. Traefik's routing
+dashboard is available locally at <http://traefik.localhost/dashboard/>.
 
 Then point any OpenAI SDK at it:
 
 ```bash
-curl http://localhost:8090/v1/chat/completions \
+curl http://gorouter.localhost/v1/chat/completions \
   -H "Authorization: Bearer nr-..." \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
 ```
@@ -73,13 +74,19 @@ curl http://localhost:8090/v1/chat/completions \
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | – (required) | `postgres://user:pass@host:port/db` |
-| `REDIS_URL` | empty | Redis URL for multi-node prompt caching; memory fallback when empty |
 | `MASTER_KEY` | required during setup | admin API + UI login; has every scope |
-| `ENCRYPTION_KEY` | required during setup | 32-byte base64 or any passphrase. Stored credentials cannot be decrypted without it. |
+| `DB_BACKEND` | `postgresql` | Primary transactional backend. ClickHouse is analytics-only and is rejected as a primary store. |
+| `DB_HOST` | `127.0.0.1` | Database host; Compose uses the internal service name. |
+| `DB_PORT` | `5432` | Database port. |
+| `DB_USER` | required | Database user. |
+| `DB_PASSWORD` | required | Database password. |
+| `DB_NAME` | required | Database name. |
+| `REDIS_HOST` | empty | Redis host; Compose uses the internal service name. Empty enables the development memory fallback. |
+| `REDIS_PORT` | `6379` | Redis port. |
+| `REDIS_USER` | empty | Redis ACL user. |
+| `REDIS_PASSWORD` | empty | Redis ACL password. |
 | `LISTEN` | `:8090` | |
 | `APP_ENV` | `development` | Production disables implicit memory-cache fallback. |
-| `SESSION_SECRET` | derived from master key | Explicit session-cookie signing secret. |
 | `REQUEST_TIMEOUT` | `5m` | Fiber request/read timeout. |
 | `CACHE_ENABLED` | `true` | |
 | `CACHE_TTL` | `24h` | |
@@ -91,6 +98,10 @@ curl http://localhost:8090/v1/chat/completions \
 | `REQUEST_LIMIT_MB` | `20` | max request body |
 | `ANTHROPIC_OAUTH_CLIENT_ID` | built-in client ID | OAuth refresh client ID. |
 | `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint | Optional compatible/test override. |
+| `TRAEFIK_BIND_IP` | `127.0.0.1` | Host address used by the Traefik HTTP entrypoint. |
+| `TRAEFIK_HTTP_PORT` | `80` | Host port used by the Traefik HTTP entrypoint. |
+| `GOROUTER_HOST` | `gorouter.localhost` | Hostname routed to the application and web console. |
+| `TRAEFIK_DASHBOARD_HOST` | `traefik.localhost` | Hostname routed to Traefik's local dashboard. |
 
 ## PostgreSQL vs ClickHouse
 
@@ -120,11 +131,12 @@ ui                     Tailwind source; compiled CSS is embedded under api/views
 ## Testing
 
 ```bash
-cp .env.example .env
-docker compose up -d postgres redis
-TEST_DATABASE_URL="postgres://gorouter:change-me-postgres-password@127.0.0.1:54329/gorouter" \
-TEST_REDIS_URL="redis://127.0.0.1:63899/0" go test ./...
+go test ./...
 ```
+
+Integration tests additionally accept `TEST_DATABASE_URL` and `TEST_REDIS_URL` pointing
+to dedicated, externally reachable test services. The Compose databases intentionally do
+not publish host ports.
 
 Covers: unit (crypto, cost, routing, cache isolation, Anthropic translation/SSE) and
 integration (passthrough + cost math, SSE usage extraction, round-robin distribution,
