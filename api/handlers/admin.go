@@ -18,6 +18,29 @@ import (
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
+type okResponse struct {
+	OK bool `json:"ok"`
+}
+
+type loginResponse struct {
+	OK     bool     `json:"ok"`
+	Role   string   `json:"role"`
+	Scopes []string `json:"scopes"`
+}
+
+type createdAPIKeyResponse struct {
+	ID              string   `json:"id"`
+	TenantID        string   `json:"tenant_id"`
+	Name            string   `json:"name"`
+	KeyPrefix       string   `json:"key_prefix"`
+	Models          []string `json:"models"`
+	Scopes          []string `json:"scopes"`
+	MonthlyQuotaUSD *float64 `json:"monthly_quota_usd"`
+	RPM             *int     `json:"rpm"`
+	Enabled         bool     `json:"enabled"`
+	Plaintext       string   `json:"plaintext"`
+}
+
 type Admin struct {
 	Auth      *auth.Service
 	TenantSvc *tenant.Service
@@ -48,10 +71,10 @@ func (a *Admin) Verify(c fiber.Ctx) error {
 		c.Set("HX-Redirect", "/")
 		return c.SendStatus(200)
 	}
-	if c.Method() == fiber.MethodPost && c.Get("Content-Type") == "application/x-www-form-urlencoded" {
+	if c.Method() == fiber.MethodPost && strings.Contains(c.Get("Content-Type"), "application/x-www-form-urlencoded") {
 		return c.Redirect().To("/")
 	}
-	return c.JSON(map[string]any{"ok": true, "role": sess.Role, "scopes": sess.Scopes})
+	return c.JSON(loginResponse{OK: true, Role: sess.Role, Scopes: sess.Scopes})
 }
 
 func (a *Admin) Logout(c fiber.Ctx) error {
@@ -63,9 +86,15 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodGet {
 		v, err := a.TenantSvc.List(c.Context())
 		if err != nil {
-			return presenter.ServerError(c, err.Error())
+			return presenter.ServerError(c, "failed to load tenants")
+		}
+		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+			v = filterTenants(v, sess.TenantID)
 		}
 		return c.JSON(v)
+	}
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can create tenants")
 	}
 	var b struct {
 		Name string `json:"name"`
@@ -75,7 +104,7 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 	}
 	v, err := a.TenantSvc.Create(c.Context(), strings.TrimSpace(b.Name))
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to create tenant")
 	}
 	return c.Status(201).JSON(v)
 }
@@ -84,7 +113,10 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodGet {
 		v, err := a.CredsSvc.List(c.Context())
 		if err != nil {
-			return presenter.ServerError(c, err.Error())
+			return presenter.ServerError(c, "failed to load credentials")
+		}
+		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+			v = filterCredentials(v, sess.TenantID)
 		}
 		return c.JSON(v)
 	}
@@ -101,28 +133,41 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if b.Provider == "" {
 		b.Provider = entities.ProviderOpenAICompatible
 	}
+	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+		b.OwnerTenant = &sess.TenantID
+	}
 	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: b.OwnerTenant})
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.BadRequest(c, err.Error())
 	}
 	return c.Status(201).JSON(v)
 }
 
 func (a *Admin) CredentialByID(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() && !a.tenantOwnsCredential(c, sess.TenantID, c.Params("id")) {
+		return presenter.NotFound(c, "credential not found")
+	}
 	err := a.CredsSvc.Delete(c.Context(), c.Params("id"))
 	if errors.Is(err, entities.ErrNotFound) {
 		return presenter.NotFound(c, "credential not found")
 	}
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to delete credential")
 	}
-	return c.JSON(map[string]any{"ok": true})
+	return c.JSON(okResponse{OK: true})
 }
 
 func (a *Admin) KeysList(c fiber.Ctx) error {
-	v, err := a.KeysSvc.List(c.Context())
+	sess := SessionFrom(c)
+	var v []entities.ApiKey
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		v, err = a.KeysSvc.ListByTenant(c.Context(), sess.TenantID)
+	} else {
+		v, err = a.KeysSvc.List(c.Context())
+	}
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to load API keys")
 	}
 	return c.JSON(v)
 }
@@ -139,17 +184,22 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if b.TenantID == "" {
 		b.TenantID = "tenant_default"
 	}
-	if len(b.Models) == 0 {
-		return presenter.BadRequest(c, "models must not be empty")
-	}
 	if len(b.Scopes) == 0 {
 		b.Scopes = []string{entities.ScopeChat}
 	}
-	v, err := a.KeysSvc.Create(c.Context(), apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, MonthlyQuotaUSD: b.MonthlyQuotaUSD, RPM: b.RPM})
-	if err != nil {
-		return presenter.ServerError(c, err.Error())
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, MonthlyQuotaUSD: b.MonthlyQuotaUSD, RPM: b.RPM}
+	sess := SessionFrom(c)
+	var v *entities.ApiKey
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		v, err = a.KeysSvc.CreateForTenant(c.Context(), sess.TenantID, in)
+	} else {
+		v, err = a.KeysSvc.Create(c.Context(), in)
 	}
-	return c.Status(201).JSON(map[string]any{"id": v.ID, "tenant_id": v.TenantID, "name": v.Name, "key_prefix": v.SecretPrefix, "models": v.Models, "scopes": v.Scopes, "monthly_quota_usd": v.MonthlyQuotaUSD, "rpm": v.RPM, "enabled": v.Enabled, "plaintext": v.Plaintext})
+	if err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return c.Status(201).JSON(createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, MonthlyQuotaUSD: v.MonthlyQuotaUSD, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext})
 }
 func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	var b struct {
@@ -162,16 +212,36 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
-	if err := a.KeysSvc.Patch(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM); err != nil {
-		return presenter.ServerError(c, err.Error())
+	sess := SessionFrom(c)
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		err = a.KeysSvc.PatchForTenant(c.Context(), sess.TenantID, c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM)
+	} else {
+		err = a.KeysSvc.Patch(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM)
 	}
-	return c.JSON(map[string]any{"ok": true})
+	if err != nil {
+		if errors.Is(err, entities.ErrNotFound) {
+			return presenter.NotFound(c, "API key not found")
+		}
+		return presenter.BadRequest(c, err.Error())
+	}
+	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) KeysDelete(c fiber.Ctx) error {
-	if err := a.KeysSvc.Delete(c.Context(), c.Params("id")); err != nil {
-		return presenter.ServerError(c, err.Error())
+	sess := SessionFrom(c)
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		err = a.KeysSvc.DeleteForTenant(c.Context(), sess.TenantID, c.Params("id"))
+	} else {
+		err = a.KeysSvc.Delete(c.Context(), c.Params("id"))
 	}
-	return c.JSON(map[string]any{"ok": true})
+	if err != nil {
+		if errors.Is(err, entities.ErrNotFound) {
+			return presenter.NotFound(c, "API key not found")
+		}
+		return presenter.ServerError(c, "failed to delete API key")
+	}
+	return c.JSON(okResponse{OK: true})
 }
 
 func (a *Admin) ModelsList(c fiber.Ctx) error {
@@ -190,13 +260,13 @@ func (a *Admin) ModelUpsert(c fiber.Ctx) error {
 	if err := a.ModelsSvc.Upsert(c.Context(), m); err != nil {
 		return presenter.ServerError(c, err.Error())
 	}
-	return c.JSON(map[string]any{"ok": true})
+	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) ModelDelete(c fiber.Ctx) error {
 	if err := a.ModelsSvc.Delete(c.Context(), c.Params("name")); err != nil {
 		return presenter.ServerError(c, err.Error())
 	}
-	return c.JSON(map[string]any{"ok": true})
+	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) Price(c fiber.Ctx) error {
 	var p entities.Price
@@ -206,7 +276,7 @@ func (a *Admin) Price(c fiber.Ctx) error {
 	if err := a.ModelsSvc.SetPrice(c.Context(), c.Params("model"), p); err != nil {
 		return presenter.ServerError(c, err.Error())
 	}
-	return c.JSON(map[string]any{"ok": true})
+	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) Prices(c fiber.Ctx) error {
 	v, err := a.ModelsSvc.Prices(c.Context())
@@ -239,5 +309,18 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 func (a *Admin) CacheStats(c fiber.Ctx) error { return c.JSON(a.Cache.Stats()) }
 func (a *Admin) CacheFlush(c fiber.Ctx) error {
 	a.Cache.Flush()
-	return c.JSON(map[string]any{"ok": true})
+	return c.JSON(okResponse{OK: true})
+}
+
+func (a *Admin) tenantOwnsCredential(c fiber.Ctx, tenantID, credentialID string) bool {
+	credentials, err := a.CredsSvc.List(c.Context())
+	if err != nil {
+		return false
+	}
+	for _, cred := range credentials {
+		if cred.ID == credentialID && cred.OwnerTenantID != nil && *cred.OwnerTenantID == tenantID {
+			return true
+		}
+	}
+	return false
 }

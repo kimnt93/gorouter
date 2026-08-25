@@ -78,7 +78,8 @@ func (r *UsageRepo) RecentForTenant(ctx context.Context, tenantID string, limit 
 		limit = 100
 	}
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT ts,tenant_id,api_key_id,credential_id,model,cost_usd,priced,cache_hit,status_code,duration_ms,error
+		SELECT ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,
+		       cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error
 		FROM usage_events WHERE tenant_id=$1 ORDER BY seq DESC LIMIT $2`, tenantID, limit)
 	if err != nil {
 		return nil, err
@@ -87,7 +88,9 @@ func (r *UsageRepo) RecentForTenant(ctx context.Context, tenantID string, limit 
 	var out []entities.RecentEvent
 	for rows.Next() {
 		var ev entities.RecentEvent
-		if err := rows.Scan(&ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error); err != nil {
+		if err := rows.Scan(&ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.UpstreamModel,
+			&ev.PromptTokens, &ev.CompletionTokens, &ev.CacheReadTokens, &ev.CacheWriteTokens,
+			&ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error); err != nil {
 			return nil, err
 		}
 		out = append(out, ev)

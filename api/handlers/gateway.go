@@ -125,14 +125,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			g.Health.Report(candidate.ID, false)
 			continue
 		}
-		if result.StatusCode >= 400 && !retryableStatus(result.StatusCode) {
+		if (result.StatusCode < 200 || result.StatusCode >= 300) && !retryableStatus(result.StatusCode) {
 			status := result.StatusCode
 			drainAndClose(result.Body)
 			g.record(key, model, runtime.ID, llm.Usage{}, false, status, started)
 			c.Set("X-Cache", "bypass")
 			return presenter.Err(c, status, "upstream rejected the request", "upstream_error", "upstream_rejected")
 		}
-		if result.StatusCode >= 400 {
+		if result.StatusCode < 200 || result.StatusCode >= 300 {
 			lastStatus = result.StatusCode
 			drainAndClose(result.Body)
 			g.Health.Report(candidate.ID, false)

@@ -110,17 +110,22 @@ type UsageEvent struct {
 }
 
 type RecentEvent struct {
-	TS           time.Time `json:"ts"`
-	TenantID     string    `json:"tenant_id"`
-	KeyID        string    `json:"api_key_id"`
-	CredentialID string    `json:"credential_id"`
-	Model        string    `json:"model"`
-	CostUSD      float64   `json:"cost_usd"`
-	Priced       bool      `json:"priced"`
-	CacheHit     bool      `json:"cache_hit"`
-	StatusCode   int       `json:"status_code"`
-	DurationMS   int64     `json:"duration_ms"`
-	Error        string    `json:"error"`
+	TS               time.Time `json:"ts"`
+	TenantID         string    `json:"tenant_id"`
+	KeyID            string    `json:"api_key_id"`
+	CredentialID     string    `json:"credential_id"`
+	Model            string    `json:"model"`
+	UpstreamModel    string    `json:"upstream_model"`
+	PromptTokens     int64     `json:"prompt_tokens"`
+	CompletionTokens int64     `json:"completion_tokens"`
+	CacheReadTokens  int64     `json:"cache_read_tokens"`
+	CacheWriteTokens int64     `json:"cache_write_tokens"`
+	CostUSD          float64   `json:"cost_usd"`
+	Priced           bool      `json:"priced"`
+	CacheHit         bool      `json:"cache_hit"`
+	StatusCode       int       `json:"status_code"`
+	DurationMS       int64     `json:"duration_ms"`
+	Error            string    `json:"error"`
 }
 
 type UsageSummary struct {
