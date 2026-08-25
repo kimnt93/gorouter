@@ -27,11 +27,6 @@ type CredentialRuntime struct {
 	OAuthRefreh string
 }
 
-type ChatRequestData struct {
-	Model  string
-	Stream bool
-}
-
 type Upstream interface {
 	Send(ctx context.Context, cr *CredentialRuntime, upstreamModel string, rawBody []byte) (*UpstreamResult, error)
 }

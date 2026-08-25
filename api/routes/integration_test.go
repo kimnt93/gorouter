@@ -112,7 +112,7 @@ func newIntegrationHarness(t *testing.T, upstreamURL string) *integrationHarness
 	anthropic.Refresh = refresher.Refresh
 	masterKey := "integration-master-key"
 	authSvc := auth.NewService(masterKey, "integration-session-secret", keySvc)
-	gw := &handlers.Gateway{Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Auth: authSvc,
+	gw := &handlers.Gateway{Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc, Cache: cacheSvc,
 		OpenAI: openai, Anthropic: anthropic, Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc}
 	app := routes.New(routes.Dependencies{Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw, OpenAI: openai, Anthropic: anthropic,

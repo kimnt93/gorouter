@@ -20,7 +20,7 @@ import (
 )
 
 func TestRetryableStatus(t *testing.T) {
-	for _, status := range []int{408, 429, 500, 502, 503, 504} {
+	for _, status := range []int{408, 429, 500, 502, 503, 504, 529} {
 		if !retryableStatus(status) {
 			t.Errorf("status %d should retry", status)
 		}

@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -463,7 +464,7 @@ func optionalFloat(value string) (*float64, error) {
 		return nil, nil
 	}
 	n, err := strconv.ParseFloat(value, 64)
-	if err != nil || n < 0 {
+	if err != nil || n < 0 || math.IsNaN(n) || math.IsInf(n, 0) {
 		return nil, strconv.ErrSyntax
 	}
 	return &n, nil

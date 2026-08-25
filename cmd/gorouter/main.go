@@ -104,7 +104,7 @@ func main() {
 	anthropic.Refresh = refresher.Refresh
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
-		Cache: cacheSvc, Auth: authSvc, OpenAI: openai, Anthropic: anthropic,
+		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic,
 		Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc,
 	}
 	app := routes.New(routes.Dependencies{

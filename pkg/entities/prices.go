@@ -27,10 +27,6 @@ func (u TokenUsage) TotalTokens() int64 {
 	return u.PromptTokens + u.CompletionTokens
 }
 
-func ComputeCost(p *Price, u TokenUsage) float64 {
-	return CalculateCost(p, u).USD
-}
-
 func CalculateCost(p *Price, u TokenUsage) Cost {
 	if p == nil {
 		return Cost{}

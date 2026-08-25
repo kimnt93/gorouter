@@ -36,7 +36,7 @@
                         <td><span class="badge {{if .Enabled}}ok{{end}}">{{if
                                 .Enabled}}enabled{{else}}disabled{{end}}</span></td>
                         <td>
-                            <div class="actions">
+                            <div class="flex items-center gap-2">
                                 <form hx-post="/ui/keys/{{.ID}}/toggle" hx-target="body" hx-swap="outerHTML"><input
                                         type="hidden" name="enabled"
                                         value="{{if .Enabled}}false{{else}}true{{end}}"><button>{{if

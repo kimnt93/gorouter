@@ -14,7 +14,6 @@ import (
 
 	"github.com/kimnt93/gorouter/api/presenter"
 	"github.com/kimnt93/gorouter/pkg/apikey"
-	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
@@ -30,7 +29,6 @@ type Gateway struct {
 	Models    *modelroute.Service
 	Usage     *usage.Service
 	Cache     chat.PromptCache
-	Auth      *auth.Service
 	OpenAI    entities.Upstream
 	Anthropic entities.Upstream
 	Selector  *chat.Selector
@@ -200,8 +198,8 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	c.Set("X-Cache", "bypass")
 	g.recordError(key, model, lastCredential, lastStatus, started, "all credentials failed")
 	responseStatus := fiber.StatusBadGateway
-	if lastStatus == fiber.StatusTooManyRequests {
-		responseStatus = fiber.StatusTooManyRequests
+	if lastStatus >= fiber.StatusBadRequest && lastStatus < fiber.StatusInternalServerError {
+		responseStatus = lastStatus
 	}
 	return presenter.Err(c, responseStatus, "all credentials failed", "upstream_error", "upstream_unavailable")
 }
@@ -220,7 +218,7 @@ func (g *Gateway) adapter(provider string) (entities.Upstream, bool) {
 func retryableStatus(status int) bool {
 	switch status {
 	case fiber.StatusRequestTimeout, fiber.StatusTooManyRequests, fiber.StatusInternalServerError,
-		fiber.StatusBadGateway, fiber.StatusServiceUnavailable, fiber.StatusGatewayTimeout:
+		fiber.StatusBadGateway, fiber.StatusServiceUnavailable, fiber.StatusGatewayTimeout, 529:
 		return true
 	default:
 		return false

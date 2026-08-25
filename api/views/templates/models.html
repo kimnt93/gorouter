@@ -13,7 +13,7 @@
                 <div>
                     <h2><code>{{.Name}}</code></h2><span class="badge">{{.Strategy}}</span> → {{.UpstreamModel}}
                 </div>
-                <div class="actions"><span class="badge {{if .Enabled}}ok{{end}}">{{if
+                <div class="flex items-center gap-2"><span class="badge {{if .Enabled}}ok{{end}}">{{if
                         .Enabled}}enabled{{else}}disabled{{end}}</span>{{if $.CanManageGlobal}}<button class="danger"
                         hx-delete="/ui/models/{{.Name}}" hx-confirm="Delete this model and its routes?" hx-target="body"
                         hx-swap="outerHTML">Delete</button>{{end}}</div>

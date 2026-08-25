@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	localSession   = "nr_session"
-	localAPIKeyEnt = "nr_api_key"
+	localSession = "nr_session"
 
 	sessionCookie = "nr_session"
 )
