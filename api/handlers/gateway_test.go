@@ -112,6 +112,10 @@ func (u *gatewayUpstream) Send(_ context.Context, runtime *entities.CredentialRu
 }
 
 func testGatewayApp(statuses map[string]int) (*fiber.App, *gatewayUpstream) {
+	return testGatewayAppWithStrategy(statuses, chat.StrategyPriority)
+}
+
+func testGatewayAppWithStrategy(statuses map[string]int, strategy string) (*fiber.App, *gatewayUpstream) {
 	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 10}, {CredentialID: "cred-b", Priority: 5}}
 	runtimes := map[string]*entities.CredentialRuntime{
@@ -122,7 +126,7 @@ func testGatewayApp(statuses map[string]int) (*fiber.App, *gatewayUpstream) {
 	gateway := &Gateway{
 		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
 		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
-		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: strategy, Enabled: true}}),
 		OpenAI: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(),
 	}
 	app := fiber.New()
@@ -131,6 +135,30 @@ func testGatewayApp(statuses map[string]int) (*fiber.App, *gatewayUpstream) {
 		return gateway.Chat(c)
 	})
 	return app, upstream
+}
+
+func TestGatewayRoundRobinDistributesRequests(t *testing.T) {
+	app, upstream := testGatewayAppWithStrategy(map[string]int{"cred-a": http.StatusOK, "cred-b": http.StatusOK}, chat.StrategyRoundRobin)
+	for i := 0; i < 4; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`))
+		res, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("request %d status=%d", i, res.StatusCode)
+		}
+	}
+	want := []string{"cred-a", "cred-b", "cred-a", "cred-b"}
+	if len(upstream.calls) != len(want) {
+		t.Fatalf("calls=%v", upstream.calls)
+	}
+	for i := range want {
+		if upstream.calls[i] != want[i] {
+			t.Fatalf("round-robin calls=%v want=%v", upstream.calls, want)
+		}
+	}
 }
 
 func TestGatewayDoesNotRetryOrdinary4xx(t *testing.T) {

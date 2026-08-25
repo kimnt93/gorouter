@@ -46,4 +46,20 @@ func TestRedisSharedCacheAndIsolation(t *testing.T) {
 	if one.Store("key-a", "tenant-a", "m", []byte("large"), &chat.CacheEntry{Body: []byte("12345")}) {
 		t.Fatal("Redis accepted oversized entry")
 	}
+	tenantOne := NewRedis(a, Config{Scope: chat.ScopeTenant, TTL: time.Minute, MaxEntryBytes: 16})
+	tenantTwo := NewRedis(b, Config{Scope: chat.ScopeTenant, TTL: time.Minute, MaxEntryBytes: 16})
+	tenantPrompt := append(prompt, []byte("-tenant")...)
+	if !tenantOne.Store("key-a", "tenant-a", "m", tenantPrompt, &chat.CacheEntry{Status: 200, Body: []byte("tenant")}) {
+		t.Fatal("tenant-scoped store failed")
+	}
+	if _, ok := tenantTwo.Lookup("key-b", "tenant-a", "m", tenantPrompt); !ok {
+		t.Fatal("tenant-scoped entry did not share within tenant")
+	}
+	if _, ok := tenantTwo.Lookup("key-c", "tenant-b", "m", tenantPrompt); ok {
+		t.Fatal("tenant-scoped entry leaked cross-tenant")
+	}
+	one.Flush()
+	if _, ok := two.Lookup("key-a", "tenant-a", "m", prompt); ok {
+		t.Fatal("cache flush left an entry behind")
+	}
 }

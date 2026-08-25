@@ -25,6 +25,12 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool := pg.Pool
+	for _, table := range []string{"tenants", "credentials", "api_keys", "models", "model_routes", "prices", "usage_events"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("migration table %s: exists=%v err=%v", table, exists, err)
+		}
+	}
 	id := fmt.Sprintf("usage-isolation-%d", time.Now().UnixNano())
 	keyA, keyB := id+"-a", id+"-b"
 	t.Cleanup(func() {

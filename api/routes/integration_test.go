@@ -108,6 +108,8 @@ func newIntegrationHarness(t *testing.T, upstreamURL string) *integrationHarness
 	client := llm.NewHTTPClient()
 	openai := &llm.OpenAIAdapter{HTTP: client}
 	anthropic := &llm.AnthropicAdapter{HTTP: client}
+	refresher := &llm.AnthropicOAuthRefresher{HTTP: client, TokenURL: strings.TrimSuffix(upstreamURL, "/") + "/oauth/token", ClientID: "integration-client", Persister: credSvc}
+	anthropic.Refresh = refresher.Refresh
 	masterKey := "integration-master-key"
 	authSvc := auth.NewService(masterKey, "integration-session-secret", keySvc)
 	gw := &handlers.Gateway{Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Auth: authSvc,
@@ -259,6 +261,22 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 	upstream, calls := mockOpenAIUpstream(t)
 	h := newIntegrationHarness(t, upstream.URL)
 	key := createConfiguredKey(t, h, "integration-model", nil, nil)
+	credentialList := readBody(t, h.request(t, http.MethodGet, "/admin/credentials", h.masterKey, nil))
+	if strings.Contains(credentialList, "provider-secret-value") {
+		t.Fatal("credential list leaked a provider secret")
+	}
+	var listedCredentials []entities.Credential
+	if err := json.Unmarshal([]byte(credentialList), &listedCredentials); err != nil || len(listedCredentials) == 0 {
+		t.Fatalf("decode credential list: credentials=%v err=%v", listedCredentials, err)
+	}
+	probe := h.request(t, http.MethodPost, "/admin/credentials/"+listedCredentials[0].ID+"/test", h.masterKey, nil)
+	if probe.StatusCode != http.StatusOK || !decodeResponse[credential.ConnectivityResult](t, probe).OK {
+		t.Fatal("credential connectivity probe failed")
+	}
+	keyList := readBody(t, h.request(t, http.MethodGet, "/admin/api-keys", h.masterKey, nil))
+	if strings.Contains(keyList, key.Plaintext) {
+		t.Fatal("API-key list repeated one-time plaintext")
+	}
 
 	masterLogin := h.request(t, http.MethodPost, "/login", "", struct {
 		Key string `json:"key"`
@@ -285,13 +303,14 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 		t.Fatal("authorized model was not listed")
 	}
 
+	callsBeforeChat := calls.Load()
 	first := h.request(t, http.MethodPost, "/v1/chat/completions", key.Plaintext, chatBody("integration-model", false, "cache me"))
 	if first.StatusCode != http.StatusOK || first.Header.Get("X-Cache") != "miss" {
 		t.Fatalf("first chat status=%d cache=%q", first.StatusCode, first.Header.Get("X-Cache"))
 	}
 	readBody(t, first)
 	second := h.request(t, http.MethodPost, "/v1/chat/completions", key.Plaintext, chatBody("integration-model", false, "cache me"))
-	if second.StatusCode != http.StatusOK || second.Header.Get("X-Cache") != "hit" || calls.Load() != 1 {
+	if second.StatusCode != http.StatusOK || second.Header.Get("X-Cache") != "hit" || calls.Load() != callsBeforeChat+1 {
 		t.Fatalf("cached chat status=%d cache=%q upstream_calls=%d", second.StatusCode, second.Header.Get("X-Cache"), calls.Load())
 	}
 	readBody(t, second)
@@ -306,6 +325,46 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 		t.Fatalf("model allowlist did not fail closed: %d", unknown.StatusCode)
 	}
 	unknown.Body.Close()
+	oversizedBody, err := json.Marshal(chatBody("integration-model", false, strings.Repeat("x", 3<<20)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversizedRequest := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(oversizedBody))
+	oversizedRequest.Header.Set("Authorization", "Bearer "+key.Plaintext)
+	oversizedRequest.Header.Set("Content-Type", "application/json")
+	oversized, oversizedErr := h.app.Test(oversizedRequest)
+	if oversizedErr != nil && !strings.Contains(oversizedErr.Error(), "body size") {
+		t.Fatalf("unexpected oversized-request error: %v", oversizedErr)
+	}
+	if oversizedErr == nil && (oversized == nil || oversized.StatusCode != http.StatusRequestEntityTooLarge) {
+		t.Fatalf("oversized request response=%v error=%v", oversized, oversizedErr)
+	}
+	if oversized != nil {
+		oversized.Body.Close()
+	}
+	if _, err := h.db.Pool.Exec(context.Background(), `INSERT INTO tenants (id,name) VALUES ('tenant_private','private') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	privateTenant := "tenant_private"
+	privateCredential, err := h.creds.Create(context.Background(), entities.CredentialInput{Name: "private", Provider: entities.ProviderOpenAICompatible,
+		Kind: entities.KindAPIKey, BaseURL: h.adminURL, APIKey: "private-secret", OwnerTenant: &privateTenant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.models.Upsert(context.Background(), entities.ModelDef{Name: "private-model", Strategy: chat.StrategyPriority, Enabled: true,
+		Routes: []entities.ModelRoute{{CredentialID: privateCredential.ID, Weight: 1, Enabled: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	foreignKey, err := h.keys.Create(context.Background(), apikey.CreateInput{TenantID: "tenant_default", Name: "foreign", Models: []string{"private-model"}, Scopes: []string{entities.ScopeChat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callsBeforePrivate := calls.Load()
+	privateResponse := h.request(t, http.MethodPost, "/v1/chat/completions", foreignKey.Plaintext, chatBody("private-model", false, "must not route"))
+	if privateResponse.StatusCode != http.StatusServiceUnavailable || calls.Load() != callsBeforePrivate {
+		t.Fatalf("private credential routed cross-tenant: status=%d calls_before=%d calls_after=%d", privateResponse.StatusCode, callsBeforePrivate, calls.Load())
+	}
+	privateResponse.Body.Close()
 
 	deadline := time.Now().Add(2 * time.Second)
 	usageReady := false
@@ -346,6 +405,100 @@ func TestDistributedQuotaAndRPM(t *testing.T) {
 		t.Fatalf("RPM statuses=%d,%d", first.StatusCode, second.StatusCode)
 	}
 	second.Body.Close()
+}
+
+type anthropicMockResponse struct {
+	ID         string                 `json:"id"`
+	Model      string                 `json:"model"`
+	StopReason string                 `json:"stop_reason"`
+	Content    []anthropicMockContent `json:"content"`
+	Usage      anthropicMockUsage     `json:"usage"`
+}
+
+type anthropicMockContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type anthropicMockUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+}
+
+type oauthMockRequest struct {
+	GrantType    string `json:"grant_type"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type oauthMockResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+func TestAnthropicOAuthRefreshAndTranslationThroughFiber(t *testing.T) {
+	var messageCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			var request oauthMockRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.GrantType != "refresh_token" || request.RefreshToken != "old-refresh" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(oauthMockResponse{AccessToken: "fresh-access", RefreshToken: "fresh-refresh"})
+		case "/v1/messages":
+			messageCalls.Add(1)
+			if r.Header.Get("Authorization") == "Bearer expired-access" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer fresh-access" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			var request llm.AnthropicRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) != 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(anthropicMockResponse{ID: "message-1", Model: request.Model, StopReason: "end_turn",
+				Content: []anthropicMockContent{{Type: "text", Text: "translated response"}}, Usage: anthropicMockUsage{InputTokens: 9, OutputTokens: 3}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	h := newIntegrationHarness(t, server.URL)
+	credentialEntity, err := h.creds.Create(context.Background(), entities.CredentialInput{Name: "oauth-anthropic", Provider: entities.ProviderAnthropic,
+		Kind: entities.KindOAuth, BaseURL: server.URL, OAuthAccess: "expired-access", OAuthRefresh: "old-refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.models.Upsert(context.Background(), entities.ModelDef{Name: "anthropic-model", UpstreamModel: "claude-test", Strategy: chat.StrategyPriority, Enabled: true,
+		Routes: []entities.ModelRoute{{CredentialID: credentialEntity.ID, Priority: 1, Weight: 1, Enabled: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := h.keys.Create(context.Background(), apikey.CreateInput{TenantID: "tenant_default", Name: "anthropic key", Models: []string{"anthropic-model"}, Scopes: []string{entities.ScopeChat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := h.request(t, http.MethodPost, "/v1/chat/completions", key.Plaintext, chatBody("anthropic-model", false, "hello"))
+	if response.StatusCode != http.StatusOK {
+		body := readBody(t, response)
+		t.Fatalf("Anthropic call status=%d body=%s", response.StatusCode, body)
+	}
+	translated := decodeResponse[llm.Response](t, response)
+	if len(translated.Choices) != 1 || translated.Choices[0].Message.Content != "translated response" || translated.Usage.PromptTokens != 9 || messageCalls.Load() != 2 {
+		t.Fatalf("translated response=%+v calls=%d", translated, messageCalls.Load())
+	}
+	runtime, err := h.creds.Runtime(context.Background(), credentialEntity.ID)
+	if err != nil || runtime.OAuthAccess != "fresh-access" || runtime.OAuthRefreh != "fresh-refresh" {
+		t.Fatalf("rotated runtime=%+v err=%v", runtime, err)
+	}
+	var encrypted bool
+	if err := h.db.Pool.QueryRow(context.Background(), `SELECT position(convert_to($1,'UTF8') in oauth_blob_enc)=0 FROM credentials WHERE id=$2`, "fresh-access", credentialEntity.ID).Scan(&encrypted); err != nil || !encrypted {
+		t.Fatalf("rotated OAuth token was not encrypted: encrypted=%v err=%v", encrypted, err)
+	}
 }
 
 func readBody(t *testing.T, res *http.Response) string {

@@ -212,6 +212,38 @@ func (u *UI) CredentialDelete(c fiber.Ctx) error {
 	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
 }
 
+func (u *UI) CredentialToggle(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	credentials, err := u.Credentials.List(c.Context())
+	if err != nil {
+		return presenter.ServerError(c, "failed to load credential")
+	}
+	var selected *entities.Credential
+	for i := range credentials {
+		if credentials[i].ID == c.Params("id") {
+			selected = &credentials[i]
+			break
+		}
+	}
+	if selected == nil || (sess != nil && !sess.IsMaster() && (selected.OwnerTenantID == nil || *selected.OwnerTenantID != sess.TenantID)) {
+		return presenter.NotFound(c, "credential not found")
+	}
+	status := "active"
+	if selected.Status == "active" {
+		status = "disabled"
+	}
+	owner := selected.OwnerTenantID
+	if sess != nil && !sess.IsMaster() {
+		owner = &sess.TenantID
+	}
+	if _, err := u.Credentials.Update(c.Context(), selected.ID, entities.CredentialUpdate{
+		Name: selected.Name, BaseURL: selected.BaseURL, Status: status, OwnerTenant: owner,
+	}); err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
+}
+
 func (u *UI) loadCredentials(c fiber.Ctx) (pageData, error) {
 	data := u.page(c, "Credentials")
 	var err error
@@ -290,6 +322,43 @@ func (u *UI) ModelDelete(c fiber.Ctx) error {
 			return presenter.NotFound(c, "model not found")
 		}
 		return presenter.ServerError(c, "failed to delete model")
+	}
+	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
+}
+
+func (u *UI) ModelPriceSet(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can change global prices")
+	}
+	readPrice := func(name string) (float64, error) {
+		value, err := optionalFloat(c.FormValue(name))
+		if err != nil {
+			return 0, err
+		}
+		if value == nil {
+			return 0, nil
+		}
+		return *value, nil
+	}
+	input, err := readPrice("input_per_m")
+	if err != nil {
+		return presenter.BadRequest(c, "input price must be non-negative")
+	}
+	output, err := readPrice("output_per_m")
+	if err != nil {
+		return presenter.BadRequest(c, "output price must be non-negative")
+	}
+	cacheRead, err := readPrice("cached_input_per_m")
+	if err != nil {
+		return presenter.BadRequest(c, "cache-read price must be non-negative")
+	}
+	cacheWrite, err := readPrice("cache_write_per_m")
+	if err != nil {
+		return presenter.BadRequest(c, "cache-write price must be non-negative")
+	}
+	price := entities.Price{InputPerM: input, OutputPerM: output, CachedInputPerM: cacheRead, CacheWritePerM: cacheWrite}
+	if err := u.Models.SetPrice(c.Context(), c.Params("name"), price); err != nil {
+		return presenter.BadRequest(c, err.Error())
 	}
 	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
 }

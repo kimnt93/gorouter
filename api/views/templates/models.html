@@ -38,6 +38,18 @@
                         </tr>{{end}}</tbody>
                 </table>
             </div>
+            {{if $.CanManageGlobal}}<form class="stack" style="margin-top:14px" hx-post="/ui/models/{{.Name}}/price"
+                hx-target="body" hx-swap="outerHTML">
+                <div class="fields"><label>Input / 1M<input name="input_per_m" type="number" min="0" step="any"
+                            value="{{if .Price}}{{.Price.InputPerM}}{{else}}0{{end}}"></label><label>Output / 1M<input
+                            name="output_per_m" type="number" min="0" step="any"
+                            value="{{if .Price}}{{.Price.OutputPerM}}{{else}}0{{end}}"></label><label>Cache read /
+                        1M<input name="cached_input_per_m" type="number" min="0" step="any"
+                            value="{{if .Price}}{{.Price.CachedInputPerM}}{{else}}0{{end}}"></label><label>Cache write /
+                        1M<input name="cache_write_per_m" type="number" min="0" step="any"
+                            value="{{if .Price}}{{.Price.CacheWritePerM}}{{else}}0{{end}}"></label></div><button>Save
+                    price</button>
+            </form>{{end}}
         </section>
         {{else}}<div class="notice muted">No models configured.</div>{{end}}
         {{if .CanManageGlobal}}<section class="panel">
