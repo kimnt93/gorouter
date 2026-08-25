@@ -1,22 +1,4 @@
 services:
-  traefik:
-    image: traefik:v3.6
-    restart: unless-stopped
-    command:
-      - --api.dashboard=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-    ports:
-      - "${TRAEFIK_BIND_IP:-127.0.0.1}:${TRAEFIK_HTTP_PORT:-80}:80"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_HOST:-traefik.localhost}`)
-      - traefik.http.routers.traefik-dashboard.entrypoints=web
-      - traefik.http.routers.traefik-dashboard.service=api@internal
-
   gorouter:
     build: .
     restart: unless-stopped
@@ -43,13 +25,8 @@ services:
       REDIS_OUTAGE_POLICY: "${REDIS_OUTAGE_POLICY:-strict}"
       ANTHROPIC_OAUTH_CLIENT_ID: "${ANTHROPIC_OAUTH_CLIENT_ID:-9d1c250a-e61b-44d9-88ed-5944d1962f5e}"
       ANTHROPIC_OAUTH_TOKEN_URL: "${ANTHROPIC_OAUTH_TOKEN_URL:-}"
-    expose:
-      - "8090"
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.gorouter.rule=Host(`${GOROUTER_HOST:-gorouter.localhost}`)
-      - traefik.http.routers.gorouter.entrypoints=web
-      - traefik.http.services.gorouter.loadbalancer.server.port=8090
+    ports:
+      - "${ROUTER_PORT:-8090}:8090"
     depends_on:
       postgres:
         condition: service_healthy

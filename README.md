@@ -42,7 +42,7 @@ for response models when a struct can represent the response shape.
 
 ```bash
 cp .env.example .env          # edit MASTER_KEY and database/Redis passwords
-docker compose up -d --build  # Traefik + router + PostgreSQL + Redis
+docker compose up -d --build  # router + PostgreSQL + Redis
 ```
 
 Container profiles:
@@ -59,13 +59,12 @@ The optional ClickHouse profile provisions an analytics database and initializes
 to PostgreSQL; ClickHouse is prepared for a future sink behind the existing usage repository
 boundary and is not a replacement for transactional PostgreSQL configuration.
 
-Open <http://gorouter.localhost/> and sign in with your master key. Traefik's routing
-dashboard is available locally at <http://traefik.localhost/dashboard/>.
+Open <http://localhost:8090/> and sign in with your master key.
 
 Then point any OpenAI SDK at it:
 
 ```bash
-curl http://gorouter.localhost/v1/chat/completions \
+curl http://localhost:8090/v1/chat/completions \
   -H "Authorization: Bearer nr-..." \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
 ```
@@ -74,7 +73,7 @@ curl http://gorouter.localhost/v1/chat/completions \
 
 | Variable | Default | Notes |
 |---|---|---|
-| `MASTER_KEY` | required during setup | admin API + UI login; has every scope |
+| `MASTER_KEY` | required during setup | Arbitrary random string with no required prefix; generate with `openssl rand -base64 33`. Used for admin login and internal key derivation. |
 | `DB_BACKEND` | `postgresql` | Primary transactional backend. ClickHouse is analytics-only and is rejected as a primary store. |
 | `DB_HOST` | `127.0.0.1` | Database host; Compose uses the internal service name. |
 | `DB_PORT` | `5432` | Database port. |
@@ -98,10 +97,7 @@ curl http://gorouter.localhost/v1/chat/completions \
 | `REQUEST_LIMIT_MB` | `20` | max request body |
 | `ANTHROPIC_OAUTH_CLIENT_ID` | built-in client ID | OAuth refresh client ID. |
 | `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint | Optional compatible/test override. |
-| `TRAEFIK_BIND_IP` | `127.0.0.1` | Host address used by the Traefik HTTP entrypoint. |
-| `TRAEFIK_HTTP_PORT` | `80` | Host port used by the Traefik HTTP entrypoint. |
-| `GOROUTER_HOST` | `gorouter.localhost` | Hostname routed to the application and web console. |
-| `TRAEFIK_DASHBOARD_HOST` | `traefik.localhost` | Hostname routed to Traefik's local dashboard. |
+| `ROUTER_PORT` | `8090` | Public application port, bound on all host interfaces. |
 
 ## PostgreSQL vs ClickHouse
 
