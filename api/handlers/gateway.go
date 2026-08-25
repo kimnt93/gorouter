@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/usage"
 	"github.com/kimnt93/gorouter/platform/llm"
 )
@@ -33,6 +35,7 @@ type Gateway struct {
 	Anthropic entities.Upstream
 	Selector  *chat.Selector
 	Health    *chat.Health
+	Quota     quota.Coordinator
 }
 
 func (g *Gateway) Chat(c fiber.Ctx) error {
@@ -67,8 +70,24 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if model == nil {
 		return presenter.NotFound(c, "unknown model")
 	}
+	if key.RPM != nil {
+		if g.Quota == nil {
+			return presenter.Err(c, fiber.StatusServiceUnavailable, "rate-limit coordination is unavailable", "service_unavailable", "redis_unavailable")
+		}
+		allowed, limitErr := g.Quota.AllowRPM(c.Context(), key.ID, *key.RPM, started)
+		if errors.Is(limitErr, quota.ErrUnavailable) {
+			return presenter.Err(c, fiber.StatusServiceUnavailable, "rate-limit coordination is unavailable", "service_unavailable", "redis_unavailable")
+		}
+		if limitErr != nil {
+			return presenter.ServerError(c, "failed to enforce rate limit")
+		}
+		if !allowed {
+			return presenter.Err(c, fiber.StatusTooManyRequests, "requests-per-minute limit exceeded", "rate_limit_error", "rate_limit_exceeded")
+		}
+	}
 	deterministic := llm.IsDeterministic(req)
-	if g.Cache != nil && deterministic {
+	cacheEnabled := g.cacheEnabled()
+	if cacheEnabled && deterministic {
 		if cached, ok := g.Cache.Lookup(key.ID, key.TenantID, model.Name, raw); ok {
 			usage := llm.Usage{PromptTokens: cached.PromptTok, CompletionTokens: cached.Completion}
 			g.record(key, model, "", usage, true, cached.Status, started)
@@ -80,10 +99,43 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			return c.Send(cached.Body)
 		}
 	}
-	prices, _ := g.Models.Prices(c.Context())
-	price := prices[model.Name]
-	if msg := g.quotaMessage(c, key, &price, req); msg != "" {
-		return presenter.Err(c, fiber.StatusTooManyRequests, msg, "insufficient_quota", "quota_exceeded")
+	prices, priceErr := g.Models.Prices(c.Context())
+	if priceErr != nil {
+		return presenter.ServerError(c, "failed to load model price")
+	}
+	price, priced := prices[model.Name]
+	var pricePtr *entities.Price
+	if priced {
+		pricePtr = &price
+	}
+	var reservation *quota.Reservation
+	streamOwnsReservation := false
+	defer func() {
+		if reservation != nil && !streamOwnsReservation && g.Quota != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = g.Quota.Release(ctx, reservation)
+		}
+	}()
+	if key.MonthlyQuotaUSD != nil {
+		if g.Quota == nil {
+			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")
+		}
+		estimate := entities.CalculateCost(pricePtr, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
+		spent, spendErr := g.Usage.MonthSpendForKey(c.Context(), key.ID)
+		if spendErr != nil {
+			return presenter.ServerError(c, "failed to load quota usage")
+		}
+		reservation, err = g.Quota.Reserve(c.Context(), key.ID, *key.MonthlyQuotaUSD, spent, estimate.USD, started)
+		if errors.Is(err, quota.ErrExceeded) {
+			return presenter.Err(c, fiber.StatusTooManyRequests, "monthly quota exceeded", "insufficient_quota", "quota_exceeded")
+		}
+		if errors.Is(err, quota.ErrUnavailable) {
+			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")
+		}
+		if err != nil {
+			return presenter.ServerError(c, "failed to reserve quota")
+		}
 	}
 	routes, err := g.Creds.Routes(c.Context(), model.Name)
 	if err != nil || len(routes) == 0 {
@@ -140,9 +192,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 		g.Health.Report(candidate.ID, true)
 		if req.Stream {
-			return g.stream(c, key, model, runtime, result, raw, deterministic, started)
+			streamOwnsReservation = true
+			return g.stream(c, key, model, runtime, result, raw, deterministic, started, pricePtr, reservation)
 		}
-		return g.nonStream(c, key, model, runtime, result, raw, deterministic, started)
+		return g.nonStream(c, key, model, runtime, result, raw, deterministic, started, pricePtr, reservation)
 	}
 	c.Set("X-Cache", "bypass")
 	g.record(key, model, lastCredential, llm.Usage{}, false, lastStatus, started)
@@ -205,19 +258,7 @@ func (g *Gateway) keyForSession(c fiber.Ctx, sess *entities.Session) (*entities.
 	return g.Keys.GetByID(c.Context(), sess.KeyID)
 }
 
-func (g *Gateway) quotaMessage(c fiber.Ctx, key *entities.ApiKey, price *entities.Price, req *llm.ChatRequest) string {
-	if key.MonthlyQuotaUSD == nil {
-		return ""
-	}
-	estimate := entities.ComputeCost(price, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
-	spent, err := g.Usage.MonthSpendForKey(c.Context(), key.ID)
-	if err == nil && spent+estimate > *key.MonthlyQuotaUSD {
-		return fmt.Sprintf("monthly quota exceeded: spent $%.4f, estimated next $%.4f", spent, estimate)
-	}
-	return ""
-}
-
-func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time) error {
+func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
 	defer result.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(result.Body, 32<<20))
 	if err != nil {
@@ -240,9 +281,14 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 	if usage.CompletionTokens == 0 {
 		usage.CompletionTokens = estimateResponseTokens(body)
 	}
-	g.record(key, model, runtime.ID, usage, false, result.StatusCode, started)
+	cost := entities.CalculateCost(price, usage.TokenUsage())
+	if err := g.settle(c.Context(), reservation, cost.USD); err != nil {
+		g.recordCost(key, model, runtime.ID, usage, false, fiber.StatusServiceUnavailable, started, cost)
+		return presenter.Err(c, fiber.StatusServiceUnavailable, "quota settlement is unavailable", "service_unavailable", "redis_unavailable")
+	}
+	g.recordCost(key, model, runtime.ID, usage, false, result.StatusCode, started, cost)
 	cacheStatus := "off"
-	if deterministic && g.Cache != nil {
+	if deterministic && g.cacheEnabled() {
 		g.Cache.Store(key.ID, key.TenantID, model.Name, raw, &chat.CacheEntry{Status: 200, ContentType: "application/json", Body: body, PromptTok: usage.PromptTokens, Completion: usage.CompletionTokens})
 		cacheStatus = "miss"
 	}
@@ -252,13 +298,13 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 	return c.Send(body)
 }
 
-func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time) error {
+func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
 	defer result.Body.Close()
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
 	c.Set("X-Upstream-Credential", runtime.ID)
-	if deterministic && g.Cache != nil {
+	if deterministic && g.cacheEnabled() {
 		c.Set("X-Cache", "miss")
 	} else {
 		c.Set("X-Cache", "off")
@@ -322,8 +368,18 @@ func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.Mode
 		if usage.CompletionTokens == 0 {
 			usage.CompletionTokens = llm.EstimateTextTokens(content.String())
 		}
-		g.record(key, model, runtime.ID, usage, false, streamStatus, started)
-		if streamStatus == fiber.StatusOK && deterministic && g.Cache != nil && content.Len() > 0 {
+		cost := entities.CalculateCost(price, usage.TokenUsage())
+		if streamStatus == fiber.StatusOK {
+			if err := g.settle(context.Background(), reservation, cost.USD); err != nil {
+				streamStatus = fiber.StatusServiceUnavailable
+			}
+		} else if reservation != nil && g.Quota != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = g.Quota.Release(ctx, reservation)
+			cancel()
+		}
+		g.recordCost(key, model, runtime.ID, usage, false, streamStatus, started, cost)
+		if streamStatus == fiber.StatusOK && deterministic && g.cacheEnabled() && content.Len() > 0 {
 			full := llm.Response{
 				ID: "chatcmpl-cache", Object: "chat.completion", Created: time.Now().Unix(), Model: model.Name,
 				Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: content.String()}, FinishReason: finishReason}},
@@ -359,12 +415,42 @@ func (g *Gateway) record(key *entities.ApiKey, model *entities.ModelDef, cred st
 		return
 	}
 	prices, _ := g.Models.Prices(context.Background())
-	p := prices[model.Name]
-	cost := entities.ComputeCost(&p, u.TokenUsage())
-	if hit {
-		cost = 0
+	p, ok := prices[model.Name]
+	var price *entities.Price
+	if ok {
+		price = &p
 	}
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: key.ID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds()})
+	cost := entities.CalculateCost(price, u.TokenUsage())
+	if hit {
+		cost = entities.Cost{USD: 0, Priced: true}
+	}
+	g.recordCost(key, model, cred, u, hit, status, started, cost)
+}
+
+func (g *Gateway) recordCost(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost) {
+	if g.Usage == nil {
+		return
+	}
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: key.ID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds()})
+}
+
+func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {
+	if reservation == nil || g.Quota == nil {
+		return nil
+	}
+	settleCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return g.Quota.Settle(settleCtx, reservation, actualUSD)
+}
+
+func (g *Gateway) cacheEnabled() bool {
+	if g.Cache == nil {
+		return false
+	}
+	if status, ok := g.Cache.(interface{ Enabled() bool }); ok {
+		return status.Enabled()
+	}
+	return true
 }
 
 func contentTypeOrJSON(contentType string) string {

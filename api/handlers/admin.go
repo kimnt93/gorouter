@@ -247,41 +247,69 @@ func (a *Admin) KeysDelete(c fiber.Ctx) error {
 func (a *Admin) ModelsList(c fiber.Ctx) error {
 	v, err := a.ModelsSvc.List(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to load models")
+	}
+	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+		credentials, listErr := a.CredsSvc.List(c.Context())
+		if listErr != nil {
+			return presenter.ServerError(c, "failed to filter model routes")
+		}
+		allowed := map[string]bool{}
+		for _, cred := range filterCredentials(credentials, sess.TenantID) {
+			allowed[cred.ID] = true
+		}
+		for i := range v {
+			routes := v[i].Routes[:0]
+			for _, route := range v[i].Routes {
+				if allowed[route.CredentialID] {
+					routes = append(routes, route)
+				}
+			}
+			v[i].Routes = routes
+		}
 	}
 	return c.JSON(v)
 }
 func (a *Admin) ModelUpsert(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can change global model routes")
+	}
 	var m entities.ModelDef
 	if err := c.Bind().Body(&m); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
 	m.Name = c.Params("name")
 	if err := a.ModelsSvc.Upsert(c.Context(), m); err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.BadRequest(c, err.Error())
 	}
 	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) ModelDelete(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can change global model routes")
+	}
 	if err := a.ModelsSvc.Delete(c.Context(), c.Params("name")); err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to delete model")
 	}
 	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) Price(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can change global prices")
+	}
 	var p entities.Price
 	if err := c.Bind().Body(&p); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
 	if err := a.ModelsSvc.SetPrice(c.Context(), c.Params("model"), p); err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.BadRequest(c, err.Error())
 	}
 	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) Prices(c fiber.Ctx) error {
 	v, err := a.ModelsSvc.Prices(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to load prices")
 	}
 	return c.JSON(v)
 }
@@ -293,20 +321,39 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	case "30d":
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	v, err := a.UsageSvc.Summary(c.Context(), since)
+	sess := SessionFrom(c)
+	var v *entities.UsageSummary
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		v, err = a.UsageSvc.SummaryForTenant(c.Context(), sess.TenantID, since)
+	} else {
+		v, err = a.UsageSvc.Summary(c.Context(), since)
+	}
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to load usage summary")
 	}
 	return c.JSON(v)
 }
 func (a *Admin) UsageRecent(c fiber.Ctx) error {
-	v, err := a.UsageSvc.Recent(c.Context(), 100)
+	sess := SessionFrom(c)
+	var v []entities.RecentEvent
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		v, err = a.UsageSvc.RecentForTenant(c.Context(), sess.TenantID, 100)
+	} else {
+		v, err = a.UsageSvc.Recent(c.Context(), 100)
+	}
 	if err != nil {
-		return presenter.ServerError(c, err.Error())
+		return presenter.ServerError(c, "failed to load recent usage")
 	}
 	return c.JSON(v)
 }
-func (a *Admin) CacheStats(c fiber.Ctx) error { return c.JSON(a.Cache.Stats()) }
+func (a *Admin) CacheStats(c fiber.Ctx) error {
+	if a.Cache == nil {
+		return c.JSON(chat.CacheStats{})
+	}
+	return c.JSON(a.Cache.Stats())
+}
 func (a *Admin) CacheFlush(c fiber.Ctx) error {
 	a.Cache.Flush()
 	return c.JSON(okResponse{OK: true})

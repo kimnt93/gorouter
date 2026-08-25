@@ -22,9 +22,11 @@ type Service struct {
 	repo    Repository
 	ch      chan entities.UsageEvent
 	stop    chan struct{}
+	force   chan struct{}
 	done    chan struct{}
 	pending *Pending
 	close   sync.Once
+	forcing sync.Once
 }
 
 var ErrClosed = errors.New("usage service closed")
@@ -33,7 +35,7 @@ func NewService(repo Repository, buffer int, pending *Pending) *Service {
 	if buffer <= 0 {
 		buffer = 1024
 	}
-	s := &Service{repo: repo, ch: make(chan entities.UsageEvent, buffer), stop: make(chan struct{}), done: make(chan struct{}), pending: pending}
+	s := &Service{repo: repo, ch: make(chan entities.UsageEvent, buffer), stop: make(chan struct{}), force: make(chan struct{}), done: make(chan struct{}), pending: pending}
 	go s.run()
 	return s
 }
@@ -65,8 +67,21 @@ func (s *Service) RecordContext(ctx context.Context, ev entities.UsageEvent) err
 }
 
 func (s *Service) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = s.CloseContext(ctx)
+}
+
+func (s *Service) CloseContext(ctx context.Context) error {
 	s.close.Do(func() { close(s.stop) })
-	<-s.done
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		s.forcing.Do(func() { close(s.force) })
+		<-s.done
+		return ctx.Err()
+	}
 }
 
 func (s *Service) run() {
@@ -112,7 +127,11 @@ func (s *Service) run() {
 				break
 			}
 			for len(batch) > 0 && !flush() {
-				time.Sleep(50 * time.Millisecond)
+				select {
+				case <-s.force:
+					return
+				case <-time.After(50 * time.Millisecond):
+				}
 			}
 			return
 		}

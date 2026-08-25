@@ -47,6 +47,10 @@ func NewService(repo Repository, box entities.SecretBox) *Service {
 type CreateInput = entities.CredentialInput
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.Credential, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
+	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
+	in.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
 	if err := validate(in); err != nil {
 		return nil, err
 	}

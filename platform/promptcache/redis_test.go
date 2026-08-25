@@ -32,10 +32,11 @@ func TestRedisSharedCacheAndIsolation(t *testing.T) {
 	one := NewRedis(a, Config{Scope: chat.ScopeKey, TTL: time.Minute, MaxEntryBytes: 4})
 	two := NewRedis(b, Config{Scope: chat.ScopeKey, TTL: time.Minute, MaxEntryBytes: 4})
 	prompt := []byte(fmt.Sprintf(`{"model":"m","messages":[{"content":%q}]}`, time.Now().String()))
+	cacheKey := redisKeyPrefix + BuildKey(ScopeID(chat.ScopeKey, "key-a", "tenant-a"), "m", prompt)
+	t.Cleanup(func() { _ = a.Del(context.Background(), cacheKey).Err() })
 	if !one.Store("key-a", "tenant-a", "m", prompt, &chat.CacheEntry{Status: 200, Body: []byte("1234")}) {
 		t.Fatal("store failed")
 	}
-	defer one.Flush()
 	if got, ok := two.Lookup("key-a", "tenant-a", "m", prompt); !ok || string(got.Body) != "1234" {
 		t.Fatal("second router instance did not share Redis cache")
 	}

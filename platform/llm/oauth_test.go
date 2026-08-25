@@ -25,11 +25,12 @@ func (s *tokenStore) UpdateOAuthTokens(_ context.Context, id, access, refresh st
 
 func TestAnthropicOAuthRefresherRotatesAndPersists(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
+		var request oauthTokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") != "old-refresh" || r.FormValue("client_id") != "client" {
-			t.Fatalf("unexpected refresh form: %v", r.Form)
+		if request.GrantType != "refresh_token" || request.RefreshToken != "old-refresh" || request.ClientID != "client" {
+			t.Fatalf("unexpected refresh request: %+v", request)
 		}
 		_ = json.NewEncoder(w).Encode(oauthTokenResponse{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresIn: 3600})
 	}))

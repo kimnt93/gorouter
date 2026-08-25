@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/kimnt93/gorouter/api/handlers"
 	"github.com/kimnt93/gorouter/api/routes"
@@ -16,6 +19,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/config"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
@@ -66,18 +70,47 @@ func main() {
 	if redisClient != nil {
 		defer redisClient.Close()
 	}
+	if redisClient == nil && cfg.RedisURL != "" {
+		redisOptions, parseErr := redis.ParseURL(cfg.RedisURL)
+		if parseErr != nil {
+			log.Fatal(parseErr)
+		}
+		redisClient = redis.NewClient(redisOptions)
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		pingErr := redisClient.Ping(pingCtx).Err()
+		cancel()
+		if pingErr != nil {
+			_ = redisClient.Close()
+			log.Fatal(pingErr)
+		}
+		defer redisClient.Close()
+	}
+	var quotaSvc quota.Coordinator
+	if redisClient != nil {
+		policy, parseErr := quota.ParsePolicy(cfg.Quota.RedisPolicy)
+		if parseErr != nil {
+			log.Fatal(parseErr)
+		}
+		quotaSvc, err = quota.NewRedis(redisClient, policy)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	client := llm.NewHTTPClient()
 	openai := &llm.OpenAIAdapter{HTTP: client}
 	anthropic := &llm.AnthropicAdapter{HTTP: client, OAuthClientID: cfg.OAuthClientID}
+	refresher := &llm.AnthropicOAuthRefresher{HTTP: client, TokenURL: cfg.OAuthTokenURL, ClientID: cfg.OAuthClientID, Persister: credSvc}
+	anthropic.Refresh = refresher.Refresh
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
 		Cache: cacheSvc, Auth: authSvc, OpenAI: openai, Anthropic: anthropic,
-		Selector: &chat.Selector{}, Health: chat.NewHealth(),
+		Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc,
 	}
 	app := routes.New(routes.Dependencies{
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
+		OpenAI: openai, Anthropic: anthropic, BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
 	})
 
 	go func() {

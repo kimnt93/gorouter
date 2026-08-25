@@ -1,11 +1,38 @@
 package credential
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
+
+type credentialRepoStub struct{ runtime *entities.CredentialRuntime }
+
+func (r credentialRepoStub) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
+	return nil, nil
+}
+func (r credentialRepoStub) List(context.Context) ([]entities.Credential, error) { return nil, nil }
+func (r credentialRepoStub) Delete(context.Context, string) error                { return nil }
+func (r credentialRepoStub) Runtime(context.Context, entities.SecretBox, string) (*entities.CredentialRuntime, error) {
+	return r.runtime, nil
+}
+func (r credentialRepoStub) UpdateOAuthTokens(context.Context, entities.SecretBox, string, string, string) error {
+	return nil
+}
+func (r credentialRepoStub) RoutesForModel(context.Context, string) ([]entities.RouteCandidate, error) {
+	return nil, nil
+}
+
+type connectivityProbeStub struct {
+	status int
+	err    error
+}
+
+func (p connectivityProbeStub) Probe(context.Context, *entities.CredentialRuntime) (int, error) {
+	return p.status, p.err
+}
 
 func TestValidateCredential(t *testing.T) {
 	tests := []struct {
@@ -30,5 +57,19 @@ func TestValidateCredential(t *testing.T) {
 	valid := CreateInput{Name: "anthropic", Provider: entities.ProviderAnthropic, Kind: entities.KindOAuth, OAuthRefresh: "refresh", BaseURL: "https://example.test"}
 	if err := validate(valid); err != nil {
 		t.Fatalf("valid credential rejected: %v", err)
+	}
+}
+
+func TestConnectivityDoesNotExposeProbeErrors(t *testing.T) {
+	runtime := &entities.CredentialRuntime{ID: "cred-1", Provider: entities.ProviderAnthropic}
+	service := NewService(credentialRepoStub{runtime: runtime}, nil)
+	result, err := service.TestConnectivity(context.Background(), runtime.ID, map[string]ConnectivityProber{
+		entities.ProviderAnthropic: connectivityProbeStub{err: errors.New("dial failed with sensitive diagnostics")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OK || result.Status != 0 {
+		t.Fatalf("unexpected connectivity result: %+v", result)
 	}
 }

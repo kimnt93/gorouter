@@ -10,5 +10,6 @@ func (Noop) Store(string, string, string, []byte, *chat.CacheEntry) bool    { re
 func (Noop) Flush()                                                         {}
 func (Noop) Stats() chat.CacheStats                                         { return chat.CacheStats{} }
 func (Noop) Close()                                                         {}
+func (Noop) Enabled() bool                                                  { return false }
 
 var _ chat.PromptCache = Noop{}

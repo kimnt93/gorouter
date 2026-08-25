@@ -29,6 +29,8 @@ type Dependencies struct {
 	Usage       *usage.Service
 	Cache       chat.PromptCache
 	Gateway     *handlers.Gateway
+	OpenAI      credential.ConnectivityProber
+	Anthropic   credential.ConnectivityProber
 	BodyLimit   int
 	ReadTimeout time.Duration
 }
@@ -64,10 +66,14 @@ func New(d Dependencies) *fiber.App {
 	app.Get("/ui/usage", handlers.Require(d.Auth, entities.ScopeUsageRead), ui.UsagePage)
 	app.Get("/ui/keys", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeysPage)
 	app.Post("/ui/keys", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeysCreate)
+	app.Post("/ui/keys/:id/toggle", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeyToggle)
+	app.Delete("/ui/keys/:id", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeyDelete)
 	app.Get("/ui/credentials", handlers.Require(d.Auth, entities.ScopeCredentialsManage), ui.CredentialsPage)
 	app.Post("/ui/credentials", handlers.Require(d.Auth, entities.ScopeCredentialsManage), ui.CredentialsCreate)
+	app.Delete("/ui/credentials/:id", handlers.Require(d.Auth, entities.ScopeCredentialsManage), ui.CredentialDelete)
 	app.Get("/ui/models", handlers.Require(d.Auth, entities.ScopeModelsManage), ui.ModelsPage)
 	app.Post("/ui/models", handlers.Require(d.Auth, entities.ScopeModelsManage), ui.ModelsCreate)
+	app.Delete("/ui/models/:name", handlers.Require(d.Auth, entities.ScopeModelsManage), ui.ModelDelete)
 	app.Get("/ui/cache-page", handlers.Require(d.Auth, entities.ScopeCachePurge), ui.CachePage)
 	app.Post("/ui/cache/flush", handlers.Require(d.Auth, entities.ScopeCachePurge), ui.CacheFlush)
 
@@ -82,6 +88,8 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Get("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Delete("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
+	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic}
+	mgmt.Post("/credentials/:id/test", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Test)
 	mgmt.Get("/api-keys", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.KeysList)
 	mgmt.Post("/api-keys", handlers.Require(d.Auth, "keys:manage"), admin.KeysCreate)
 	mgmt.Patch("/api-keys/:id", handlers.Require(d.Auth, "keys:manage"), admin.KeysPatch)

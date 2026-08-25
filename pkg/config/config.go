@@ -10,16 +10,18 @@ import (
 )
 
 type Config struct {
-	Listen        string
-	DatabaseURL   string
-	RedisURL      string
-	MasterKey     string
-	EncryptionKey string
-	SessionSecret string
-	RequestLimit  int64
-	Cache         CacheConfig
-	Quota         QuotaConfig
-	OAuthClientID string
+	Listen         string
+	DatabaseURL    string
+	RedisURL       string
+	MasterKey      string
+	EncryptionKey  string
+	SessionSecret  string
+	RequestLimit   int64
+	RequestTimeout time.Duration
+	Cache          CacheConfig
+	Quota          QuotaConfig
+	OAuthClientID  string
+	OAuthTokenURL  string
 }
 
 type CacheConfig struct {
@@ -37,14 +39,16 @@ type QuotaConfig struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		Listen:        env("LISTEN", ":8090"),
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		RedisURL:      os.Getenv("REDIS_URL"),
-		MasterKey:     os.Getenv("MASTER_KEY"),
-		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
-		SessionSecret: os.Getenv("SESSION_SECRET"),
-		RequestLimit:  int64(envInt("REQUEST_LIMIT_MB", 20)) << 20,
-		OAuthClientID: env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+		Listen:         env("LISTEN", ":8090"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		RedisURL:       os.Getenv("REDIS_URL"),
+		MasterKey:      os.Getenv("MASTER_KEY"),
+		EncryptionKey:  os.Getenv("ENCRYPTION_KEY"),
+		SessionSecret:  os.Getenv("SESSION_SECRET"),
+		RequestLimit:   int64(envInt("REQUEST_LIMIT_MB", 20)) << 20,
+		RequestTimeout: 5 * time.Minute,
+		OAuthClientID:  env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+		OAuthTokenURL:  os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
 		Cache: CacheConfig{
 			Enabled:       true,
 			TTL:           24 * time.Hour,
@@ -76,6 +80,13 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid CACHE_TTL: %w", err)
 		}
 		cfg.Cache.TTL = d
+	}
+	if v := os.Getenv("REQUEST_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.New("REQUEST_TIMEOUT must be a positive duration")
+		}
+		cfg.RequestTimeout = d
 	}
 	if v := os.Getenv("CACHE_MAX_ENTRY_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)

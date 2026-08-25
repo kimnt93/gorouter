@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-const defaultAnthropicOAuthTokenURL = "https://console.anthropic.com/v1/oauth/token"
+const defaultAnthropicOAuthTokenURL = "https://api.anthropic.com/v1/oauth/token"
 
 type OAuthTokenPersister interface {
 	UpdateOAuthTokens(ctx context.Context, id, access, refresh string) error
@@ -34,6 +33,12 @@ type oauthTokenResponse struct {
 	ExpiresIn    int64  `json:"expires_in,omitempty"`
 }
 
+type oauthTokenRequest struct {
+	GrantType    string `json:"grant_type"`
+	RefreshToken string `json:"refresh_token"`
+	ClientID     string `json:"client_id"`
+}
+
 func (r *AnthropicOAuthRefresher) Refresh(ctx context.Context, cr *entities.CredentialRuntime) error {
 	if cr == nil || cr.Kind != entities.KindOAuth || strings.TrimSpace(cr.OAuthRefreh) == "" {
 		return errors.New("oauth refresh token is unavailable")
@@ -46,18 +51,16 @@ func (r *AnthropicOAuthRefresher) Refresh(ctx context.Context, cr *entities.Cred
 	if endpoint == "" {
 		endpoint = defaultAnthropicOAuthTokenURL
 	}
-	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {cr.OAuthRefreh},
-	}
-	if r.ClientID != "" {
-		form.Set("client_id", r.ClientID)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	payload, err := json.Marshal(oauthTokenRequest{GrantType: "refresh_token", RefreshToken: cr.OAuthRefreh, ClientID: r.ClientID})
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("oauth token request: %w", err)

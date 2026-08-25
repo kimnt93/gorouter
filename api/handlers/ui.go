@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -40,21 +41,22 @@ type UI struct {
 }
 
 type pageData struct {
-	Title          string
-	Session        *entities.Session
-	CanUsage       bool
-	CanKeys        bool
-	CanCredentials bool
-	CanModels      bool
-	CanCache       bool
-	Cache          chat.CacheStats
-	Keys           []entities.ApiKey
-	Tenants        []entities.Tenant
-	Credentials    []entities.Credential
-	Models         []entities.ModelDef
-	Summary        *entities.UsageSummary
-	Recent         []entities.RecentEvent
-	CreatedSecret  string
+	Title           string
+	Session         *entities.Session
+	CanUsage        bool
+	CanKeys         bool
+	CanCredentials  bool
+	CanModels       bool
+	CanCache        bool
+	CanManageGlobal bool
+	Cache           chat.CacheStats
+	Keys            []entities.ApiKey
+	Tenants         []entities.Tenant
+	Credentials     []entities.Credential
+	Models          []entities.ModelDef
+	Summary         *entities.UsageSummary
+	Recent          []entities.RecentEvent
+	CreatedSecret   string
 }
 
 func (u *UI) page(c fiber.Ctx, title string) pageData {
@@ -66,6 +68,7 @@ func (u *UI) page(c fiber.Ctx, title string) pageData {
 		data.CanCredentials = sess.Has(entities.ScopeCredentialsManage)
 		data.CanModels = sess.Has(entities.ScopeModelsManage)
 		data.CanCache = sess.Has(entities.ScopeCachePurge)
+		data.CanManageGlobal = sess.IsMaster()
 	}
 	if u.Cache != nil {
 		data.Cache = u.Cache.Stats()
@@ -120,6 +123,37 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	return renderTemplate(c, "keys.html", data)
 }
 
+func (u *UI) KeyToggle(c fiber.Ctx) error {
+	enabled, err := strconv.ParseBool(c.FormValue("enabled"))
+	if err != nil {
+		return presenter.BadRequest(c, "enabled must be true or false")
+	}
+	sess := SessionFrom(c)
+	if sess != nil && !sess.IsMaster() {
+		err = u.Keys.PatchForTenant(c.Context(), sess.TenantID, c.Params("id"), &enabled, nil, nil, nil, nil)
+	} else {
+		err = u.Keys.Patch(c.Context(), c.Params("id"), &enabled, nil, nil, nil, nil)
+	}
+	if err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return u.redirectOrRefresh(c, "/ui/keys", u.KeysPage)
+}
+
+func (u *UI) KeyDelete(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	var err error
+	if sess != nil && !sess.IsMaster() {
+		err = u.Keys.DeleteForTenant(c.Context(), sess.TenantID, c.Params("id"))
+	} else {
+		err = u.Keys.Delete(c.Context(), c.Params("id"))
+	}
+	if err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return u.redirectOrRefresh(c, "/ui/keys", u.KeysPage)
+}
+
 func (u *UI) loadKeys(c fiber.Ctx, created string) (pageData, error) {
 	data := u.page(c, "API keys")
 	sess := SessionFrom(c)
@@ -158,7 +192,21 @@ func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.Redirect().To("/ui/credentials")
+	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
+}
+
+func (u *UI) CredentialDelete(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	if sess != nil && !sess.IsMaster() && !u.tenantOwnsCredential(c, sess.TenantID, c.Params("id")) {
+		return presenter.NotFound(c, "credential not found")
+	}
+	if err := u.Credentials.Delete(c.Context(), c.Params("id")); err != nil {
+		if errors.Is(err, entities.ErrNotFound) {
+			return presenter.NotFound(c, "credential not found")
+		}
+		return presenter.ServerError(c, "failed to delete credential")
+	}
+	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
 }
 
 func (u *UI) loadCredentials(c fiber.Ctx) (pageData, error) {
@@ -210,15 +258,15 @@ func (u *UI) ModelsPage(c fiber.Ctx) error {
 }
 
 func (u *UI) ModelsCreate(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can change global model routes")
+	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	weight, _ := strconv.Atoi(c.FormValue("weight"))
 	if weight <= 0 {
 		weight = 1
 	}
 	credentialID := strings.TrimSpace(c.FormValue("credential_id"))
-	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() && !u.tenantOwnsCredential(c, sess.TenantID, credentialID) {
-		return presenter.Forbidden(c, "credential does not belong to this tenant")
-	}
 	routes := []entities.ModelRoute{}
 	if credentialID != "" {
 		routes = append(routes, entities.ModelRoute{CredentialID: credentialID, Priority: priority, Weight: weight, Enabled: true})
@@ -227,17 +275,40 @@ func (u *UI) ModelsCreate(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.Redirect().To("/ui/models")
+	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
+}
+
+func (u *UI) ModelDelete(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only the master session can change global model routes")
+	}
+	if err := u.Models.Delete(c.Context(), c.Params("name")); err != nil {
+		if errors.Is(err, entities.ErrNotFound) {
+			return presenter.NotFound(c, "model not found")
+		}
+		return presenter.ServerError(c, "failed to delete model")
+	}
+	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
 }
 
 func (u *UI) UsagePage(c fiber.Ctx) error {
 	data := u.page(c, "Usage")
 	var err error
-	data.Summary, err = u.Usage.Summary(c.Context(), time.Now().Add(-30*24*time.Hour))
+	since := time.Now().Add(-30 * 24 * time.Hour)
+	sess := SessionFrom(c)
+	if sess != nil && !sess.IsMaster() {
+		data.Summary, err = u.Usage.SummaryForTenant(c.Context(), sess.TenantID, since)
+	} else {
+		data.Summary, err = u.Usage.Summary(c.Context(), since)
+	}
 	if err != nil {
 		return presenter.ServerError(c, "failed to load usage summary")
 	}
-	data.Recent, err = u.Usage.Recent(c.Context(), 100)
+	if sess != nil && !sess.IsMaster() {
+		data.Recent, err = u.Usage.RecentForTenant(c.Context(), sess.TenantID, 100)
+	} else {
+		data.Recent, err = u.Usage.Recent(c.Context(), 100)
+	}
 	if err != nil {
 		return presenter.ServerError(c, "failed to load recent usage")
 	}
@@ -252,7 +323,14 @@ func (u *UI) CacheFlush(c fiber.Ctx) error {
 	if u.Cache != nil {
 		u.Cache.Flush()
 	}
-	return c.Redirect().To("/ui/cache-page")
+	return u.redirectOrRefresh(c, "/ui/cache-page", u.CachePage)
+}
+
+func (u *UI) redirectOrRefresh(c fiber.Ctx, location string, refresh fiber.Handler) error {
+	if c.Get("HX-Request") == "true" {
+		return refresh(c)
+	}
+	return c.Redirect().To(location)
 }
 
 func (u *UI) tenantOwnsCredential(c fiber.Ctx, tenantID, credentialID string) bool {
