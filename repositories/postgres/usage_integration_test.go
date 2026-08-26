@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/platform/database"
 )
 
@@ -36,9 +37,12 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM usage_events WHERE api_key_id IN ($1,$2)`, keyA, keyB)
 	})
+	now := time.Now().UTC()
 	_, err = pool.Exec(ctx, `INSERT INTO usage_events
-		(ts,tenant_id,api_key_id,model,cost_usd,priced) VALUES
-		(now(),$1,$2,'model-a',1,true),(now(),$3,$4,'model-b',2,true)`, id+"-tenant-a", keyA, id+"-tenant-b", keyB)
+		(event_id,ts,tenant_id,api_key_id,model,cost_usd,priced) VALUES
+		($1,$2,$3,$4,'model-a',1,true),($5,$6,$7,$8,'model-b',2,true)`,
+		entities.NewID("usage"), now, id+"-tenant-a", keyA,
+		entities.NewID("usage"), now, id+"-tenant-b", keyB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +58,7 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recent) != 1 || recent[0].TenantID != id+"-tenant-a" || recent[0].KeyID != keyA {
+	if len(recent) != 1 || recent[0].ID == "" || recent[0].TS.IsZero() || recent[0].TenantID != id+"-tenant-a" || recent[0].KeyID != keyA {
 		t.Fatalf("tenant recent usage leaked: %+v", recent)
 	}
 }

@@ -134,7 +134,6 @@ type ModelDef struct {
 
 type UsageEvent struct {
 	ID               string    `json:"id"`
-	Sequence         int64     `json:"-"`
 	TS               time.Time `json:"ts"`
 	TenantID         string    `json:"tenant_id"`
 	ApiKeyID         string    `json:"api_key_id"`

@@ -91,6 +91,9 @@ func TestServiceRetriesAndTracksPending(t *testing.T) {
 	if len(repo.events) != 1 {
 		t.Fatalf("want one durable event, got %d", len(repo.events))
 	}
+	if repo.events[0].ID == "" || repo.events[0].TS.IsZero() {
+		t.Fatalf("backend did not assign usage identity/time: %+v", repo.events[0])
+	}
 }
 
 type concurrencyRepo struct {

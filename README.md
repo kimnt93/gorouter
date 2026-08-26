@@ -73,6 +73,10 @@ The two profiles are standalone alternatives. PostgreSQL stores relational confi
 usage events; ClickHouse stores configuration in versioned records and usage in a MergeTree.
 The ClickHouse profile does not start or require PostgreSQL.
 
+The process selects exactly one primary store at startup from `DB_BACKEND`; it never writes
+configuration or usage to both databases. All persisted identifiers and timestamps are created
+in the Go backend and passed explicitly to SQL inserts—database ID/time defaults are disabled.
+
 Open <http://localhost:8090/> and sign in with your master key.
 
 Then point any OpenAI SDK at it:

@@ -347,7 +347,7 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 	if oversized != nil {
 		oversized.Body.Close()
 	}
-	if _, err := h.db.Pool.Exec(context.Background(), `INSERT INTO tenants (id,name) VALUES ('tenant_private','private') ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := h.db.Pool.Exec(context.Background(), `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, "tenant_private", "private", time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	privateTenant := "tenant_private"

@@ -153,7 +153,9 @@ func (r *ModelRouteRepo) ReplaceCatalogPrices(ctx context.Context, source string
 	now := time.Now().UTC()
 	for _, item := range prices {
 		updatedAt := item.UpdatedAt.UTC()
-		if item.UpdatedAt.IsZero() { updatedAt = now }
+		if item.UpdatedAt.IsZero() {
+			updatedAt = now
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO catalog_prices
 			(model,name,provider,context_length,cache_supported,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m,source,updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)

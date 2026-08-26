@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -18,7 +19,7 @@ type Store struct{ Conn ch.Conn }
 
 func New(conn ch.Conn) *Store { return &Store{Conn: conn} }
 
-func id(prefix string) string { return entities.NewID(prefix) }
+func id(prefix string) string    { return entities.NewID(prefix) }
 func HashSecret(v string) string { h := sha256.Sum256([]byte(v)); return hex.EncodeToString(h[:]) }
 func GenerateSecret() string {
 	b := make([]byte, 24)

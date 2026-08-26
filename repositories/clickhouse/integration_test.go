@@ -85,4 +85,8 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	if err != nil || spent != .25 {
 		t.Fatalf("spend=%v err=%v", spent, err)
 	}
+	recent, err := usage.RecentForTenant(ctx, tenant.ID, 10)
+	if err != nil || len(recent) != 1 || recent[0].ID == "" || recent[0].TS.IsZero() {
+		t.Fatalf("usage identity/time=%+v err=%v", recent, err)
+	}
 }

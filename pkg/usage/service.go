@@ -57,9 +57,14 @@ func NewServiceWithConcurrency(repo Repository, buffer, concurrency int, pending
 func (s *Service) Record(ev entities.UsageEvent) { _ = s.RecordContext(context.Background(), ev) }
 
 func (s *Service) RecordContext(ctx context.Context, ev entities.UsageEvent) error {
-	if ev.ID == "" { ev.ID = entities.NewID("usage") }
-	if ev.Sequence == 0 { ev.Sequence = entities.NewSequence() }
-	if ev.TS.IsZero() { ev.TS = time.Now().UTC() } else { ev.TS = ev.TS.UTC() }
+	if ev.ID == "" {
+		ev.ID = entities.NewID("usage")
+	}
+	if ev.TS.IsZero() {
+		ev.TS = time.Now().UTC()
+	} else {
+		ev.TS = ev.TS.UTC()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {

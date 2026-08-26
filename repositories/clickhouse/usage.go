@@ -27,8 +27,14 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		return e
 	}
 	for _, v := range events {
-		if v.ID == "" { v.ID = entities.NewID("usage") }
-		if v.TS.IsZero() { v.TS = time.Now().UTC() } else { v.TS = v.TS.UTC() }
+		if v.ID == "" {
+			v.ID = entities.NewID("usage")
+		}
+		if v.TS.IsZero() {
+			v.TS = time.Now().UTC()
+		} else {
+			v.TS = v.TS.UTC()
+		}
 		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error); e != nil {
 			return e
 		}
@@ -108,9 +114,11 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	out := []entities.RecentEvent{}
 	for rows.Next() {
 		var v entities.RecentEvent
-		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &v.StatusCode, &v.DurationMS, &v.Error); e != nil {
+		var statusCode int32
+		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &statusCode, &v.DurationMS, &v.Error); e != nil {
 			return nil, e
 		}
+		v.StatusCode = int(statusCode)
 		out = append(out, v)
 	}
 	return out, rows.Err()
