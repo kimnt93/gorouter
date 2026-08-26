@@ -105,3 +105,23 @@ func TestReadCursorFramesDecodesMCPToolCall(t *testing.T) {
 		t.Fatalf("decoded tool call = %+v", call)
 	}
 }
+
+func TestReadCursorFramesAcknowledgesKVSetBlob(t *testing.T) {
+	kvMessage := bytes.Join([][]byte{
+		append(protoTag(1, 0), protoVarint(12)...),
+		protoBytes(3, append(protoBytes(1, []byte("blob")), protoBytes(2, []byte("data"))...)),
+		protoBytes(4, []byte("metadata")),
+	}, nil)
+	var replies bytes.Buffer
+	if err := readCursorFrames(bytes.NewReader(cursorConnectFrame(protoBytes(4, kvMessage))), &replies, func(cursorEvent) {}); err != nil {
+		t.Fatal(err)
+	}
+	if replies.Len() < 5 {
+		t.Fatal("KV set acknowledgement was not written")
+	}
+	payload := replies.Bytes()[5:]
+	kvClient := protoField(payload, 3)
+	if protoField(kvClient, 3) == nil || string(protoField(kvClient, 4)) != "metadata" {
+		t.Fatalf("KV acknowledgement payload = %x", payload)
+	}
+}

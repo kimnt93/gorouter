@@ -488,6 +488,34 @@ func cursorExecResponse(event *cursorExecEvent) []byte {
 	return cursorConnectFrame(protoBytes(2, inner))
 }
 
+func cursorKVResponse(payload []byte) []byte {
+	messages := protoFields(payload, 4)
+	if len(messages) == 0 {
+		return nil
+	}
+	message := messages[0]
+	var id uint64
+	if values := protoFields(message, 1); len(values) > 0 {
+		offset := 0
+		id, _ = readProtoVarint(values[0], &offset)
+	}
+	parts := [][]byte{}
+	if id != 0 {
+		parts = append(parts, append(protoTag(1, 0), protoVarint(id)...))
+	}
+	if protoField(message, 2) != nil {
+		parts = append(parts, protoBytes(2, protoBytes(1, nil)))
+	} else if protoField(message, 3) != nil {
+		parts = append(parts, protoBytes(3, nil))
+	} else {
+		return nil
+	}
+	if metadata := protoField(message, 4); len(metadata) > 0 {
+		parts = append(parts, protoBytes(4, metadata))
+	}
+	return cursorConnectFrame(protoBytes(3, bytes.Join(parts, nil)))
+}
+
 func readCursorFrames(reader io.Reader, responder io.Writer, visit func(cursorEvent)) error {
 	header := make([]byte, 5)
 	for {
@@ -517,7 +545,12 @@ func readCursorFrames(reader io.Reader, responder io.Writer, visit func(cursorEv
 			}
 		}
 		if header[0]&2 != 0 {
-			continue
+			return nil
+		}
+		if response := cursorKVResponse(payload); len(response) > 0 && responder != nil {
+			if _, err := responder.Write(response); err != nil {
+				return err
+			}
 		}
 		if execEvent := cursorExecServerEvent(payload); execEvent != nil {
 			if response := cursorExecResponse(execEvent); len(response) > 0 && responder != nil {
@@ -531,6 +564,9 @@ func readCursorFrames(reader io.Reader, responder io.Writer, visit func(cursorEv
 					Type:     "function",
 					Function: ToolFunction{Name: execEvent.ToolName, Arguments: execEvent.Arguments},
 				}})
+				// Cursor pauses here waiting for the tool result. Finish this OpenAI
+				// turn; the next request cold-resumes from the supplied tool history.
+				return nil
 			}
 		}
 		for _, interaction := range protoFields(payload, 1) {
@@ -545,6 +581,9 @@ func readCursorFrames(reader io.Reader, responder io.Writer, visit func(cursorEv
 				offset := 0
 				n, _ := readProtoVarint(raw, &offset)
 				visit(cursorEvent{Kind: "tokens", Tokens: int64(n)})
+			}
+			if len(protoFields(interaction, 14)) > 0 {
+				return nil
 			}
 		}
 	}
