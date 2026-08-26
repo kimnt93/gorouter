@@ -51,9 +51,9 @@ export async function requestStream(path: string, body: object, onText: (text: s
 function applyFilters(params: URLSearchParams, filters: UsageFilters): void {
   params.set('range', filters.range)
   params.set('group_by', filters.groupBy)
-  if (filters.userId) params.set('user_id', filters.userId)
-  if (filters.apiKeyId) params.set('api_key_id', filters.apiKeyId)
-  if (filters.organizationId) params.set('organization_id', filters.organizationId)
+  if (filters.userIds.length) params.set('user_id', filters.userIds.join(','))
+  if (filters.apiKeyIds.length) params.set('api_key_id', filters.apiKeyIds.join(','))
+  if (filters.organizationIds.length) params.set('organization_id', filters.organizationIds.join(','))
   if (filters.range === 'custom') {
     if (filters.since) params.set('since', new Date(filters.since).toISOString())
     if (filters.until) params.set('until', new Date(filters.until).toISOString())
@@ -68,9 +68,9 @@ export function getActivity(filters: UsageFilters): Promise<UsageActivityRespons
 
 export function getRecent(filters: UsageFilters, cursor = ''): Promise<UsageRecentResponse> {
   const params = new URLSearchParams({ limit: '100' })
-  if (filters.userId) params.set('user_id', filters.userId)
-  if (filters.apiKeyId) params.set('api_key_id', filters.apiKeyId)
-  if (filters.organizationId) params.set('organization_id', filters.organizationId)
+  if (filters.userIds.length) params.set('user_id', filters.userIds.join(','))
+  if (filters.apiKeyIds.length) params.set('api_key_id', filters.apiKeyIds.join(','))
+  if (filters.organizationIds.length) params.set('organization_id', filters.organizationIds.join(','))
   if (filters.model) params.set('model', filters.model)
   if (filters.status) params.set('status', filters.status)
   if (cursor) params.set('cursor', cursor)
@@ -122,7 +122,7 @@ export const createCredential = (body: object): Promise<Credential> => request('
 export const updateCredential = (id: string, body: object): Promise<Credential> => request(`/admin/credentials/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) })
 export const deleteCredential = (id: string): Promise<{ ok: boolean }> => request(`/admin/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const testCredential = (id: string): Promise<ConnectivityResult> => request(`/admin/credentials/${encodeURIComponent(id)}/test`, { method: 'POST' })
-export const getCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`)
+export const getCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`, { cache: 'no-store' })
 export const refreshCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`, { method: 'POST' })
 export const discoverModels = (id: string): Promise<ProviderModelsResponse> => request(`/admin/credentials/${encodeURIComponent(id)}/models`)
 export const importModels = (id: string, models: string[]): Promise<{ ok: boolean; imported: string[] }> => request(`/admin/credentials/${encodeURIComponent(id)}/models/import`, { method: 'POST', body: JSON.stringify({ models }) })

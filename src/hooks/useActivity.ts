@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { getActivity } from '../api/client'
-import type { UsageActivityBucket, UsageFilters } from '../api/contracts'
+import type { UsageActivityBucket, UsageFilters, UsageSummary } from '../api/contracts'
 
 export function useActivity(filters: UsageFilters) {
   const [data, setData] = useState<UsageActivityBucket[]>([])
+  const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [version, setVersion] = useState(0)
@@ -12,8 +13,8 @@ export function useActivity(filters: UsageFilters) {
     let live = true
     setLoading(true)
     setError('')
-    void getActivity(filters).then((response) => { if (live) setData(response.data) }).catch((reason: Error) => { if (live) setError(reason.message) }).finally(() => { if (live) setLoading(false) })
+    void getActivity(filters).then((response) => { if (live) { setData(response.data); setSummary(response.summary) } }).catch((reason: Error) => { if (live) setError(reason.message) }).finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [filters, version])
-  return { data, loading, error, retry: () => setVersion((value) => value + 1) }
+  return { data, summary, loading, error, retry: () => setVersion((value) => value + 1) }
 }

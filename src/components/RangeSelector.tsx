@@ -5,24 +5,23 @@ const ranges: Array<{ value: RangePreset; label: string }> = [
   { value: '90d', label: '90D' }, { value: 'ytd', label: 'YTD' }, { value: 'all', label: 'All' }, { value: 'custom', label: 'Custom' },
 ]
 
-interface Props {
-  filters: UsageFilters
-  onChange: (filters: UsageFilters) => void
-  users: User[]
-  apiKeys: APIKey[]
-  organizations?: Organization[]
-}
+interface Props { filters: UsageFilters; onChange: (filters: UsageFilters) => void; users: User[]; apiKeys: APIKey[]; organizations?: Organization[] }
 
 export function RangeSelector({ filters, onChange, users, apiKeys, organizations = [] }: Props) {
   const set = <K extends keyof UsageFilters>(key: K, value: UsageFilters[K]) => onChange({ ...filters, [key]: value })
-  return <div className="filter-panel">
-    <div className="filter-row">
-      <div className="segmented" aria-label="Date range">{ranges.map((range) => <button key={range.value} className={filters.range === range.value ? 'selected' : ''} onClick={() => set('range', range.value)}>{range.label}</button>)}</div>
-      <label className="select-field"><span>User</span><select value={filters.userId} onChange={(event) => set('userId', event.target.value)}><option value="">All visible users</option>{users.map((user) => <option key={user.id} value={user.id}>{user.username}</option>)}</select></label>
-      <label className="select-field"><span>API key</span><select value={filters.apiKeyId} onChange={(event) => set('apiKeyId', event.target.value)}><option value="">All visible keys</option>{apiKeys.map((key) => <option key={key.id} value={key.id}>{key.name} · {key.key_prefix}</option>)}</select></label>
-      {organizations.length > 0 && <label className="select-field"><span>Organization</span><select value={filters.organizationId ?? ''} onChange={(event) => set('organizationId', event.target.value)}><option value="">All visible</option>{organizations.map((organization) => <option value={organization.id} key={organization.id}>{organization.name}</option>)}</select></label>}
-      <label className="select-field small"><span>Group by</span><select value={filters.groupBy} onChange={(event) => set('groupBy', event.target.value as GroupBy)}><option value="hour">Hour</option><option value="day">Day</option><option value="week">Week</option></select></label>
-    </div>
+  const options = filters.filterType === 'user'
+    ? users.map((user) => ({ id: user.id, label: user.username }))
+    : filters.filterType === 'api_key'
+      ? apiKeys.map((key) => ({ id: key.id, label: `${key.name} · ${key.key_prefix}` }))
+      : organizations.map((organization) => ({ id: organization.id, label: organization.name }))
+  const selected = filters.filterType === 'user' ? filters.userIds : filters.filterType === 'api_key' ? filters.apiKeyIds : filters.organizationIds
+  const selectedKey: 'userIds' | 'apiKeyIds' | 'organizationIds' = filters.filterType === 'user' ? 'userIds' : filters.filterType === 'api_key' ? 'apiKeyIds' : 'organizationIds'
+  const toggle = (id: string) => set(selectedKey, selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id])
+  const setType = (value: UsageFilters['filterType']) => onChange({ ...filters, filterType: value, userIds: [], apiKeyIds: [], organizationIds: [] })
+  return <div className="filter-panel usage-filter-panel">
+    <div className="filter-block"><span className="filter-label">Range</span><div className="segmented" aria-label="Date range">{ranges.map((range) => <button key={range.value} className={filters.range === range.value ? 'selected' : ''} onClick={() => set('range', range.value)}>{range.label}</button>)}</div></div>
+    <div className="identity-filter-row"><label className="select-field filter-type"><span>Filter by</span><select value={filters.filterType} onChange={(event) => setType(event.target.value as UsageFilters['filterType'])}><option value="user">User</option><option value="api_key">API key</option><option value="organization">Organization</option></select></label><details className="multi-picker"><summary>{selected.length ? `${selected.length} selected` : `All ${filters.filterType.replace('_', ' ')}s`}</summary><div className="multi-picker-menu">{options.length === 0 ? <small>No visible values</small> : options.map((option) => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} onChange={() => toggle(option.id)} /><span>{option.label}</span></label>)}</div></details><div className="filter-chips">{selected.map((id) => <button key={id} onClick={() => toggle(id)}>{options.find((option) => option.id === id)?.label ?? id}<span>×</span></button>)}</div></div>
+    <div className="filter-block resolution-block"><span className="filter-label">Resolution</span><div className="segmented resolution" aria-label="Resolution">{(['hour', 'day', 'week'] as GroupBy[]).map((group) => <button key={group} className={filters.groupBy === group ? 'selected' : ''} onClick={() => set('groupBy', group)}>{group[0].toUpperCase() + group.slice(1)}</button>)}</div></div>
     {filters.range === 'custom' && <div className="custom-range"><label><span>From</span><input type="datetime-local" value={filters.since} onChange={(event) => set('since', event.target.value)} /></label><label><span>To</span><input type="datetime-local" value={filters.until} onChange={(event) => set('until', event.target.value)} /></label></div>}
   </div>
 }

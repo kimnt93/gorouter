@@ -41,11 +41,25 @@ export interface UsageActivityBucket {
   cache_read_tokens: number
   cache_write_tokens: number
   cost_usd: number
+  input_cost_usd: number
+  output_cost_usd: number
+  cache_read_cost_usd: number
+  cache_write_cost_usd: number
+  user_id: string
+  username: string
+}
+
+export interface ModelUsageSummary { requests: number; cost_usd: number; in_tokens: number; out_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
+export interface UsageSummary {
+  requests: number; cache_hits: number; cost_usd: number; prompt_tokens: number; completion_tokens: number
+  cache_read_tokens: number; cache_write_tokens: number; input_cost_usd: number; output_cost_usd: number
+  cache_read_cost_usd: number; cache_write_cost_usd: number; by_model: Record<string, ModelUsageSummary>
 }
 
 export interface UsageActivityResponse {
   group_by: GroupBy
   data: UsageActivityBucket[]
+  summary: UsageSummary
 }
 
 export interface User {
@@ -100,12 +114,12 @@ export interface ProviderDefinition {
 export interface ProviderQuotaWindow { name: string; used_percent: number; remaining_percent: number; reset_at?: string }
 export interface ProviderQuotaSnapshot {
   credential_id: string; provider: string; account: string; plan?: string; fetched_at?: string
-  available: boolean; windows: ProviderQuotaWindow[]; message?: string
+  available: boolean; windows: ProviderQuotaWindow[]; message?: string; in_use?: boolean
 }
 
 export interface Credential {
   id: string; name: string; provider: string; kind: string; base_url: string; status: string
-  key_preview?: string; owner_tenant_id: string | null; created_at: string
+  key_preview?: string; owner_tenant_id: string | null; owner_user_id?: string; created_at: string
 }
 
 export interface ConnectivityResult { ok: boolean; status?: number; latency_ms: number }
@@ -142,11 +156,12 @@ export type GroupBy = 'hour' | 'day' | 'week'
 export interface UsageFilters {
   range: RangePreset
   groupBy: GroupBy
-  userId: string
-  apiKeyId: string
+  filterType: 'user' | 'api_key' | 'organization'
+  userIds: string[]
+  apiKeyIds: string[]
+  organizationIds: string[]
   since: string
   until: string
-  organizationId?: string
   model?: string
   status?: string
 }

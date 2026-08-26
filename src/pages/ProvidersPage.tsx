@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
-import type { Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot } from '../api/contracts'
+import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getProviders, importModels, refreshCredentialQuota, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
+import type { Credential, OAuthStartResponse, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
 import { Modal } from '../components/Modal'
 import { PageLoading } from '../components/PageState'
@@ -10,7 +10,6 @@ export function ProvidersPage() {
   const { isMaster } = useSession()
   const [providers, setProviders] = useState<ProviderDefinition[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
-  const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [connect, setConnect] = useState<ProviderDefinition | null>(null)
@@ -19,8 +18,8 @@ export function ProvidersPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [providerResponse, credentialResponse, organizationResponse] = await Promise.all([getProviders(), getCredentials(), getOrganizations().catch(() => ({ object: 'list' as const, data: [] }))])
-      setProviders(providerResponse.data); setCredentials(credentialResponse); setOrganizations(organizationResponse.data)
+      const [providerResponse, credentialResponse] = await Promise.all([getProviders(), getCredentials()])
+      setProviders(providerResponse.data); setCredentials(credentialResponse)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load])
@@ -31,7 +30,7 @@ export function ProvidersPage() {
     <ErrorBanner message={error} />
     <ProviderSection title="OAuth subscriptions" detail="Guided browser and device authorization flows." providers={grouped.oauth} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onRefresh={load} />
     <ProviderSection title="API-key providers" detail="Preset and custom OpenAI-compatible endpoints." providers={grouped.api} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onRefresh={load} />
-    {connect && <ConnectProviderModal provider={connect} organizations={organizations} isMaster={isMaster} onClose={() => setConnect(null)} onConnected={() => { setConnect(null); void load() }} />}
+    {connect && <ConnectProviderModal provider={connect} onClose={() => setConnect(null)} onConnected={() => { setConnect(null); void load() }} />}
     {modelsFor && <ModelsModal credential={modelsFor} canImport={isMaster} onClose={() => setModelsFor(null)} />}
     {chatFor && <ChatTestModal credential={chatFor} onClose={() => setChatFor(null)} />}
   </>
@@ -61,22 +60,32 @@ function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh
   }, [credential.id, quotaSupported])
   const run = async (action: () => Promise<void>) => { setBusy(true); setResult(''); try { await action() } catch (reason) { setResult((reason as Error).message) } finally { setBusy(false) } }
   const reloadQuota = async () => { setQuotaBusy(true); setResult(''); try { setQuota(await refreshCredentialQuota(credential.id)) } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) } }
-  return <div className="connection-row"><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{credential.name}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div>
-    {quotaSupported && <QuotaPanel quota={quota} busy={quotaBusy} onReload={() => void reloadQuota()} />}
+  const displayName = maskEmail(credential.name)
+  return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{displayName}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div>
+    {quotaSupported && <QuotaPanel quota={quota} accountFallback={displayName} busy={quotaBusy} onReload={() => void reloadQuota()} />}
     <div className="compact-actions">
     <button disabled={busy} onClick={() => void run(async () => { const response = await testCredential(credential.id); setResult(response.ok ? `Healthy · ${response.status ?? 'OK'} · ${response.latency_ms} ms` : 'Health check failed') })}>Test</button>
     <button onClick={onModels}>Models</button><button onClick={onChat}>Chat</button>
-    <button disabled={busy} onClick={() => void run(async () => { await updateCredential(credential.id, { name: credential.name, base_url: credential.base_url, status: credential.status === 'active' ? 'disabled' : 'active', api_key: '', oauth_access: '', oauth_refresh: '', owner_tenant_id: credential.owner_tenant_id }); await onRefresh() })}>{credential.status === 'active' ? 'Disable' : 'Enable'}</button>
+    <button disabled={busy} onClick={() => void run(async () => { await updateCredential(credential.id, { name: credential.name, base_url: credential.base_url, status: credential.status === 'active' ? 'disabled' : 'active', api_key: '', oauth_access: '', oauth_refresh: '' }); await onRefresh() })}>{credential.status === 'active' ? 'Disable' : 'Enable'}</button>
     <button className="danger-text" disabled={busy} onClick={() => { if (window.confirm(`Delete ${credential.name}?`)) void run(async () => { await deleteCredential(credential.id); await onRefresh() }) }}>Delete</button>
   </div>{result && <small className="inline-result">{result}</small>}</div>
 }
 
-function QuotaPanel({ quota, busy, onReload }: { quota: ProviderQuotaSnapshot | null; busy: boolean; onReload: () => void }) {
-  return <div className="provider-quota"><div className="provider-quota-head"><div><strong>{quota?.account || 'Connected account'}</strong>{quota?.plan && <small>{quota.plan}</small>}</div><button disabled={busy} onClick={onReload}>{busy ? 'Reloading…' : 'Reload'}</button></div>
+function QuotaPanel({ quota, accountFallback, busy, onReload }: { quota: ProviderQuotaSnapshot | null; accountFallback: string; busy: boolean; onReload: () => void }) {
+  const account = accountFallback.includes('@') ? accountFallback : quota?.account || accountFallback || 'Connected account'
+  const loaded = Boolean(quota?.fetched_at || quota?.windows.length)
+  return <div className={`provider-quota ${loaded && quota && !quota.available ? 'exhausted' : ''}`}><div className="provider-quota-head"><div><strong>{account}</strong>{quota?.plan && <small>{quota.plan}</small>}</div><div className="provider-quota-actions">{quota && <span className={loaded ? quota.available ? 'available' : 'exhausted' : 'not-loaded'}>{loaded ? quota.available ? 'Available' : 'Exhausted' : 'Not loaded'}</span>}<button disabled={busy} onClick={onReload}>{busy ? 'Reloading…' : 'Reload'}</button></div></div>
     {quota?.windows.map((window) => { const remaining = Math.max(0, Math.min(100, window.remaining_percent)); const tone = remaining <= 10 ? 'critical' : remaining <= 30 ? 'warning' : 'good'; return <div className="quota-window" key={window.name}><div><span>{window.name}</span><strong>{remaining.toFixed(1)}% remaining</strong></div><div className="quota-track"><i className={tone} style={{ width: `${remaining}%` }} /></div>{window.reset_at && <small>Resets {relativeTime(window.reset_at)}</small>}</div> })}
     {quota?.message && <small className="quota-message">{quota.message}</small>}
     {quota?.fetched_at && <small className="quota-fetched">Updated {relativeTime(quota.fetched_at)}</small>}
   </div>
+}
+
+function maskEmail(value: string): string {
+  const at = value.indexOf('@')
+  if (at < 1) return value
+  const visible = Math.min(2, at)
+  return `${value.slice(0, visible)}${'*'.repeat(Math.max(4, at - visible))}${value.slice(at)}`
 }
 
 function relativeTime(value: string): string {
@@ -91,20 +100,19 @@ function relativeTime(value: string): string {
   return formatter.format(Math.round(seconds / 86_400), 'day')
 }
 
-function ConnectProviderModal({ provider, organizations, isMaster, onClose, onConnected }: { provider: ProviderDefinition; organizations: Organization[]; isMaster: boolean; onClose: () => void; onConnected: () => void }) {
+function ConnectProviderModal({ provider, onClose, onConnected }: { provider: ProviderDefinition; onClose: () => void; onConnected: () => void }) {
   const [name, setName] = useState(`${provider.name} account`)
   const [baseURL, setBaseURL] = useState(provider.default_base_url)
   const [apiKey, setAPIKey] = useState('')
-  const [owner, setOwner] = useState('')
   const [flow, setFlow] = useState<OAuthStartResponse | null>(null)
   const [callback, setCallback] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
-  const submitAPIKey = async () => { setBusy(true); setError(''); try { await createCredential({ name, provider: provider.id, kind: 'api_key', base_url: baseURL, api_key: apiKey, oauth_access: '', oauth_refresh: '', owner_tenant_id: owner || null }); setAPIKey(''); onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
+  const submitAPIKey = async () => { setBusy(true); setError(''); try { await createCredential({ name, provider: provider.id, kind: 'api_key', base_url: baseURL, api_key: apiKey, oauth_access: '', oauth_refresh: '' }); setAPIKey(''); onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
   const beginOAuth = async () => { setBusy(true); setError(''); try { setFlow(await startOAuth(provider.id)) } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
-  const finishOAuth = async () => { if (!flow) return; setBusy(true); setError(''); try { const response = await completeOAuth(provider.id, { flow_id: flow.flow_id, callback, name, owner_tenant_id: owner || null }); if (response.status === 'authorization_pending') setStatus('Authorization is still pending. Finish sign-in, then check again.'); else onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
-  return <Modal title={`Connect ${provider.name}`} onClose={onClose}><ErrorBanner message={error} /><SuccessBanner message={status} /><div className="form-grid"><Field label="Connection name"><input value={name} onChange={(event) => setName(event.target.value)} /></Field>{isMaster && <Field label="Owner organization"><select value={owner} onChange={(event) => setOwner(event.target.value)}><option value="">Shared globally</option>{organizations.map((organization) => <option value={organization.id} key={organization.id}>{organization.name}</option>)}</select></Field>}</div>
+  const finishOAuth = async () => { if (!flow) return; setBusy(true); setError(''); try { const response = await completeOAuth(provider.id, { flow_id: flow.flow_id, callback, name }); if (response.status === 'authorization_pending') setStatus('Authorization is still pending. Finish sign-in, then check again.'); else onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
+  return <Modal title={`Connect ${provider.name}`} onClose={onClose}><ErrorBanner message={error} /><SuccessBanner message={status} /><div className="form-grid"><Field label="Connection name"><input value={name} onChange={(event) => setName(event.target.value)} /></Field></div>
     {provider.auth === 'api_key' ? <><Field label="Base URL"><input type="url" value={baseURL} disabled={!provider.custom_base_url && Boolean(provider.default_base_url)} onChange={(event) => setBaseURL(event.target.value)} /></Field><Field label="API key"><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setAPIKey(event.target.value)} /></Field><div className="dialog-actions"><button className="button" disabled={busy || !name.trim() || !apiKey.trim()} onClick={() => void submitAPIKey()}>Save encrypted connection</button></div></> : !flow ? <div className="oauth-panel"><p>{provider.description}</p><button className="button" disabled={busy || !provider.oauth_supported} onClick={() => void beginOAuth()}>Start authorization</button></div> : <div className="oauth-panel"><p>{flow.instructions}</p>{flow.user_code && <div className="device-code"><span>Device code</span><strong>{flow.user_code}</strong></div>}{(flow.verification_uri_complete || flow.verification_uri || flow.authorize_url) && <a className="button secondary" target="_blank" rel="noopener noreferrer" href={flow.verification_uri_complete || flow.verification_uri || flow.authorize_url}>Open authorization page ↗</a>}{flow.flow_type !== 'device' && <Field label="Callback URL or code"><textarea rows={4} value={callback} onChange={(event) => setCallback(event.target.value)} /></Field>}<div className="dialog-actions"><button className="button" disabled={busy} onClick={() => void finishOAuth()}>{flow.flow_type === 'device' ? 'Check authorization' : 'Complete connection'}</button></div></div>}
   </Modal>
 }
