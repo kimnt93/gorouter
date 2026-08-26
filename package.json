@@ -1,11 +1,28 @@
 {
   "name": "gorouter-ui",
   "private": true,
+  "type": "module",
   "scripts": {
-    "css": "tailwindcss -i ./ui/tailwind.css -o ./api/views/static/tailwind.css --minify"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "css": "tailwindcss -i ./ui/tailwind.css -o ./internal/api/views/static/tailwind.css --minify"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.12",
-    "tailwindcss": "^4.1.12"
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^30.0.1",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
