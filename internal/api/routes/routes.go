@@ -22,30 +22,32 @@ import (
 	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
+	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
 type Dependencies struct {
-	Auth         *auth.Service
-	Tenants      *tenant.Service
-	Credentials  *credential.Service
-	Keys         *apikey.Service
-	Models       *modelroute.Service
-	Usage        *usage.Service
-	Cache        chat.PromptCache
-	Gateway      *handlers.Gateway
-	OpenAI       credential.ConnectivityProber
-	Anthropic    credential.ConnectivityProber
-	Codex        credential.ConnectivityProber
-	Providers    map[string]credential.ConnectivityProber
-	OAuth        *oauthpkg.Service
-	Pricing      handlers.PriceCatalog
-	BodyLimit    int
-	ReadTimeout  time.Duration
-	Identity     *identity.Service
-	IdentityRepo identity.Repository
-	Audit        entities.AuditRepository
+	Auth           *auth.Service
+	Tenants        *tenant.Service
+	Credentials    *credential.Service
+	Keys           *apikey.Service
+	Models         *modelroute.Service
+	Usage          *usage.Service
+	Cache          chat.PromptCache
+	Gateway        *handlers.Gateway
+	OpenAI         credential.ConnectivityProber
+	Anthropic      credential.ConnectivityProber
+	Codex          credential.ConnectivityProber
+	Providers      map[string]credential.ConnectivityProber
+	OAuth          *oauthpkg.Service
+	Pricing        handlers.PriceCatalog
+	ProviderQuotas *providerquota.Service
+	BodyLimit      int
+	ReadTimeout    time.Duration
+	Identity       *identity.Service
+	IdentityRepo   identity.Repository
+	Audit          entities.AuditRepository
 }
 
 func New(d Dependencies) *fiber.App {
@@ -165,16 +167,19 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Put("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
 	mgmt.Delete("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
-	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models}
+	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models, Quotas: d.ProviderQuotas}
 	oauthConnector := &handlers.OAuthConnector{Service: d.OAuth}
 	mgmt.Get("/providers", handlers.Require(d.Auth, entities.ScopeCredentialsManage), admin.Providers)
 	mgmt.Post("/oauth/:provider/start", handlers.Require(d.Auth, entities.ScopeCredentialsManage), oauthConnector.Start)
 	mgmt.Post("/oauth/:provider/complete", handlers.Require(d.Auth, entities.ScopeCredentialsManage), oauthConnector.Complete)
 	mgmt.Post("/credentials/:id/test", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Test)
+	mgmt.Get("/credentials/:id/quota", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Quota)
+	mgmt.Post("/credentials/:id/quota", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Quota)
 	mgmt.Get("/credentials/:id/models", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Models)
 	mgmt.Post("/credentials/:id/models/import", handlers.Require(d.Auth, entities.ScopeModelsManage), connectivity.ImportModels)
 	mgmt.Post("/credentials/:id/chat-tests", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Chat)
 	mgmt.Get("/api-keys", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.KeysList)
+	mgmt.Get("/api-keys/models", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.KeyModelOptions)
 	mgmt.Post("/api-keys", handlers.Require(d.Auth, "keys:manage"), admin.KeysCreate)
 	mgmt.Patch("/api-keys/:id", handlers.Require(d.Auth, "keys:manage"), admin.KeysPatch)
 	mgmt.Post("/api-keys/:id/rotate", handlers.Require(d.Auth, "keys:manage"), admin.KeysRotate)
@@ -189,6 +194,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Delete("/prices/:model", handlers.Require(d.Auth, "models:manage"), admin.Price)
 	mgmt.Get("/usage/summary", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageSummary)
 	mgmt.Get("/usage/recent", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageRecent)
+	mgmt.Get("/usage/events/:id", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageDetail)
 	mgmt.Get("/usage/activity", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageActivity)
 	mgmt.Get("/cache/stats", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.CacheStats)
 	mgmt.Post("/cache/flush", handlers.Require(d.Auth, "cache:purge"), admin.CacheFlush)

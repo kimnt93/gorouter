@@ -154,6 +154,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/api-keys/models": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "api-keys"
+                ],
+                "summary": "List grantable API-key models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Target organization",
+                        "name": "organization_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIKeyModelOptionsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/api-keys/{id}": {
             "delete": {
                 "security": [
@@ -955,6 +1002,124 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/credentials/{id}/quota": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "credentials"
+                ],
+                "summary": "Get or refresh credential quota",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Credential ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Snapshot"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "credentials"
+                ],
+                "summary": "Get or refresh credential quota",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Credential ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Snapshot"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
@@ -2534,6 +2699,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/usage/events/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Get usage request detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Usage event ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Organization context",
+                        "name": "organization_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageDetail"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/usage/recent": {
             "get": {
                 "security": [
@@ -3391,6 +3616,12 @@ const docTemplate = `{
                 },
                 "owned_by": {
                     "type": "string"
+                },
+                "pricing": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price"
+                },
+                "upstream_model": {
+                    "type": "string"
                 }
             }
         },
@@ -3986,6 +4217,83 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageDetail": {
+            "type": "object",
+            "properties": {
+                "actor_type": {
+                    "type": "string"
+                },
+                "api_key_id": {
+                    "type": "string"
+                },
+                "cache_hit": {
+                    "type": "boolean"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "completion_tokens": {
+                    "type": "integer"
+                },
+                "content_truncated": {
+                    "type": "boolean"
+                },
+                "cost_usd": {
+                    "type": "number"
+                },
+                "credential_id": {
+                    "type": "string"
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string"
+                },
+                "priced": {
+                    "type": "boolean"
+                },
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "request_body": {
+                    "type": "string"
+                },
+                "response_body": {
+                    "type": "string"
+                },
+                "status_code": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "type": "string"
+                },
+                "ts": {
+                    "type": "string"
+                },
+                "upstream_model": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_kimnt93_gorouter_pkg_entities.UsageSummary": {
             "type": "object",
             "properties": {
@@ -4082,6 +4390,58 @@ const docTemplate = `{
                 },
                 "protocol": {
                     "type": "string"
+                },
+                "quota_supported": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_providerquota.Snapshot": {
+            "type": "object",
+            "properties": {
+                "account": {
+                    "type": "string"
+                },
+                "available": {
+                    "type": "boolean"
+                },
+                "credential_id": {
+                    "type": "string"
+                },
+                "fetched_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "plan": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "windows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Window"
+                    }
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_providerquota.Window": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "remaining_percent": {
+                    "type": "number"
+                },
+                "reset_at": {
+                    "type": "string"
+                },
+                "used_percent": {
+                    "type": "number"
                 }
             }
         },
@@ -4140,6 +4500,37 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "object": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.APIKeyModelOption": {
+            "type": "object",
+            "properties": {
+                "free": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "price": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price"
+                },
+                "upstream_model": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.APIKeyModelOptionsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_handlers.APIKeyModelOption"
+                    }
                 },
                 "object": {
                     "type": "string"

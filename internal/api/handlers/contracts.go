@@ -94,6 +94,16 @@ type APIKeyListResponse struct {
 	Data       []entities.ApiKey `json:"data"`
 	NextCursor string            `json:"next_cursor,omitempty"`
 }
+type APIKeyModelOption struct {
+	ID            string         `json:"id"`
+	UpstreamModel string         `json:"upstream_model"`
+	Price         entities.Price `json:"price"`
+	Free          bool           `json:"free"`
+}
+type APIKeyModelOptionsResponse struct {
+	Object string              `json:"object"`
+	Data   []APIKeyModelOption `json:"data"`
+}
 type PricingCatalogResponse struct {
 	Data   []entities.CatalogPrice `json:"data"`
 	Total  int                     `json:"total"`

@@ -17,6 +17,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
+	"github.com/kimnt93/gorouter/pkg/providerquota"
 )
 
 // CredentialConnectivity is registered separately from Admin so provider
@@ -28,6 +29,41 @@ type CredentialConnectivity struct {
 	Codex       credential.ConnectivityProber
 	Providers   map[string]credential.ConnectivityProber
 	ModelRoutes *modelroute.Service
+	Quotas      *providerquota.Service
+}
+
+// Quota returns the cached provider quota or refreshes it on explicit POST.
+// @Summary Get or refresh credential quota
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Success 200 {object} providerquota.Snapshot
+// @Failure 401,403,404,500,502 {object} presenter.Error
+// @Router /admin/credentials/{id}/quota [get]
+// @Router /admin/credentials/{id}/quota [post]
+func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
+	if !h.authorize(c) {
+		return presenter.NotFound(c, "credential not found")
+	}
+	if h.Quotas == nil {
+		return presenter.ServerError(c, "provider quota service is unavailable")
+	}
+	id := c.Params("id")
+	if c.Method() == fiber.MethodGet {
+		if snapshot, ok := h.Quotas.Cached(id); ok {
+			return responseapi.JSON(c, snapshot)
+		}
+		runtime, err := h.Credentials.Runtime(c.Context(), id)
+		if err != nil {
+			return presenter.NotFound(c, "credential not found")
+		}
+		return responseapi.JSON(c, providerquota.Snapshot{CredentialID: id, Provider: runtime.Provider, Account: "connected account", Available: true, Windows: []providerquota.Window{}, Message: "Click reload to fetch quota"})
+	}
+	snapshot, err := h.Quotas.Refresh(c.Context(), id)
+	if err != nil {
+		return presenter.Err(c, fiber.StatusBadGateway, err.Error(), "upstream_error", "quota_refresh_failed")
+	}
+	return responseapi.JSON(c, snapshot)
 }
 
 // ImportModels imports selected upstream models into global model routes.
@@ -76,14 +112,18 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 			model = entities.ModelDef{Name: name, Strategy: "priority", UpstreamModel: upstream, Enabled: true, Routes: []entities.ModelRoute{}}
 		}
 		hasRoute := false
+		nextPriority := 0
 		for _, route := range model.Routes {
 			if route.CredentialID == runtime.ID {
 				hasRoute = true
 				break
 			}
+			if route.Priority <= nextPriority {
+				nextPriority = route.Priority - 1
+			}
 		}
 		if !hasRoute {
-			model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: runtime.ID, Weight: 1, Enabled: true})
+			model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: runtime.ID, Priority: nextPriority, Weight: 1, Enabled: true})
 		}
 		if err := h.ModelRoutes.Upsert(c.Context(), model); err != nil {
 			return presenter.BadRequest(c, fmt.Sprintf("import %s: %v", upstream, err))

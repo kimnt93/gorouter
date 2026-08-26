@@ -108,6 +108,10 @@ definitions:
         type: string
       owned_by:
         type: string
+      pricing:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price'
+      upstream_model:
+        type: string
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.ModelList:
     properties:
@@ -495,6 +499,57 @@ definitions:
       start:
         type: string
     type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageDetail:
+    properties:
+      actor_type:
+        type: string
+      api_key_id:
+        type: string
+      cache_hit:
+        type: boolean
+      cache_read_tokens:
+        type: integer
+      cache_write_tokens:
+        type: integer
+      completion_tokens:
+        type: integer
+      content_truncated:
+        type: boolean
+      cost_usd:
+        type: number
+      credential_id:
+        type: string
+      duration_ms:
+        type: integer
+      error:
+        type: string
+      id:
+        type: string
+      model:
+        type: string
+      organization_id:
+        type: string
+      priced:
+        type: boolean
+      prompt_tokens:
+        type: integer
+      request_body:
+        type: string
+      response_body:
+        type: string
+      status_code:
+        type: integer
+      tenant_id:
+        type: string
+      ts:
+        type: string
+      upstream_model:
+        type: string
+      user_id:
+        type: string
+      username:
+        type: string
+    type: object
   github_com_kimnt93_gorouter_pkg_entities.UsageSummary:
     properties:
       by_key:
@@ -559,6 +614,40 @@ definitions:
         type: boolean
       protocol:
         type: string
+      quota_supported:
+        type: boolean
+    type: object
+  github_com_kimnt93_gorouter_pkg_providerquota.Snapshot:
+    properties:
+      account:
+        type: string
+      available:
+        type: boolean
+      credential_id:
+        type: string
+      fetched_at:
+        type: string
+      message:
+        type: string
+      plan:
+        type: string
+      provider:
+        type: string
+      windows:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Window'
+        type: array
+    type: object
+  github_com_kimnt93_gorouter_pkg_providerquota.Window:
+    properties:
+      name:
+        type: string
+      remaining_percent:
+        type: number
+      reset_at:
+        type: string
+      used_percent:
+        type: number
     type: object
   internal_api_handlers.APIKeyCreateRequest:
     properties:
@@ -597,6 +686,26 @@ definitions:
         type: array
       next_cursor:
         type: string
+      object:
+        type: string
+    type: object
+  internal_api_handlers.APIKeyModelOption:
+    properties:
+      free:
+        type: boolean
+      id:
+        type: string
+      price:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price'
+      upstream_model:
+        type: string
+    type: object
+  internal_api_handlers.APIKeyModelOptionsResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/internal_api_handlers.APIKeyModelOption'
+        type: array
       object:
         type: string
     type: object
@@ -1255,6 +1364,35 @@ paths:
       summary: Rotate an API key
       tags:
       - api-keys
+  /admin/api-keys/models:
+    get:
+      parameters:
+      - description: Target organization
+        in: query
+        name: organization_id
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIKeyModelOptionsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+      security:
+      - BearerAuth: []
+      summary: List grantable API-key models
+      tags:
+      - api-keys
   /admin/audit/events:
     get:
       parameters:
@@ -1654,6 +1792,81 @@ paths:
       security:
       - BearerAuth: []
       summary: Import provider models
+      tags:
+      - credentials
+  /admin/credentials/{id}/quota:
+    get:
+      parameters:
+      - description: Credential ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Snapshot'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+      security:
+      - BearerAuth: []
+      summary: Get or refresh credential quota
+      tags:
+      - credentials
+    post:
+      parameters:
+      - description: Credential ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Snapshot'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+      security:
+      - BearerAuth: []
+      summary: Get or refresh credential quota
       tags:
       - credentials
   /admin/credentials/{id}/test:
@@ -2654,6 +2867,44 @@ paths:
       security:
       - BearerAuth: []
       summary: Get usage activity
+      tags:
+      - usage
+  /admin/usage/events/{id}:
+    get:
+      parameters:
+      - description: Usage event ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Organization context
+        in: query
+        name: organization_id
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageDetail'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+      security:
+      - BearerAuth: []
+      summary: Get usage request detail
       tags:
       - usage
   /admin/usage/recent:

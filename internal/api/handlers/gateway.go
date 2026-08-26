@@ -27,19 +27,25 @@ import (
 )
 
 type Gateway struct {
-	Keys      *apikey.Service
-	Creds     *credential.Service
-	Models    *modelroute.Service
-	Usage     *usage.Service
-	Cache     chat.PromptCache
-	OpenAI    entities.Upstream
-	Anthropic entities.Upstream
-	Codex     entities.Upstream
-	Providers map[string]entities.Upstream
-	Selector  *chat.Selector
-	Health    *chat.Health
-	Quota     quota.Coordinator
-	Pricing   PriceResolver
+	Keys           *apikey.Service
+	Creds          *credential.Service
+	Models         *modelroute.Service
+	Usage          *usage.Service
+	Cache          chat.PromptCache
+	OpenAI         entities.Upstream
+	Anthropic      entities.Upstream
+	Codex          entities.Upstream
+	Providers      map[string]entities.Upstream
+	Selector       *chat.Selector
+	Health         *chat.Health
+	Quota          quota.Coordinator
+	Pricing        PriceResolver
+	ProviderQuotas ProviderQuotaRouter
+}
+
+type ProviderQuotaRouter interface {
+	Available(credentialID string) bool
+	MarkExhausted(credentialID string)
 }
 
 // GatewayAccessContext separates a stored API key (absent for master) from
@@ -124,7 +130,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if cacheEnabled && deterministic {
 		if cached, ok := g.Cache.Lookup(key.ID, key.TenantID, model.Name, raw); ok {
 			usage := llm.Usage{PromptTokens: cached.PromptTok, CompletionTokens: cached.Completion}
-			g.record(key, model, "", usage, true, cached.Status, started)
+			g.recordConversation(key, model, "", usage, true, cached.Status, started, raw, cached.Body)
 			c.Set("X-Cache", "hit")
 			if req.Stream {
 				return g.replayStream(c, cached)
@@ -197,7 +203,8 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
 			continue
 		}
-		if g.Health.Available(route.CredentialID) {
+		quotaAvailable := g.ProviderQuotas == nil || g.ProviderQuotas.Available(route.CredentialID)
+		if quotaAvailable && g.Health.Available(route.CredentialID) {
 			candidates = append(candidates, chat.Candidate{ID: route.CredentialID, Priority: route.Priority, Weight: route.Weight})
 		}
 	}
@@ -226,6 +233,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		result, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
 		if rerr != nil {
 			g.Health.Report(candidate.ID, false)
+			continue
+		}
+		if result.StatusCode == fiber.StatusTooManyRequests || result.StatusCode == fiber.StatusPaymentRequired {
+			lastStatus = result.StatusCode
+			drainAndClose(result.Body)
+			if g.ProviderQuotas != nil {
+				g.ProviderQuotas.MarkExhausted(candidate.ID)
+			}
 			continue
 		}
 		if (result.StatusCode < 200 || result.StatusCode >= 300) && !retryableStatus(result.StatusCode) {
@@ -310,7 +325,11 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}}
 	for _, model := range models {
 		if model.Enabled && (key.Master || contains(key.Models, model.Name)) {
-			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter"})
+			var price *entities.Price
+			if resolved, ok, resolveErr := g.resolvePrice(c.Context(), &model); resolveErr == nil && ok {
+				price = &resolved
+			}
+			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
 		}
 	}
 	return responseapi.JSON(c, out)
@@ -364,10 +383,10 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 	}
 	cost := entities.CalculateCost(price, usage.TokenUsage())
 	if err := g.settle(c.Context(), reservation, cost.USD); err != nil {
-		g.recordCost(key, model, runtime.ID, usage, false, fiber.StatusServiceUnavailable, started, cost)
+		g.recordCostConversation(key, model, runtime.ID, usage, false, fiber.StatusServiceUnavailable, started, cost, raw, body)
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "quota settlement is unavailable", "service_unavailable", "redis_unavailable")
 	}
-	g.recordCost(key, model, runtime.ID, usage, false, result.StatusCode, started, cost)
+	g.recordCostConversation(key, model, runtime.ID, usage, false, result.StatusCode, started, cost, raw, body)
 	cacheStatus := "off"
 	if deterministic && g.cacheEnabled() {
 		g.Cache.Store(key.ID, key.TenantID, model.Name, raw, &chat.CacheEntry{Status: 200, ContentType: "application/json", Body: body, PromptTok: usage.PromptTokens, Completion: usage.CompletionTokens})
@@ -459,7 +478,8 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			_ = g.Quota.Release(ctx, reservation)
 			cancel()
 		}
-		g.recordCost(key, model, runtime.ID, usage, false, streamStatus, started, cost)
+		conversationResponse, _ := json.Marshal(llm.Response{Model: model.Name, Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage})
+		g.recordCostConversation(key, model, runtime.ID, usage, false, streamStatus, started, cost, raw, conversationResponse)
 		if streamStatus == fiber.StatusOK && deterministic && g.cacheEnabled() && content.Len() > 0 {
 			full := llm.Response{
 				ID: "chatcmpl-cache", Object: "chat.completion", Created: time.Now().Unix(), Model: model.Name,
@@ -492,19 +512,19 @@ func (g *Gateway) replayStream(c fiber.Ctx, e *chat.CacheEntry) error {
 }
 
 func (g *Gateway) record(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time) {
+	g.recordConversation(key, model, cred, u, hit, status, started, nil, nil)
+}
+
+func (g *Gateway) recordConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, requestBody, responseBody []byte) {
 	if g.Usage == nil {
 		return
 	}
-	p, ok, _ := g.resolvePrice(context.Background(), model)
-	var price *entities.Price
-	if ok {
-		price = &p
-	}
-	cost := entities.CalculateCost(price, u.TokenUsage())
+	p, _, _ := g.resolvePrice(context.Background(), model)
+	cost := entities.CalculateCost(&p, u.TokenUsage())
 	if hit {
 		cost = entities.Cost{USD: 0, Priced: true}
 	}
-	g.recordCost(key, model, cred, u, hit, status, started, cost)
+	g.recordCostConversation(key, model, cred, u, hit, status, started, cost, requestBody, responseBody)
 }
 
 func (g *Gateway) resolvePrice(ctx context.Context, model *entities.ModelDef) (entities.Price, bool, error) {
@@ -517,18 +537,38 @@ func (g *Gateway) resolvePrice(ctx context.Context, model *entities.ModelDef) (e
 		return entities.Price{}, false, err
 	}
 	price, ok := prices[model.Name]
-	return price, ok, nil
+	if !ok {
+		return entities.Price{}, true, nil
+	}
+	return price, true, nil
 }
 
 func (g *Gateway) recordCost(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost) {
-	g.recordCostError(key, model, cred, u, hit, status, started, cost, "")
+	g.recordCostConversation(key, model, cred, u, hit, status, started, cost, nil, nil)
+}
+
+func (g *Gateway) recordCostConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, requestBody, responseBody []byte) {
+	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, "", requestBody, responseBody)
 }
 
 func (g *Gateway) recordError(key *GatewayAccessContext, model *entities.ModelDef, cred string, status int, started time.Time, summary string) {
-	g.recordCostError(key, model, cred, llm.Usage{}, false, status, started, entities.Cost{}, summary)
+	g.recordCostError(key, model, cred, llm.Usage{}, false, status, started, entities.Cost{Priced: true}, summary)
 }
 
 func (g *Gateway) recordCostError(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
+	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, summary, nil, nil)
+}
+
+const maxStoredConversationBytes = 8 << 20
+
+func storedConversationBody(body []byte) (string, bool) {
+	if len(body) <= maxStoredConversationBytes {
+		return string(body), false
+	}
+	return string(body[:maxStoredConversationBytes]), true
+}
+
+func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string, requestBody, responseBody []byte) {
 	if g.Usage == nil {
 		return
 	}
@@ -536,7 +576,9 @@ func (g *Gateway) recordCostError(key *GatewayAccessContext, model *entities.Mod
 	if key.StoredKey != nil {
 		apiKeyID = key.StoredKey.ID
 	}
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID})
+	requestText, requestTruncated := storedConversationBody(requestBody)
+	responseText, responseTruncated := storedConversationBody(responseBody)
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, RequestBody: requestText, ResponseBody: responseText, ContentTruncated: requestTruncated || responseTruncated})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

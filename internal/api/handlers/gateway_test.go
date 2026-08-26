@@ -69,12 +69,13 @@ func (r gatewayKeyRepo) DeleteForTenant(context.Context, string, string) error {
 type gatewayCredRepo struct {
 	routes   []entities.RouteCandidate
 	runtimes map[string]*entities.CredentialRuntime
+	items    []entities.Credential
 }
 
 func (r gatewayCredRepo) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
 	return nil, nil
 }
-func (r gatewayCredRepo) List(context.Context) ([]entities.Credential, error) { return nil, nil }
+func (r gatewayCredRepo) List(context.Context) ([]entities.Credential, error) { return r.items, nil }
 func (r gatewayCredRepo) Update(context.Context, entities.SecretBox, string, entities.CredentialUpdate) (*entities.Credential, error) {
 	return nil, nil
 }
@@ -163,7 +164,7 @@ func TestGatewayUsesPriceResolverFallback(t *testing.T) {
 }
 
 func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
-	gateway := &Gateway{Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", Enabled: true}})}
+	gateway := &Gateway{Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "openai/model-a", Enabled: true}}), Pricing: gatewayPriceResolver{price: entities.Price{InputPerM: 0.2, OutputPerM: 1.2, CachedInputPerM: 0.02, CacheWritePerM: 0.25}}}
 	app := fiber.New()
 	app.Get("/v1/models", func(c fiber.Ctx) error {
 		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes})
@@ -178,9 +179,38 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "model-a") {
-		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	var body llm.ModelList
+	if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != "model-a" || body.Data[0].UpstreamModel != "openai/model-a" || body.Data[0].Pricing == nil || body.Data[0].Pricing.InputPerM != 0.2 {
+		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+	}
+}
+
+func TestKeyModelOptionsIncludesOnlyCallableModelsWithEffectivePrice(t *testing.T) {
+	price := entities.Price{InputPerM: 0.2, OutputPerM: 1.2, CachedInputPerM: 0.02, CacheWritePerM: 0.25}
+	model := entities.ModelDef{Name: "cx/gpt-5.6-luna", UpstreamModel: "gpt-5.6-luna", Enabled: true, Price: &price, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true, Weight: 1}}}
+	admin := &Admin{
+		ModelsSvc: modelroute.NewService(gatewayModelRepo{model: model}),
+		CredsSvc:  credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a"}}}, nil),
+	}
+	app := fiber.New()
+	app.Get("/admin/api-keys/models", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes})
+		return admin.KeyModelOptions(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/admin/api-keys/models?organization_id=org-1", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body APIKeyModelOptionsResponse
+	if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != model.Name || body.Data[0].Price.InputPerM != 0.2 || body.Data[0].Free {
+		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
 	}
 }
 
@@ -247,6 +277,24 @@ func TestGatewayRecordsPrincipalAttributionForSuccessCacheStreamAndError(t *test
 				t.Fatal("personal usage acquired organization context")
 			}
 		})
+	}
+}
+
+func TestGatewayCapturesBoundedConversationAndMarksFreeCostPriced(t *testing.T) {
+	repository := &captureUsageRepository{}
+	service := usage.NewService(repository, 16, nil)
+	gateway := &Gateway{Usage: service}
+	access := &GatewayAccessContext{ApiKey: &entities.ApiKey{ID: "master"}, Actor: entities.UsageActor{Type: entities.ActorMaster, Username: "master"}, Master: true}
+	request := []byte(`{"model":"free-model","messages":[{"role":"user","content":"hello"}]}`)
+	response := []byte(`{"choices":[{"message":{"role":"assistant","content":"hi"}}]}`)
+	gateway.recordCostConversation(access, &entities.ModelDef{Name: "free-model"}, "cred-1", llm.Usage{PromptTokens: 2, CompletionTokens: 1}, false, 200, time.Now(), entities.Cost{USD: 0, Priced: true}, request, response)
+	service.Close()
+	if len(repository.events) != 1 {
+		t.Fatalf("events=%+v", repository.events)
+	}
+	event := repository.events[0]
+	if !event.Priced || event.CostUSD != 0 || event.RequestBody != string(request) || event.ResponseBody != string(response) || event.ContentTruncated {
+		t.Fatalf("captured event=%+v", event)
 	}
 }
 
@@ -331,6 +379,66 @@ func TestGatewayFailsOverRetryableStatus(t *testing.T) {
 	if res.StatusCode != http.StatusOK || len(upstream.calls) != 2 {
 		body, _ := io.ReadAll(res.Body)
 		t.Fatalf("status=%d calls=%v body=%s", res.StatusCode, upstream.calls, body)
+	}
+}
+
+type gatewayProviderQuota struct {
+	available map[string]bool
+	marked    []string
+}
+
+func (q *gatewayProviderQuota) Available(id string) bool {
+	available, ok := q.available[id]
+	return !ok || available
+}
+
+func (q *gatewayProviderQuota) MarkExhausted(id string) {
+	q.available[id] = false
+	q.marked = append(q.marked, id)
+}
+
+func TestGatewayQuotaFillFirstAndExhaustionFailover(t *testing.T) {
+	app, upstream := testGatewayApp(map[string]int{"cred-a": http.StatusTooManyRequests, "cred-b": http.StatusOK})
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}}
+
+	// Install the state on the gateway captured by a dedicated test route.
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 10}, {CredentialID: "cred-b", Priority: 5}}
+	runtimes := map[string]*entities.CredentialRuntime{
+		"cred-a": {ID: "cred-a", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
+		"cred-b": {ID: "cred-b", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
+	}
+	gateway := &Gateway{
+		Keys:           apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:          credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
+		Models:         modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		OpenAI:         upstream,
+		Selector:       &chat.Selector{},
+		Health:         chat.NewHealth(),
+		ProviderQuotas: quotaState,
+	}
+	app = fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+
+	for i := 0; i < 2; i++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`))
+		response, err := app.Test(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("request %d status=%d", i, response.StatusCode)
+		}
+	}
+	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-b,cred-b"; got != want {
+		t.Fatalf("calls=%s want=%s", got, want)
+	}
+	if len(quotaState.marked) != 1 || quotaState.marked[0] != "cred-a" {
+		t.Fatalf("marked=%v", quotaState.marked)
 	}
 }
 

@@ -431,6 +431,77 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 	return responseapi.JSON(c, APIKeyListResponse{Object: "list", Data: filtered, NextCursor: next})
 }
 
+// KeyModelOptions lists callable models that the current principal may grant
+// to an API key, including the effective per-million-token price.
+// @Summary List grantable API-key models
+// @Tags api-keys
+// @Security BearerAuth
+// @Param organization_id query string false "Target organization"
+// @Success 200 {object} APIKeyModelOptionsResponse
+// @Failure 401,403,500 {object} presenter.Error
+// @Router /admin/api-keys/models [get]
+func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	organizationID := strings.TrimSpace(c.Query("organization_id"))
+	if !sess.IsMaster() {
+		if sess.OrganizationID != "" {
+			organizationID = sess.OrganizationID
+		} else if organizationID != "" {
+			if a.IdentitySvc == nil || a.IdentitySvc.ValidateUserKeyContext(c.Context(), sess.UserID, organizationID) != nil {
+				return presenter.Forbidden(c, "active organization membership is required")
+			}
+		}
+	}
+	models, err := a.ModelsSvc.List(c.Context())
+	if err != nil {
+		return presenter.ServerError(c, "failed to load models")
+	}
+	visibleCredentials := map[string]bool{}
+	if organizationID != "" {
+		credentials, listErr := a.CredsSvc.List(c.Context())
+		if listErr != nil {
+			return presenter.ServerError(c, "failed to load model connections")
+		}
+		for _, credential := range credentials {
+			if policy.CredentialVisible(false, organizationID, credential.OwnerTenantID) {
+				visibleCredentials[credential.ID] = true
+			}
+		}
+	}
+	allowed := make(map[string]bool, len(sess.AllowedModels))
+	for _, model := range sess.AllowedModels {
+		allowed[model] = true
+	}
+	options := make([]APIKeyModelOption, 0, len(models))
+	for _, model := range models {
+		if !model.Enabled || (!sess.IsMaster() && !allowed[model.Name]) {
+			continue
+		}
+		if organizationID != "" {
+			callable := false
+			for _, route := range model.Routes {
+				if route.Enabled && visibleCredentials[route.CredentialID] {
+					callable = true
+					break
+				}
+			}
+			if !callable {
+				continue
+			}
+		}
+		price := entities.Price{}
+		priced := false
+		if model.Price != nil {
+			price, priced = *model.Price, true
+		} else if a.Pricing != nil {
+			price, priced = a.Pricing.Resolve(model.Name, model.UpstreamModel)
+		}
+		options = append(options, APIKeyModelOption{ID: model.Name, UpstreamModel: model.UpstreamModel, Price: price, Free: !priced || price == (entities.Price{})})
+	}
+	sort.Slice(options, func(i, j int) bool { return options[i].ID < options[j].ID })
+	return responseapi.JSON(c, APIKeyModelOptionsResponse{Object: "list", Data: options})
+}
+
 // KeysCreate creates a principal-owned key and returns plaintext once.
 // @Summary Create an API key
 // @Tags api-keys
@@ -468,19 +539,34 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 				b.ContextOrganizationID = organizationID
 			} else {
 				b.OwnerType = entities.OwnerUser
-				b.OwnerUserID = actor.UserID
+				targetUserID := strings.TrimSpace(b.OwnerUserID)
+				if targetUserID == "" {
+					targetUserID = actor.UserID
+				}
+				if targetUserID != actor.UserID && (actor.MembershipRole != entities.MembershipAdmin || actor.OrganizationID == "" || actor.OrganizationID != strings.TrimSpace(b.ContextOrganizationID)) {
+					return presenter.Forbidden(c, "organization administration is required to create a key for another member")
+				}
+				b.OwnerUserID = targetUserID
 				b.OwnerOrganizationID = ""
 			}
 			if b.OwnerType == entities.OwnerUser && b.ContextOrganizationID != "" {
-				if err := a.IdentitySvc.ValidateUserKeyContext(c.Context(), actor.UserID, b.ContextOrganizationID); err != nil {
+				if err := a.IdentitySvc.ValidateUserKeyContext(c.Context(), b.OwnerUserID, b.ContextOrganizationID); err != nil {
 					return presenter.Forbidden(c, "active organization membership is required")
 				}
 			}
 		case entities.PrincipalOrganization:
-			b.OwnerType = entities.OwnerOrganization
-			b.OwnerUserID = ""
-			b.OwnerOrganizationID = actor.OrganizationID
-			b.ContextOrganizationID = actor.OrganizationID
+			if b.OwnerType == entities.OwnerUser && strings.TrimSpace(b.OwnerUserID) != "" {
+				b.OwnerOrganizationID = ""
+				b.ContextOrganizationID = actor.OrganizationID
+				if err := a.IdentitySvc.ValidateUserKeyContext(c.Context(), b.OwnerUserID, actor.OrganizationID); err != nil {
+					return presenter.Forbidden(c, "selected user must be an active organization member")
+				}
+			} else {
+				b.OwnerType = entities.OwnerOrganization
+				b.OwnerUserID = ""
+				b.OwnerOrganizationID = actor.OrganizationID
+				b.ContextOrganizationID = actor.OrganizationID
+			}
 		}
 	}
 	if sess.IsMaster() && b.OwnerType == "" {
@@ -490,6 +576,14 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 		b.OwnerType = entities.OwnerOrganization
 		b.OwnerOrganizationID = b.TenantID
 		b.ContextOrganizationID = b.TenantID
+	}
+	if b.OwnerType == entities.OwnerUser && strings.TrimSpace(b.ContextOrganizationID) != "" {
+		if a.IdentitySvc == nil {
+			return presenter.ServerError(c, "identity service unavailable")
+		}
+		if err := a.IdentitySvc.ValidateUserKeyContext(c.Context(), strings.TrimSpace(b.OwnerUserID), strings.TrimSpace(b.ContextOrganizationID)); err != nil {
+			return presenter.BadRequest(c, "selected user must be an active member of the organization")
+		}
 	}
 	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID}
 	v, err := a.KeysSvc.Create(c.Context(), in)
@@ -857,6 +951,39 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 		return presenter.ServerError(c, "failed to load recent usage")
 	}
 	return responseapi.JSON(c, UsageRecentResponse{Object: "list", Data: page.Data, NextCursor: page.NextCursor})
+}
+
+// UsageDetail returns one policy-constrained request, including its captured
+// conversation bodies. Secrets and credential material are never captured.
+// @Summary Get usage request detail
+// @Tags usage
+// @Security BearerAuth
+// @Param id path string true "Usage event ID"
+// @Param organization_id query string false "Organization context"
+// @Success 200 {object} entities.UsageDetail
+// @Failure 401,403,404,500 {object} presenter.Error
+// @Router /admin/usage/events/{id} [get]
+func (a *Admin) UsageDetail(c fiber.Ctx) error {
+	actor := principalFromSession(SessionFrom(c))
+	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
+		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
+			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
+		}
+	}
+	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
+	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
+	if policyErr != nil {
+		return presenter.Forbidden(c, "usage access is not allowed")
+	}
+	detail, err := a.UsageSvc.Detail(c.Context(), c.Params("id"), visibility)
+	if errors.Is(err, entities.ErrNotFound) {
+		return presenter.NotFound(c, "usage event not found")
+	}
+	if err != nil {
+		return presenter.ServerError(c, "failed to load usage detail")
+	}
+	return responseapi.JSON(c, detail)
 }
 
 // UsageActivity returns policy-constrained time buckets for the analysis UI.
