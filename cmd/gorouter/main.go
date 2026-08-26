@@ -20,6 +20,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/config"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 	"github.com/kimnt93/gorouter/pkg/pricing"
@@ -52,6 +53,8 @@ func main() {
 	var keyRepo apikey.Repository
 	var modelRepo modelStore
 	var usageRepo usage.Repository
+	var identityRepo identity.Repository
+	var auditRepo entities.AuditRepository
 	var hashSecret func(string) string
 	var generateSecret func() string
 	if cfg.DatabaseBackend == "clickhouse" {
@@ -66,6 +69,7 @@ func main() {
 		store := clickhouserepo.New(db.Conn)
 		tenantRepo, credRepo, keyRepo = clickhouserepo.NewTenantRepo(store), clickhouserepo.NewCredentialRepo(store), clickhouserepo.NewApiKeyRepo(store)
 		modelRepo, usageRepo = clickhouserepo.NewModelRouteRepo(store), clickhouserepo.NewUsageRepo(store)
+		identityRepo, auditRepo = clickhouserepo.NewIdentityRepo(store), clickhouserepo.NewAuditRepo(store)
 		hashSecret, generateSecret = clickhouserepo.HashSecret, clickhouserepo.GenerateSecret
 	} else {
 		db, connectErr := database.Connect(ctx, cfg.DatabaseURL)
@@ -79,6 +83,7 @@ func main() {
 		store := postgres.New(db.Pool)
 		tenantRepo, credRepo, keyRepo = postgres.NewTenantRepo(store), postgres.NewCredentialRepo(store), postgres.NewApiKeyRepo(store)
 		modelRepo, usageRepo = postgres.NewModelRouteRepo(store), postgres.NewUsageRepo(store)
+		identityRepo, auditRepo = postgres.NewIdentityRepo(store), postgres.NewAuditRepo(store)
 		hashSecret, generateSecret = postgres.HashSecret, postgres.GenerateSecret
 	}
 
@@ -92,6 +97,7 @@ func main() {
 	}
 	credSvc := credential.NewService(credRepo, box)
 	keySvc := apikey.NewService(keyRepo, hashSecret, generateSecret)
+	identitySvc := identity.NewService(identityRepo, auditRepo)
 	modelSvc := modelroute.NewService(modelRepo)
 	priceResolver := pricing.NewResolver(modelRepo)
 	if err := priceResolver.Refresh(ctx); err != nil {
@@ -109,7 +115,7 @@ func main() {
 	pending := usage.NewPending()
 	usageSvc := usage.NewServiceWithConcurrency(usageRepo, cfg.UsageWriteQueueSize, cfg.UsageWriteConcurrency, pending)
 	defer usageSvc.Close()
-	authSvc := auth.NewService(cfg.MasterKey, cfg.SessionSecret, keySvc)
+	authSvc := auth.NewServiceWithIdentity(cfg.MasterKey, cfg.SessionSecret, keySvc, identityRepo)
 	cacheSvc, redisClient, err := promptcache.New(cfg.Cache, cfg.RedisURL)
 	if err != nil {
 		log.Fatal(err)
@@ -199,6 +205,7 @@ func main() {
 	app := routes.New(routes.Dependencies{
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
+		Identity: identitySvc, IdentityRepo: identityRepo, Audit: auditRepo,
 		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc,
 		Pricing:   priceResolver,
 		BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,

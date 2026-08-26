@@ -88,3 +88,87 @@ type UsageRepository interface {
 	SummaryForTenant(ctx context.Context, tenantID string, since time.Time) (*UsageSummary, error)
 	RecentForTenant(ctx context.Context, tenantID string, limit int) ([]RecentEvent, error)
 }
+
+type PageQuery struct {
+	Cursor string
+	Limit  int
+	Query  string
+	Status string
+}
+
+type UserRepository interface {
+	CreateUser(ctx context.Context, user User) error
+	UserByID(ctx context.Context, id string) (*User, error)
+	UserByNormalizedUsername(ctx context.Context, normalized string) (*User, error)
+	ListUsers(ctx context.Context, query PageQuery) ([]User, string, error)
+	UpdateUserStatus(ctx context.Context, id, status string, updatedAt time.Time) error
+}
+
+type OrganizationRepository interface {
+	CreateOrganization(ctx context.Context, organization Organization) error
+	OrganizationByID(ctx context.Context, id string) (*Organization, error)
+	OrganizationByNormalizedName(ctx context.Context, normalized string) (*Organization, error)
+	ListOrganizations(ctx context.Context, query PageQuery) ([]Organization, string, error)
+	UpdateOrganization(ctx context.Context, organization Organization) error
+}
+
+type MembershipRepository interface {
+	PutMembership(ctx context.Context, membership Membership) error
+	Membership(ctx context.Context, organizationID, userID string) (*Membership, error)
+	ListMemberships(ctx context.Context, organizationID string) ([]Membership, error)
+	ListMembershipsForUser(ctx context.Context, userID string) ([]Membership, error)
+	CountActiveOrganizationAdmins(ctx context.Context, organizationID string) (int, error)
+	DeleteMembership(ctx context.Context, organizationID, userID string) error
+}
+
+type UsageVisibility struct {
+	PrincipalType    string
+	UserID           string
+	OrganizationID   string
+	OrganizationWide bool
+}
+
+type UsageQuery struct {
+	Visibility     UsageVisibility
+	Cursor         string
+	Limit          int
+	Since          *time.Time
+	Until          *time.Time
+	OrganizationID string
+	UserID         string
+	Model          string
+	APIKeyID       string
+	StatusCode     *int
+}
+
+type UsagePage struct {
+	Data       []RecentEvent `json:"data"`
+	NextCursor string        `json:"next_cursor,omitempty"`
+}
+
+type PrincipalUsageRepository interface {
+	QueryUsage(ctx context.Context, query UsageQuery) (*UsagePage, error)
+	SummaryUsage(ctx context.Context, query UsageQuery) (*UsageSummary, error)
+}
+
+type AuditQuery struct {
+	Visibility UsageVisibility
+	Cursor     string
+	Limit      int
+	Since      *time.Time
+	Until      *time.Time
+	ActorID    string
+	Action     string
+	TargetType string
+	TargetID   string
+}
+
+type AuditPage struct {
+	Data       []AuditEvent `json:"data"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+}
+
+type AuditRepository interface {
+	AppendAudit(ctx context.Context, event AuditEvent) error
+	QueryAudit(ctx context.Context, query AuditQuery) (*AuditPage, error)
+}

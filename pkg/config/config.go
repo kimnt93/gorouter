@@ -103,7 +103,11 @@ func Load() (*Config, error) {
 	cfg.EncryptionKey = deriveKey(cfg.MasterKey, "credential-encryption")
 	cfg.SessionSecret = deriveKey(cfg.MasterKey, "session-signing")
 
-	backend := strings.ToLower(env("DB_BACKEND", "postgresql"))
+	backendValue := os.Getenv("DATABASE_BACKEND")
+	if backendValue == "" {
+		backendValue = env("DB_BACKEND", "postgresql")
+	}
+	backend := strings.ToLower(backendValue)
 	if backend == "postgres" {
 		backend = "postgresql"
 	}
@@ -114,7 +118,7 @@ func Load() (*Config, error) {
 	case "clickhouse":
 		cfg.ClickHouseURL = clickhouseConnectionURL(env("CLICKHOUSE_HOST", "127.0.0.1"), env("CLICKHOUSE_PORT", "9000"), os.Getenv("CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_DB"), strings.EqualFold(env("CLICKHOUSE_TLS", "false"), "true"))
 	default:
-		return nil, errors.New("DB_BACKEND must be postgresql or clickhouse")
+		return nil, errors.New("DATABASE_BACKEND must be postgres/postgresql or clickhouse")
 	}
 	if backend == "postgresql" && (os.Getenv("DB_USER") == "" || os.Getenv("DB_PASSWORD") == "" || os.Getenv("DB_NAME") == "") {
 		return nil, errors.New("DB_USER, DB_PASSWORD, and DB_NAME are required for PostgreSQL")

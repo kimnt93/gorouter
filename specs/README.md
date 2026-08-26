@@ -80,6 +80,7 @@ Domain and use-case packages must not import Fiber. HTTP concerns stay in `api/`
 | `ui.md` | Templates, HTMX interactions, Tailwind UI requirements |
 | `testing.md` | Unit, integration, multi-node, and smoke-test requirements |
 | `CHECKLIST.md` | Parallel-agent work plan and completion checklist |
+| `identity-organizations-usage/` | User/organization identity, key ownership, usage attribution, API/UI contracts, storage parity, and delegated implementation checklist |
 
 ## Agent Rules
 

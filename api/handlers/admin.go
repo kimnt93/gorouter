@@ -15,6 +15,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	"github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/tenant"
@@ -32,9 +33,14 @@ func (a *Admin) Providers(c fiber.Ctx) error {
 }
 
 type loginResponse struct {
-	OK     bool     `json:"ok"`
-	Role   string   `json:"role"`
-	Scopes []string `json:"scopes"`
+	OK             bool     `json:"ok"`
+	Role           string   `json:"role"`
+	PrincipalType  string   `json:"principal_type"`
+	UserID         string   `json:"user_id,omitempty"`
+	Username       string   `json:"username,omitempty"`
+	OrganizationID string   `json:"organization_id,omitempty"`
+	MembershipRole string   `json:"membership_role,omitempty"`
+	Scopes         []string `json:"scopes"`
 }
 
 type createdAPIKeyResponse struct {
@@ -52,14 +58,17 @@ type createdAPIKeyResponse struct {
 }
 
 type Admin struct {
-	Auth      *auth.Service
-	TenantSvc *tenant.Service
-	CredsSvc  *credential.Service
-	KeysSvc   *apikey.Service
-	ModelsSvc *modelroute.Service
-	UsageSvc  *usage.Service
-	Cache     chat.PromptCache
-	Pricing   PriceCatalog
+	Auth         *auth.Service
+	TenantSvc    *tenant.Service
+	CredsSvc     *credential.Service
+	KeysSvc      *apikey.Service
+	ModelsSvc    *modelroute.Service
+	UsageSvc     *usage.Service
+	Cache        chat.PromptCache
+	Pricing      PriceCatalog
+	IdentitySvc  *identity.Service
+	IdentityRepo identity.Repository
+	AuditRepo    entities.AuditRepository
 }
 
 type priceEstimateResponse struct {
@@ -169,7 +178,7 @@ func (a *Admin) Verify(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodPost && strings.Contains(c.Get("Content-Type"), "application/x-www-form-urlencoded") {
 		return c.Redirect().To("/")
 	}
-	return c.JSON(loginResponse{OK: true, Role: sess.Role, Scopes: sess.Scopes})
+	return c.JSON(loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, Scopes: sess.Scopes})
 }
 
 func (a *Admin) Logout(c fiber.Ctx) error {

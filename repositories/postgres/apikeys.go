@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -311,12 +312,12 @@ func GenerateSecret() string {
 	return "nr-" + hex.EncodeToString(b)
 }
 
-const keyColumns = `k.id,k.tenant_id,k.name,k.key_hash,k.key_prefix,k.models,k.scopes,k.quota_usd,k.quota_period,k.rpm,k.enabled,k.created_at`
+const keyColumns = `k.id,k.tenant_id,k.name,k.key_hash,k.key_prefix,k.models,k.scopes,k.quota_usd,k.quota_period,k.rpm,k.enabled,k.created_at,k.owner_type,coalesce(k.owner_user_id,''),coalesce(k.owner_organization_id,''),coalesce(k.context_organization_id,'')`
 
 func scanApiKey(row pgx.Row) (*entities.ApiKey, error) {
 	var k entities.ApiKey
 	var modelsJSON, scopesJSON []byte
-	err := row.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt)
+	err := row.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.OwnerType, &k.OwnerUserID, &k.OwnerOrganizationID, &k.ContextOrganizationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, entities.ErrNotFound
 	}
@@ -351,17 +352,49 @@ func (r *ApiKeyRepo) CreateWithQuota(ctx context.Context, tenantID, name string,
 		SecretHash: HashSecret(plain), SecretPrefix: plain[:11],
 		Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm, Enabled: true, CreatedAt: time.Now().UTC(),
 		Plaintext: plain,
+		OwnerType: entities.OwnerOrganization, OwnerOrganizationID: tenantID, ContextOrganizationID: tenantID,
 	}
 	modelsJSON, _ := json.Marshal(orEmpty(models))
 	scopesJSON, _ := json.Marshal(orEmpty(scopes))
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO api_keys
-		(id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		k.ID, k.TenantID, k.Name, k.SecretHash, k.SecretPrefix, modelsJSON, scopesJSON, quota, period, rpm, k.Enabled, k.CreatedAt)
+		(id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_organization_id,context_organization_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		k.ID, k.TenantID, k.Name, k.SecretHash, k.SecretPrefix, modelsJSON, scopesJSON, quota, period, rpm, k.Enabled, k.CreatedAt, k.OwnerType, k.OwnerOrganizationID, k.ContextOrganizationID)
 	if err != nil {
 		return nil, err
 	}
 	return k, nil
+}
+
+func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*entities.ApiKey, error) {
+	if err := input.ValidateOwnerShape(); err != nil {
+		return nil, err
+	}
+	plain := GenerateSecret()
+	input.ID, input.SecretHash, input.SecretPrefix = NewID("key"), HashSecret(plain), plain[:11]
+	input.Enabled, input.CreatedAt, input.Plaintext = true, time.Now().UTC(), plain
+	input.TenantID = input.ContextOrganizationID
+	modelsJSON, _ := json.Marshal(orEmpty(input.Models))
+	scopesJSON, _ := json.Marshal(orEmpty(input.Scopes))
+	_, err := r.db.Pool.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id)
+		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),NULLIF($15,''),NULLIF($16,''))`,
+		input.ID, input.TenantID, input.Name, input.SecretHash, input.SecretPrefix, modelsJSON, scopesJSON, input.QuotaUSD, input.QuotaPeriod, input.RPM, input.Enabled, input.CreatedAt, input.OwnerType, input.OwnerUserID, input.OwnerOrganizationID, input.ContextOrganizationID)
+	if err != nil {
+		return nil, err
+	}
+	return &input, nil
+}
+
+func (r *ApiKeyRepo) Rotate(ctx context.Context, id string) (*entities.ApiKey, error) {
+	plain := GenerateSecret()
+	hash, prefix := HashSecret(plain), plain[:11]
+	columns := strings.ReplaceAll(keyColumns, "k.", "")
+	key, err := scanApiKey(r.db.Pool.QueryRow(ctx, `UPDATE api_keys SET key_hash=$1,key_prefix=$2 WHERE id=$3 RETURNING `+columns, hash, prefix, id))
+	if err != nil {
+		return nil, err
+	}
+	key.Plaintext = plain
+	return key, nil
 }
 
 func orEmpty(s []string) []string {
@@ -411,7 +444,7 @@ func (r *ApiKeyRepo) list(ctx context.Context, tenantID string, scoped bool) ([]
 	for rows.Next() {
 		var k entities.ApiKey
 		var modelsJSON, scopesJSON []byte
-		if err := rows.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.TenantName); err != nil {
+		if err := rows.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.OwnerType, &k.OwnerUserID, &k.OwnerOrganizationID, &k.ContextOrganizationID, &k.TenantName); err != nil {
 			return nil, err
 		}
 		k.Models = decodeJSONStrings(modelsJSON)

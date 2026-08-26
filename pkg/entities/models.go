@@ -5,7 +5,10 @@ import (
 	"time"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("conflict")
+)
 
 const (
 	ProviderOpenAICompatible = "openai-compatible"
@@ -94,19 +97,23 @@ type CredentialUpdate struct {
 }
 
 type ApiKey struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	TenantName   string    `json:"tenant_name,omitempty"`
-	Name         string    `json:"name"`
-	SecretHash   string    `json:"-"`
-	SecretPrefix string    `json:"key_prefix"`
-	Models       []string  `json:"models"`
-	Scopes       []string  `json:"scopes"`
-	QuotaUSD     *float64  `json:"quota_usd"`
-	QuotaPeriod  string    `json:"quota_period"`
-	RPM          *int      `json:"rpm"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                    string    `json:"id"`
+	TenantID              string    `json:"tenant_id"`
+	TenantName            string    `json:"tenant_name,omitempty"`
+	Name                  string    `json:"name"`
+	SecretHash            string    `json:"-"`
+	SecretPrefix          string    `json:"key_prefix"`
+	Models                []string  `json:"models"`
+	Scopes                []string  `json:"scopes"`
+	QuotaUSD              *float64  `json:"quota_usd"`
+	QuotaPeriod           string    `json:"quota_period"`
+	RPM                   *int      `json:"rpm"`
+	Enabled               bool      `json:"enabled"`
+	CreatedAt             time.Time `json:"created_at"`
+	OwnerType             string    `json:"owner_type"`
+	OwnerUserID           string    `json:"owner_user_id,omitempty"`
+	OwnerOrganizationID   string    `json:"owner_organization_id,omitempty"`
+	ContextOrganizationID string    `json:"context_organization_id,omitempty"`
 
 	Plaintext string `json:"-"`
 }
@@ -150,6 +157,10 @@ type UsageEvent struct {
 	StatusCode       int       `json:"status_code"`
 	DurationMS       int64     `json:"duration_ms"`
 	Error            string    `json:"error"`
+	ActorType        string    `json:"actor_type"`
+	UserID           string    `json:"user_id"`
+	Username         string    `json:"username"`
+	OrganizationID   string    `json:"organization_id"`
 }
 
 type RecentEvent struct {
@@ -170,6 +181,10 @@ type RecentEvent struct {
 	StatusCode       int       `json:"status_code"`
 	DurationMS       int64     `json:"duration_ms"`
 	Error            string    `json:"error"`
+	ActorType        string    `json:"actor_type"`
+	UserID           string    `json:"user_id"`
+	Username         string    `json:"username"`
+	OrganizationID   string    `json:"organization_id"`
 }
 
 type UsageSummary struct {

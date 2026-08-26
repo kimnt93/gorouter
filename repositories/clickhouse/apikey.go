@@ -33,12 +33,58 @@ func (r *ApiKeyRepo) CreateWithQuota(ctx context.Context, tenant, name string, m
 	}
 	return k, nil
 }
+func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*entities.ApiKey, error) {
+	if e := input.ValidateOwnerShape(); e != nil {
+		return nil, e
+	}
+	plain := GenerateSecret()
+	input.ID, input.SecretHash, input.SecretPrefix = id("key"), HashSecret(plain), plain[:11]
+	input.Enabled, input.CreatedAt, input.Plaintext = true, time.Now().UTC(), plain
+	input.TenantID = input.ContextOrganizationID
+	e := r.s.mutate(ctx, "api_key_hash:"+input.SecretHash, func() error {
+		if e := r.s.put(ctx, "api_key", input.ID, storedAPIKey{input, input.SecretHash}); e != nil {
+			return e
+		}
+		return r.s.put(ctx, "api_key_hash", input.SecretHash, input.ID)
+	})
+	if e != nil {
+		return nil, e
+	}
+	return &input, nil
+}
+func (r *ApiKeyRepo) Rotate(ctx context.Context, keyID string) (*entities.ApiKey, error) {
+	var result *entities.ApiKey
+	err := r.s.mutate(ctx, "api_key:"+keyID, func() error {
+		key, e := r.GetByID(ctx, keyID)
+		if e != nil {
+			return e
+		}
+		oldHash := key.SecretHash
+		plain := GenerateSecret()
+		key.SecretHash, key.SecretPrefix, key.Plaintext = HashSecret(plain), plain[:11], plain
+		if e = r.s.put(ctx, "api_key", keyID, storedAPIKey{*key, key.SecretHash}); e != nil {
+			return e
+		}
+		if e = r.s.put(ctx, "api_key_hash", key.SecretHash, keyID); e != nil {
+			return e
+		}
+		if e = r.s.del(ctx, "api_key_hash", oldHash); e != nil {
+			return e
+		}
+		result = key
+		return nil
+	})
+	return result, err
+}
 func (r *ApiKeyRepo) GetByID(ctx context.Context, id string) (*entities.ApiKey, error) {
 	v, e := get[storedAPIKey](ctx, r.s, "api_key", id)
 	if e != nil {
 		return nil, e
 	}
 	v.SecretHash = v.Hash
+	if v.OwnerType == "" {
+		v.OwnerType, v.OwnerOrganizationID, v.ContextOrganizationID = entities.OwnerOrganization, v.TenantID, v.TenantID
+	}
 	return &v.ApiKey, nil
 }
 func (r *ApiKeyRepo) GetByIDForTenant(ctx context.Context, tenant, id string) (*entities.ApiKey, error) {

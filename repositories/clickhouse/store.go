@@ -9,15 +9,52 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"sync"
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-type Store struct{ Conn ch.Conn }
+type MutationLocker interface {
+	WithLock(ctx context.Context, key string, fn func() error) error
+}
 
-func New(conn ch.Conn) *Store { return &Store{Conn: conn} }
+type Store struct {
+	Conn   ch.Conn
+	locker MutationLocker
+}
+
+func New(conn ch.Conn) *Store { return &Store{Conn: conn, locker: newProcessLocker()} }
+func NewWithLocker(conn ch.Conn, locker MutationLocker) *Store {
+	return &Store{Conn: conn, locker: locker}
+}
+
+func (s *Store) mutate(ctx context.Context, key string, fn func() error) error {
+	if s.locker == nil {
+		return errors.New("clickhouse configuration mutation lock is unavailable")
+	}
+	return s.locker.WithLock(ctx, key, fn)
+}
+
+type processLocker struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newProcessLocker() *processLocker { return &processLocker{locks: make(map[string]*sync.Mutex)} }
+func (l *processLocker) WithLock(_ context.Context, key string, fn func() error) error {
+	l.mu.Lock()
+	lock := l.locks[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		l.locks[key] = lock
+	}
+	l.mu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
+	return fn()
+}
 
 func id(prefix string) string    { return entities.NewID(prefix) }
 func HashSecret(v string) string { h := sha256.Sum256([]byte(v)); return hex.EncodeToString(h[:]) }

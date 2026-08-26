@@ -40,6 +40,11 @@ type quotaRepository interface {
 	PatchQuotaForTenant(ctx context.Context, tenantID, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error
 }
 
+type ownedRepository interface {
+	CreateOwned(ctx context.Context, key entities.ApiKey) (*entities.ApiKey, error)
+	Rotate(ctx context.Context, id string) (*entities.ApiKey, error)
+}
+
 type Service struct {
 	repo   Repository
 	hashFn func(string) string
@@ -54,20 +59,25 @@ func NewService(repo Repository, hashFn func(string) string, genFn func() string
 func (s *Service) hash(secret string) string { return s.hashFn(secret) }
 
 type CreateInput struct {
-	TenantID    string
-	Name        string
-	Models      []string
-	Scopes      []string
-	QuotaUSD    *float64
-	QuotaPeriod string
-	RPM         *int
+	TenantID              string
+	Name                  string
+	Models                []string
+	Scopes                []string
+	QuotaUSD              *float64
+	QuotaPeriod           string
+	RPM                   *int
+	OwnerType             string
+	OwnerUserID           string
+	OwnerOrganizationID   string
+	ContextOrganizationID string
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey, error) {
 	var err error
 	in.TenantID = strings.TrimSpace(in.TenantID)
 	in.Name = strings.TrimSpace(in.Name)
-	if in.TenantID == "" {
+	owned := in.OwnerType != "" || in.OwnerUserID != "" || in.OwnerOrganizationID != "" || in.ContextOrganizationID != ""
+	if !owned && in.TenantID == "" {
 		return nil, ErrTenantRequired
 	}
 	if in.Name == "" {
@@ -86,6 +96,23 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	if err := validateLimits(quota, in.RPM); err != nil {
 		return nil, err
 	}
+	if owned {
+		key := entities.ApiKey{Name: in.Name, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM,
+			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID)}
+		if err := key.ValidateOwnerShape(); err != nil {
+			return nil, err
+		}
+		key.TenantID = key.ContextOrganizationID
+		repo, ok := s.repo.(ownedRepository)
+		if !ok {
+			return nil, errors.New("API key repository does not support principal ownership")
+		}
+		created, err := repo.CreateOwned(ctx, key)
+		if err == nil && s.cache != nil {
+			s.cache.put(ctx, created)
+		}
+		return created, err
+	}
 	if repo, ok := s.repo.(quotaRepository); ok {
 		key, err := repo.CreateWithQuota(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, period, in.RPM)
 		if err == nil && s.cache != nil {
@@ -95,6 +122,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	}
 	key, err := s.repo.Create(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, in.RPM)
 	if err == nil && s.cache != nil {
+		s.cache.put(ctx, key)
+	}
+	return key, err
+}
+
+func (s *Service) Rotate(ctx context.Context, id string) (*entities.ApiKey, error) {
+	repo, ok := s.repo.(ownedRepository)
+	if !ok {
+		return nil, errors.New("API key repository does not support rotation")
+	}
+	key, err := repo.Rotate(ctx, strings.TrimSpace(id))
+	if err == nil && s.cache != nil {
+		s.cache.invalidate(ctx, id, "")
 		s.cache.put(ctx, key)
 	}
 	return key, err

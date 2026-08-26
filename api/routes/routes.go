@@ -15,6 +15,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 	"github.com/kimnt93/gorouter/pkg/tenant"
@@ -22,22 +23,25 @@ import (
 )
 
 type Dependencies struct {
-	Auth              *auth.Service
-	Tenants           *tenant.Service
-	Credentials       *credential.Service
-	Keys              *apikey.Service
-	Models            *modelroute.Service
-	Usage             *usage.Service
-	Cache             chat.PromptCache
-	Gateway           *handlers.Gateway
-	OpenAI            credential.ConnectivityProber
-	Anthropic         credential.ConnectivityProber
-	Codex             credential.ConnectivityProber
-	Providers         map[string]credential.ConnectivityProber
-	OAuth             *oauthpkg.Service
-	Pricing           handlers.PriceCatalog
-	BodyLimit         int
-	ReadTimeout       time.Duration
+	Auth         *auth.Service
+	Tenants      *tenant.Service
+	Credentials  *credential.Service
+	Keys         *apikey.Service
+	Models       *modelroute.Service
+	Usage        *usage.Service
+	Cache        chat.PromptCache
+	Gateway      *handlers.Gateway
+	OpenAI       credential.ConnectivityProber
+	Anthropic    credential.ConnectivityProber
+	Codex        credential.ConnectivityProber
+	Providers    map[string]credential.ConnectivityProber
+	OAuth        *oauthpkg.Service
+	Pricing      handlers.PriceCatalog
+	BodyLimit    int
+	ReadTimeout  time.Duration
+	Identity     *identity.Service
+	IdentityRepo identity.Repository
+	Audit        entities.AuditRepository
 }
 
 type healthResponse struct {
@@ -90,10 +94,23 @@ func New(d Dependencies) *fiber.App {
 	app.Post("/v1/chat/completions/", handlers.Require(d.Auth, "chat"), d.Gateway.Chat)
 	app.Get("/v1/models", handlers.Require(d.Auth, "chat"), d.Gateway.ListModels)
 
-	admin := &handlers.Admin{Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing}
+	admin := &handlers.Admin{Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit}
 	mgmt := app.Group("/admin", handlers.Require(d.Auth, ""))
 	mgmt.Get("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
 	mgmt.Post("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
+	mgmt.Get("/organizations", admin.Organizations)
+	mgmt.Post("/organizations", admin.Organizations)
+	mgmt.Get("/organizations/:id", admin.OrganizationByID)
+	mgmt.Patch("/organizations/:id", admin.OrganizationByID)
+	mgmt.Get("/organizations/:id/members", admin.Members)
+	mgmt.Post("/organizations/:id/members", admin.Members)
+	mgmt.Patch("/organizations/:id/members/:user_id", admin.MemberByID)
+	mgmt.Delete("/organizations/:id/members/:user_id", admin.MemberByID)
+	mgmt.Get("/users", admin.Users)
+	mgmt.Post("/users", admin.Users)
+	mgmt.Get("/users/:id", admin.UserByID)
+	mgmt.Patch("/users/:id", admin.UserByID)
+	mgmt.Get("/audit/events", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.AuditEvents)
 	mgmt.Get("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Put("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
