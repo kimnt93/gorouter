@@ -478,6 +478,23 @@ definitions:
       username:
         type: string
     type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageActivityBucket:
+    properties:
+      cache_read_tokens:
+        type: integer
+      cache_write_tokens:
+        type: integer
+      completion_tokens:
+        type: integer
+      cost_usd:
+        type: number
+      prompt_tokens:
+        type: integer
+      requests:
+        type: integer
+      start:
+        type: string
+    type: object
   github_com_kimnt93_gorouter_pkg_entities.UsageSummary:
     properties:
       by_key:
@@ -491,6 +508,8 @@ definitions:
       cache_hits:
         type: integer
       cache_read_tokens:
+        type: integer
+      cache_write_tokens:
         type: integer
       completion_tokens:
         type: integer
@@ -957,6 +976,15 @@ definitions:
       object:
         type: string
       provider:
+        type: string
+    type: object
+  internal_api_handlers.UsageActivityResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageActivityBucket'
+        type: array
+      group_by:
         type: string
     type: object
   internal_api_handlers.UsageRecentResponse:
@@ -2554,6 +2582,64 @@ paths:
       summary: Deprecated organization alias
       tags:
       - organizations
+  /admin/usage/activity:
+    get:
+      parameters:
+      - description: 1d, 7d, 30d, 90d, ytd, or all
+        in: query
+        name: range
+        type: string
+      - description: RFC3339 lower bound for a custom range
+        in: query
+        name: since
+        type: string
+      - description: RFC3339 upper bound for a custom range
+        in: query
+        name: until
+        type: string
+      - default: day
+        description: hour, day, or week
+        in: query
+        name: group_by
+        type: string
+      - description: Organization filter
+        in: query
+        name: organization_id
+        type: string
+      - description: User filter
+        in: query
+        name: user_id
+        type: string
+      - description: API-key filter
+        in: query
+        name: api_key_id
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.UsageActivityResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+      security:
+      - BearerAuth: []
+      summary: Get usage activity
+      tags:
+      - usage
   /admin/usage/recent:
     get:
       parameters:
