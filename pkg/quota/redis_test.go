@@ -119,13 +119,12 @@ func TestRedisOutagePolicies(t *testing.T) {
 }
 
 func TestWindowUTCBoundaries(t *testing.T) {
+	SetWeekStart(time.Sunday)
 	now := time.Date(2026, time.August, 26, 16, 30, 0, 0, time.FixedZone("ICT", 7*60*60))
 	tests := []struct {
 		period, start, end, suffix string
 	}{
-		{"day", "2026-08-26T00:00:00Z", "2026-08-27T00:00:00Z", "2026-08-26"},
-		{"week", "2026-08-24T00:00:00Z", "2026-08-31T00:00:00Z", "2026-W35"},
-		{"month", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "2026-08"},
+		{"week", "2026-08-23T00:00:00Z", "2026-08-30T00:00:00Z", "2026-08-23"},
 	}
 	for _, tt := range tests {
 		start, end, suffix, err := Window(tt.period, now)
@@ -136,6 +135,13 @@ func TestWindowUTCBoundaries(t *testing.T) {
 			t.Fatalf("%s window = %s %s %s", tt.period, start, end, suffix)
 		}
 	}
+}
+
+func TestWindowConfigurableWeekStart(t *testing.T) {
+	SetWeekStart(time.Monday)
+	t.Cleanup(func(){ SetWeekStart(time.Sunday) })
+	start,end,suffix,err:=Window("week",time.Date(2027,time.January,1,12,0,0,0,time.UTC))
+	if err!=nil || start.Format("2006-01-02")!="2026-12-28" || end.Format("2006-01-02")!="2027-01-04" || suffix!="2026-12-28" { t.Fatalf("window = %s %s %s err=%v",start,end,suffix,err) }
 }
 
 func TestNoLimitBypassesRedis(t *testing.T) {

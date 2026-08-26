@@ -55,7 +55,7 @@ func NewRedis(rdb redis.UniversalClient, policy Policy) (*Redis, error) {
 }
 
 func (r *Redis) Reserve(ctx context.Context, keyID string, limit, durableSpent, estimated float64, now time.Time) (*Reservation, error) {
-	return r.ReserveForPeriod(ctx, keyID, limit, durableSpent, estimated, "month", now)
+	return r.ReserveForPeriod(ctx, keyID, limit, durableSpent, estimated, "week", now)
 }
 
 func (r *Redis) ReserveForPeriod(ctx context.Context, keyID string, limit, durableSpent, estimated float64, period string, now time.Time) (*Reservation, error) {

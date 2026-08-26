@@ -322,9 +322,7 @@ func scanApiKey(row pgx.Row) (*entities.ApiKey, error) {
 	}
 	k.Models = decodeJSONStrings(modelsJSON)
 	k.Scopes = decodeJSONStrings(scopesJSON)
-	if k.QuotaPeriod == entities.QuotaPeriodMonth {
-		k.MonthlyQuotaUSD = k.QuotaUSD
-	}
+	k.MonthlyQuotaUSD = nil
 	return &k, nil
 }
 
@@ -339,7 +337,7 @@ func decodeJSONStrings(b []byte) []string {
 func (r *ApiKeyRepo) Create(ctx context.Context, tenantID, name string, models, scopes []string, quota *float64, rpm *int) (*entities.ApiKey, error) {
 	period := entities.QuotaPeriodNone
 	if quota != nil {
-		period = entities.QuotaPeriodMonth
+		period = entities.QuotaPeriodWeek
 	}
 	return r.CreateWithQuota(ctx, tenantID, name, models, scopes, quota, period, rpm)
 }
@@ -351,9 +349,6 @@ func (r *ApiKeyRepo) CreateWithQuota(ctx context.Context, tenantID, name string,
 		SecretHash: HashSecret(plain), SecretPrefix: plain[:11],
 		Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm, Enabled: true,
 		Plaintext: plain,
-	}
-	if period == entities.QuotaPeriodMonth {
-		k.MonthlyQuotaUSD = quota
 	}
 	modelsJSON, _ := json.Marshal(orEmpty(models))
 	scopesJSON, _ := json.Marshal(orEmpty(scopes))
@@ -419,9 +414,6 @@ func (r *ApiKeyRepo) list(ctx context.Context, tenantID string, scoped bool) ([]
 		}
 		k.Models = decodeJSONStrings(modelsJSON)
 		k.Scopes = decodeJSONStrings(scopesJSON)
-		if k.QuotaPeriod == entities.QuotaPeriodMonth {
-			k.MonthlyQuotaUSD = k.QuotaUSD
-		}
 		out = append(out, k)
 	}
 	return out, rows.Err()
@@ -443,7 +435,7 @@ func legacyPatchPeriod(quota **float64) *string {
 	}
 	period := entities.QuotaPeriodNone
 	if *quota != nil {
-		period = entities.QuotaPeriodMonth
+		period = entities.QuotaPeriodWeek
 	}
 	return &period
 }
@@ -481,7 +473,7 @@ func (r *ApiKeyRepo) patch(ctx context.Context, tenantID, id string, scoped bool
 		if period == nil {
 			inferred := entities.QuotaPeriodNone
 			if *quota != nil {
-				inferred = entities.QuotaPeriodMonth
+				inferred = entities.QuotaPeriodWeek
 			}
 			period = &inferred
 		}

@@ -83,3 +83,27 @@ func TestServiceRetriesAndTracksPending(t *testing.T) {
 		t.Fatalf("want one durable event, got %d", len(repo.events))
 	}
 }
+
+type concurrencyRepo struct {
+	*testRepo
+	active int
+	max int
+}
+
+func (r *concurrencyRepo) InsertBatch(_ context.Context, events []entities.UsageEvent) error {
+	r.mu.Lock(); r.active++; if r.active>r.max { r.max=r.active }; r.mu.Unlock()
+	time.Sleep(20*time.Millisecond)
+	r.mu.Lock(); r.events=append(r.events,events...); r.active--; r.mu.Unlock()
+	return nil
+}
+
+func TestServiceUsesConfiguredWritersAndDrains(t *testing.T) {
+	repo:=&concurrencyRepo{testRepo:&testRepo{}}
+	svc:=NewServiceWithConcurrency(repo,100000,4,NewPending())
+	for i:=0;i<1024;i++ { if err:=svc.RecordContext(context.Background(),entities.UsageEvent{ApiKeyID:"key"});err!=nil{t.Fatal(err)} }
+	ctx,cancel:=context.WithTimeout(context.Background(),3*time.Second);defer cancel()
+	if err:=svc.CloseContext(ctx);err!=nil{t.Fatal(err)}
+	repo.mu.Lock();defer repo.mu.Unlock()
+	if len(repo.events)!=1024{t.Fatalf("durable events=%d, want 1024",len(repo.events))}
+	if repo.max<2{t.Fatalf("max concurrent writes=%d, want at least 2",repo.max)}
+}

@@ -31,8 +31,14 @@ import (
 	"github.com/kimnt93/gorouter/platform/llm"
 	platformpricing "github.com/kimnt93/gorouter/platform/pricing"
 	"github.com/kimnt93/gorouter/platform/promptcache"
+	clickhouserepo "github.com/kimnt93/gorouter/repositories/clickhouse"
 	"github.com/kimnt93/gorouter/repositories/postgres"
 )
+
+type modelStore interface {
+	modelroute.Repository
+	entities.CatalogPriceRepository
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -41,28 +47,51 @@ func main() {
 	}
 
 	ctx := context.Background()
-	db, err := database.Connect(ctx, cfg.DatabaseURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		log.Fatal(err)
+	var tenantRepo tenant.Repository
+	var credRepo credential.Repository
+	var keyRepo apikey.Repository
+	var modelRepo modelStore
+	var usageRepo usage.Repository
+	var hashSecret func(string) string
+	var generateSecret func() string
+	if cfg.DatabaseBackend == "clickhouse" {
+		db, connectErr := database.ConnectClickHouse(ctx, cfg.ClickHouseURL)
+		if connectErr != nil {
+			log.Fatal(connectErr)
+		}
+		defer db.Close()
+		if err := db.Migrate(ctx); err != nil {
+			log.Fatal(err)
+		}
+		store := clickhouserepo.New(db.Conn)
+		tenantRepo, credRepo, keyRepo = clickhouserepo.NewTenantRepo(store), clickhouserepo.NewCredentialRepo(store), clickhouserepo.NewApiKeyRepo(store)
+		modelRepo, usageRepo = clickhouserepo.NewModelRouteRepo(store), clickhouserepo.NewUsageRepo(store)
+		hashSecret, generateSecret = clickhouserepo.HashSecret, clickhouserepo.GenerateSecret
+	} else {
+		db, connectErr := database.Connect(ctx, cfg.DatabaseURL)
+		if connectErr != nil {
+			log.Fatal(connectErr)
+		}
+		defer db.Close()
+		if err := db.Migrate(ctx); err != nil {
+			log.Fatal(err)
+		}
+		store := postgres.New(db.Pool)
+		tenantRepo, credRepo, keyRepo = postgres.NewTenantRepo(store), postgres.NewCredentialRepo(store), postgres.NewApiKeyRepo(store)
+		modelRepo, usageRepo = postgres.NewModelRouteRepo(store), postgres.NewUsageRepo(store)
+		hashSecret, generateSecret = postgres.HashSecret, postgres.GenerateSecret
 	}
 
 	box, err := seal.New(cfg.EncryptionKey)
 	if err != nil {
 		log.Fatal(err)
 	}
-	repoDB := postgres.New(db.Pool)
-	tenantSvc := tenant.NewService(postgres.NewTenantRepo(repoDB))
+	tenantSvc := tenant.NewService(tenantRepo)
 	if err := tenantSvc.EnsureDefault(ctx); err != nil {
 		log.Fatal(err)
 	}
-	credSvc := credential.NewService(postgres.NewCredentialRepo(repoDB), box)
-	keyRepo := postgres.NewApiKeyRepo(repoDB)
-	keySvc := apikey.NewService(keyRepo, postgres.HashSecret, postgres.GenerateSecret)
-	modelRepo := postgres.NewModelRouteRepo(repoDB)
+	credSvc := credential.NewService(credRepo, box)
+	keySvc := apikey.NewService(keyRepo, hashSecret, generateSecret)
 	modelSvc := modelroute.NewService(modelRepo)
 	priceResolver := pricing.NewResolver(modelRepo)
 	if err := priceResolver.Refresh(ctx); err != nil {
@@ -78,7 +107,7 @@ func main() {
 		priceSync.Start(ctx, cfg.Pricing.SyncInterval, func(err error) { log.Printf("sync OpenRouter catalog: %v", err) })
 	}
 	pending := usage.NewPending()
-	usageSvc := usage.NewService(postgres.NewUsageRepo(repoDB), 2048, pending)
+	usageSvc := usage.NewServiceWithConcurrency(usageRepo, cfg.UsageWriteQueueSize, cfg.UsageWriteConcurrency, pending)
 	defer usageSvc.Close()
 	authSvc := auth.NewService(cfg.MasterKey, cfg.SessionSecret, keySvc)
 	cacheSvc, redisClient, err := promptcache.New(cfg.Cache, cfg.RedisURL)
@@ -104,6 +133,10 @@ func main() {
 		}
 		defer redisClient.Close()
 	}
+	if redisClient != nil {
+		keySvc.SetTokenCache(redisClient, cfg.APITokenCacheTTL)
+	}
+	quota.SetWeekStart(cfg.WeekStart)
 	var quotaSvc quota.Coordinator
 	if redisClient != nil {
 		policy, parseErr := quota.ParsePolicy(cfg.Quota.RedisPolicy)

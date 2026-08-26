@@ -101,9 +101,9 @@ func TestCreateNormalizesQuotaPeriods(t *testing.T) {
 		wantPeriod string
 	}{
 		{"no limit", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: "none"}, nil, entities.QuotaPeriodNone},
-		{"daily", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: " DAY "}, &quota, entities.QuotaPeriodDay},
-		{"generic default", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota}, &quota, entities.QuotaPeriodMonth},
-		{"legacy monthly", CreateInput{TenantID: "t", Name: "k", MonthlyQuotaUSD: &quota}, &quota, entities.QuotaPeriodMonth},
+		{"weekly", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: " WEEK "}, &quota, entities.QuotaPeriodWeek},
+		{"generic default", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota}, &quota, entities.QuotaPeriodWeek},
+		{"legacy value becomes weekly", CreateInput{TenantID: "t", Name: "k", MonthlyQuotaUSD: &quota}, &quota, entities.QuotaPeriodWeek},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,7 +132,8 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 		{"scope", CreateInput{TenantID: "t", Name: "x", Scopes: []string{"admin"}}, ErrInvalidScope},
 		{"quota", CreateInput{TenantID: "t", Name: "x", MonthlyQuotaUSD: &quota}, ErrInvalidQuota},
 		{"period", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "year"}, ErrInvalidPeriod},
-		{"missing quota", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "day"}, ErrQuotaRequired},
+		{"missing quota", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "week"}, ErrQuotaRequired},
+		{"daily rejected", CreateInput{TenantID: "t", Name: "x", QuotaUSD: new(float64), QuotaPeriod: "day"}, ErrInvalidPeriod},
 		{"rpm", CreateInput{TenantID: "t", Name: "x", RPM: &rpm}, ErrInvalidRPM},
 	}
 	for _, tt := range tests {

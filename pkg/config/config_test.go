@@ -131,12 +131,14 @@ func TestRedisIsOptionalForDevelopment(t *testing.T) {
 	}
 }
 
-func TestRejectsClickHouseAsPrimaryStore(t *testing.T) {
+func TestAcceptsClickHouseAsPrimaryStore(t *testing.T) {
 	requiredEnv(t)
 	t.Setenv("DB_BACKEND", "clickhouse")
-	if _, err := Load(); err == nil {
-		t.Fatal("unsupported ClickHouse primary store was accepted")
-	}
+	t.Setenv("CLICKHOUSE_USER", "gorouter")
+	t.Setenv("CLICKHOUSE_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_DB", "gorouter")
+	cfg,err:=Load();if err!=nil{t.Fatal(err)}
+	if cfg.ClickHouseURL==""{t.Fatal("ClickHouse URL is empty")}
 }
 
 func TestRejectsInvalidLimitsAndScope(t *testing.T) {

@@ -114,10 +114,8 @@ type ApiKey struct {
 }
 
 const (
-	QuotaPeriodNone  = "none"
-	QuotaPeriodDay   = "day"
-	QuotaPeriodWeek  = "week"
-	QuotaPeriodMonth = "month"
+	QuotaPeriodNone = "none"
+	QuotaPeriodWeek = "week"
 )
 
 type ModelRoute struct {

@@ -37,7 +37,7 @@ func TestKeysTemplateRendersImportedModelsAsCheckboxes(t *testing.T) {
 	for _, marker := range []string{
 		`type="checkbox" name="models" value="cx/gpt-5.5"`,
 		`type="checkbox" name="models" value="groq/llama-3.1-8b-instant"`,
-		`value="day">Daily`, `value="week">Weekly`, `value="month">Monthly`,
+		`value="week">Weekly`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("keys template missing %q", marker)

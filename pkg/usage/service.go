@@ -10,55 +10,65 @@ import (
 )
 
 type Repository interface {
-	MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error)
-	SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error)
-	Summary(ctx context.Context, since time.Time) (*entities.UsageSummary, error)
-	Recent(ctx context.Context, limit int) ([]entities.RecentEvent, error)
-	SummaryForTenant(ctx context.Context, tenantID string, since time.Time) (*entities.UsageSummary, error)
-	RecentForTenant(ctx context.Context, tenantID string, limit int) ([]entities.RecentEvent, error)
-	InsertBatch(ctx context.Context, events []entities.UsageEvent) error
+	MonthSpendForKey(context.Context, string) (float64, error)
+	SpendForKeySince(context.Context, string, time.Time) (float64, error)
+	Summary(context.Context, time.Time) (*entities.UsageSummary, error)
+	Recent(context.Context, int) ([]entities.RecentEvent, error)
+	SummaryForTenant(context.Context, string, time.Time) (*entities.UsageSummary, error)
+	RecentForTenant(context.Context, string, int) ([]entities.RecentEvent, error)
+	InsertBatch(context.Context, []entities.UsageEvent) error
 }
 
 type Service struct {
-	repo    Repository
-	ch      chan entities.UsageEvent
-	stop    chan struct{}
-	force   chan struct{}
-	done    chan struct{}
-	pending *Pending
-	close   sync.Once
-	forcing sync.Once
+	repo      Repository
+	ch        chan entities.UsageEvent
+	jobs      chan []entities.UsageEvent
+	force     chan struct{}
+	done      chan struct{}
+	pending   *Pending
+	mu        sync.RWMutex
+	closed    bool
+	closeOnce sync.Once
+	forceOnce sync.Once
+	workers   sync.WaitGroup
 }
 
 var ErrClosed = errors.New("usage service closed")
 
 func NewService(repo Repository, buffer int, pending *Pending) *Service {
+	return NewServiceWithConcurrency(repo, buffer, 1, pending)
+}
+
+func NewServiceWithConcurrency(repo Repository, buffer, concurrency int, pending *Pending) *Service {
 	if buffer <= 0 {
-		buffer = 1024
+		buffer = 100000
 	}
-	s := &Service{repo: repo, ch: make(chan entities.UsageEvent, buffer), stop: make(chan struct{}), force: make(chan struct{}), done: make(chan struct{}), pending: pending}
-	go s.run()
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	s := &Service{repo: repo, ch: make(chan entities.UsageEvent, buffer), jobs: make(chan []entities.UsageEvent, concurrency*2), force: make(chan struct{}), done: make(chan struct{}), pending: pending}
+	for i := 0; i < concurrency; i++ {
+		s.workers.Add(1)
+		go s.worker()
+	}
+	go s.dispatch()
 	return s
 }
 
-func (s *Service) Record(ev entities.UsageEvent) {
-	_ = s.RecordContext(context.Background(), ev)
-}
+func (s *Service) Record(ev entities.UsageEvent) { _ = s.RecordContext(context.Background(), ev) }
 
-// RecordContext applies backpressure instead of silently dropping billable
-// usage when the buffer is full.
 func (s *Service) RecordContext(ctx context.Context, ev entities.UsageEvent) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
 	if s.pending != nil {
 		s.pending.Add(ev.ApiKeyID, ev.CostUSD)
 	}
 	select {
 	case s.ch <- ev:
 		return nil
-	case <-s.stop:
-		if s.pending != nil {
-			s.pending.Sub(ev.ApiKeyID, ev.CostUSD)
-		}
-		return ErrClosed
 	case <-ctx.Done():
 		if s.pending != nil {
 			s.pending.Sub(ev.ApiKeyID, ev.CostUSD)
@@ -74,19 +84,19 @@ func (s *Service) Close() {
 }
 
 func (s *Service) CloseContext(ctx context.Context) error {
-	s.close.Do(func() { close(s.stop) })
+	s.closeOnce.Do(func() { s.mu.Lock(); s.closed = true; close(s.ch); s.mu.Unlock() })
 	select {
 	case <-s.done:
 		return nil
 	case <-ctx.Done():
-		s.forcing.Do(func() { close(s.force) })
+		s.forceOnce.Do(func() { close(s.force) })
 		<-s.done
 		return ctx.Err()
 	}
 }
 
-func (s *Service) run() {
-	defer close(s.done)
+func (s *Service) dispatch() {
+	defer func() { close(s.jobs); s.workers.Wait(); close(s.done) }()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	batch := make([]entities.UsageEvent, 0, 256)
@@ -94,88 +104,89 @@ func (s *Service) run() {
 		if len(batch) == 0 {
 			return true
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := s.repo.InsertBatch(ctx, batch)
-		cancel()
-		if err != nil {
+		job := append([]entities.UsageEvent(nil), batch...)
+		select {
+		case s.jobs <- job:
+			batch = batch[:0]
+			return true
+		case <-s.force:
 			return false
 		}
-		if s.pending != nil {
-			for _, ev := range batch {
-				s.pending.Sub(ev.ApiKeyID, ev.CostUSD)
-			}
-		}
-		batch = batch[:0]
-		return true
 	}
 	for {
 		select {
-		case ev := <-s.ch:
-			batch = append(batch, ev)
-			if len(batch) >= 256 {
+		case ev, ok := <-s.ch:
+			if !ok {
 				_ = flush()
+				return
+			}
+			batch = append(batch, ev)
+			if len(batch) >= 256 && !flush() {
+				return
 			}
 		case <-ticker.C:
-			_ = flush()
-		case <-s.stop:
-			for {
-				select {
-				case ev := <-s.ch:
-					batch = append(batch, ev)
-					continue
-				default:
-				}
-				break
+			if !flush() {
+				return
 			}
-			for len(batch) > 0 && !flush() {
-				select {
-				case <-s.force:
-					return
-				case <-time.After(50 * time.Millisecond):
-				}
-			}
+		case <-s.force:
 			return
 		}
 	}
 }
 
-func (s *Service) MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error) {
-	dbSpent, err := s.repo.MonthSpendForKey(ctx, apiKeyID)
+func (s *Service) worker() {
+	defer s.workers.Done()
+	for batch := range s.jobs {
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := s.repo.InsertBatch(ctx, batch)
+			cancel()
+			if err == nil {
+				if s.pending != nil {
+					for _, ev := range batch {
+						s.pending.Sub(ev.ApiKeyID, ev.CostUSD)
+					}
+				}
+				break
+			}
+			select {
+			case <-s.force:
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+}
+
+func (s *Service) MonthSpendForKey(ctx context.Context, id string) (float64, error) {
+	v, err := s.repo.MonthSpendForKey(ctx, id)
 	if err != nil {
 		return 0, err
 	}
 	if s.pending != nil {
-		return dbSpent + s.pending.Load(apiKeyID), nil
+		v += s.pending.Load(id)
 	}
-	return dbSpent, nil
+	return v, nil
 }
-
-// SpendForKeySince returns durable and not-yet-flushed usage for a quota
-// window. Pending usage is deliberately included so rapid concurrent requests
-// cannot exceed a limit while the asynchronous writer is still flushing.
-func (s *Service) SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error) {
-	dbSpent, err := s.repo.SpendForKeySince(ctx, apiKeyID, since.UTC())
+func (s *Service) SpendForKeySince(ctx context.Context, id string, since time.Time) (float64, error) {
+	v, err := s.repo.SpendForKeySince(ctx, id, since.UTC())
 	if err != nil {
 		return 0, err
 	}
 	if s.pending != nil {
-		return dbSpent + s.pending.Load(apiKeyID), nil
+		v += s.pending.Load(id)
 	}
-	return dbSpent, nil
+	return v, nil
 }
-
 func (s *Service) Summary(ctx context.Context, since time.Time) (*entities.UsageSummary, error) {
 	return s.repo.Summary(ctx, since)
 }
-
 func (s *Service) Recent(ctx context.Context, limit int) ([]entities.RecentEvent, error) {
 	return s.repo.Recent(ctx, limit)
 }
-
-func (s *Service) SummaryForTenant(ctx context.Context, tenantID string, since time.Time) (*entities.UsageSummary, error) {
-	return s.repo.SummaryForTenant(ctx, tenantID, since)
+func (s *Service) SummaryForTenant(ctx context.Context, id string, since time.Time) (*entities.UsageSummary, error) {
+	return s.repo.SummaryForTenant(ctx, id, since)
 }
-
-func (s *Service) RecentForTenant(ctx context.Context, tenantID string, limit int) ([]entities.RecentEvent, error) {
-	return s.repo.RecentForTenant(ctx, tenantID, limit)
+func (s *Service) RecentForTenant(ctx context.Context, id string, limit int) ([]entities.RecentEvent, error) {
+	return s.repo.RecentForTenant(ctx, id, limit)
 }

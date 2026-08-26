@@ -17,7 +17,12 @@ type Config struct {
 	Listen                       string
 	DatabaseBackend              string
 	DatabaseURL                  string
+	ClickHouseURL                string
 	RedisURL                     string
+	APITokenCacheTTL             time.Duration
+	WeekStart                    time.Weekday
+	UsageWriteConcurrency        int
+	UsageWriteQueueSize          int
 	MasterKey                    string
 	EncryptionKey                string
 	SessionSecret                string
@@ -80,7 +85,11 @@ func Load() (*Config, error) {
 			MaxTotalBytes: 256 << 20,
 			AllowMemory:   !strings.EqualFold(env("APP_ENV", "development"), "production"),
 		},
-		Quota: QuotaConfig{RedisPolicy: "strict"},
+		Quota:                 QuotaConfig{RedisPolicy: "strict"},
+		APITokenCacheTTL:      10 * time.Minute,
+		WeekStart:             time.Sunday,
+		UsageWriteConcurrency: 4,
+		UsageWriteQueueSize:   100000,
 		Pricing: PricingConfig{
 			Enabled:      true,
 			CatalogURL:   "https://openrouter.ai/api/frontend/v1/catalog/models",
@@ -103,12 +112,15 @@ func Load() (*Config, error) {
 	case "postgresql":
 		cfg.DatabaseURL = postgresConnectionURL(env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"), env("DB_SSLMODE", "disable"))
 	case "clickhouse":
-		return nil, errors.New("DB_BACKEND=clickhouse is not supported as the primary store; ClickHouse is currently an analytics sink and PostgreSQL is required for transactional configuration")
+		cfg.ClickHouseURL = clickhouseConnectionURL(env("CLICKHOUSE_HOST", "127.0.0.1"), env("CLICKHOUSE_PORT", "9000"), os.Getenv("CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_DB"), strings.EqualFold(env("CLICKHOUSE_TLS", "false"), "true"))
 	default:
 		return nil, errors.New("DB_BACKEND must be postgresql or clickhouse")
 	}
-	if os.Getenv("DB_USER") == "" || os.Getenv("DB_PASSWORD") == "" || os.Getenv("DB_NAME") == "" {
-		return nil, errors.New("DB_USER, DB_PASSWORD, and DB_NAME are required")
+	if backend == "postgresql" && (os.Getenv("DB_USER") == "" || os.Getenv("DB_PASSWORD") == "" || os.Getenv("DB_NAME") == "") {
+		return nil, errors.New("DB_USER, DB_PASSWORD, and DB_NAME are required for PostgreSQL")
+	}
+	if backend == "clickhouse" && (os.Getenv("CLICKHOUSE_USER") == "" || os.Getenv("CLICKHOUSE_PASSWORD") == "" || os.Getenv("CLICKHOUSE_DB") == "") {
+		return nil, errors.New("CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and CLICKHOUSE_DB are required for ClickHouse")
 	}
 	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" {
 		cfg.RedisURL = connectionURL("redis", redisHost, env("REDIS_PORT", "6379"), os.Getenv("REDIS_USER"), os.Getenv("REDIS_PASSWORD"), "0")
@@ -119,6 +131,34 @@ func Load() (*Config, error) {
 			return nil, errors.New("REQUEST_LIMIT_MB must be a positive integer")
 		}
 		cfg.RequestLimit = int64(n) << 20
+	}
+	if v := os.Getenv("API_TOKEN_CACHE_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.New("API_TOKEN_CACHE_TTL must be a positive duration")
+		}
+		cfg.APITokenCacheTTL = d
+	}
+	if v := strings.TrimSpace(os.Getenv("WEEK_START")); v != "" {
+		weekday, err := parseWeekday(v)
+		if err != nil {
+			return nil, err
+		}
+		cfg.WeekStart = weekday
+	}
+	if v := os.Getenv("USAGE_WRITE_CONCURRENCY"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return nil, errors.New("USAGE_WRITE_CONCURRENCY must be a positive integer")
+		}
+		cfg.UsageWriteConcurrency = n
+	}
+	if v := os.Getenv("USAGE_WRITE_QUEUE_SIZE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return nil, errors.New("USAGE_WRITE_QUEUE_SIZE must be a positive integer")
+		}
+		cfg.UsageWriteQueueSize = n
 	}
 	if v := os.Getenv("CACHE_ENABLED"); v != "" {
 		cfg.Cache.Enabled = strings.EqualFold(v, "true") || v == "1"
@@ -216,6 +256,25 @@ func postgresConnectionURL(host, port, user, password, name, sslMode string) str
 	query.Set("sslmode", sslMode)
 	u.RawQuery = query.Encode()
 	return u.String()
+}
+
+func clickhouseConnectionURL(host, port, user, password, name string, tls bool) string {
+	scheme := "clickhouse"
+	if tls {
+		scheme = "clickhouses"
+	}
+	return connectionURL(scheme, host, port, user, password, name)
+}
+
+func parseWeekday(v string) (time.Weekday, error) {
+	names := []string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"}
+	v = strings.ToLower(strings.TrimSpace(v))
+	for i, name := range names {
+		if v == name || v == name[:3] || v == strconv.Itoa(i) {
+			return time.Weekday(i), nil
+		}
+	}
+	return 0, errors.New("WEEK_START must be sunday..saturday or 0..6")
 }
 
 func deriveKey(masterKey, purpose string) string {

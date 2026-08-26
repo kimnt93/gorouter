@@ -358,7 +358,7 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 		quotaValue = b.Quota
 		legacyPeriod := entities.QuotaPeriodNone
 		if *b.Quota != nil {
-			legacyPeriod = entities.QuotaPeriodMonth
+			legacyPeriod = entities.QuotaPeriodWeek
 		}
 		period = &legacyPeriod
 	}

@@ -133,7 +133,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	quotaPeriod := key.QuotaPeriod
 	if quotaLimit == nil && key.MonthlyQuotaUSD != nil {
 		quotaLimit = key.MonthlyQuotaUSD
-		quotaPeriod = entities.QuotaPeriodMonth
+		quotaPeriod = entities.QuotaPeriodWeek
 	}
 	if quotaLimit != nil && quotaPeriod != entities.QuotaPeriodNone {
 		if g.Quota == nil {
@@ -156,7 +156,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 		if periodQuota, ok := g.Quota.(quota.PeriodCoordinator); ok {
 			reservation, err = periodQuota.ReserveForPeriod(c.Context(), key.ID, *quotaLimit, spent, estimate.USD, quotaPeriod, started)
-		} else if quotaPeriod == entities.QuotaPeriodMonth || quotaPeriod == "" {
+		} else if quotaPeriod == entities.QuotaPeriodWeek || quotaPeriod == "" {
 			reservation, err = g.Quota.Reserve(c.Context(), key.ID, *quotaLimit, spent, estimate.USD, started)
 		} else {
 			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination does not support this period", "service_unavailable", "quota_period_unavailable")

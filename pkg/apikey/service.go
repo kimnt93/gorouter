@@ -15,8 +15,8 @@ var (
 	ErrInvalidModel   = errors.New("model names must not be empty")
 	ErrInvalidScope   = errors.New("invalid API key scope")
 	ErrInvalidQuota   = errors.New("quota must be non-negative")
-	ErrInvalidPeriod  = errors.New("quota period must be none, day, week, or month")
-	ErrQuotaRequired  = errors.New("quota is required for day, week, or month periods")
+	ErrInvalidPeriod  = errors.New("quota period must be none or week")
+	ErrQuotaRequired  = errors.New("quota is required for a weekly limit")
 	ErrInvalidRPM     = errors.New("RPM limit must be greater than zero")
 )
 
@@ -46,6 +46,7 @@ type Service struct {
 	repo   Repository
 	hashFn func(string) string
 	genFn  func() string
+	cache  *tokenCache
 }
 
 func NewService(repo Repository, hashFn func(string) string, genFn func() string) *Service {
@@ -89,9 +90,17 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 		return nil, err
 	}
 	if repo, ok := s.repo.(quotaRepository); ok {
-		return repo.CreateWithQuota(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, period, in.RPM)
+		key, err := repo.CreateWithQuota(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, period, in.RPM)
+		if err == nil && s.cache != nil {
+			s.cache.put(ctx, key)
+		}
+		return key, err
 	}
-	return s.repo.Create(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, in.RPM)
+	key, err := s.repo.Create(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, in.RPM)
+	if err == nil && s.cache != nil {
+		s.cache.put(ctx, key)
+	}
+	return key, err
 }
 
 func (s *Service) CreateForTenant(ctx context.Context, tenantID string, in CreateInput) (*entities.ApiKey, error) {
@@ -110,7 +119,17 @@ func (s *Service) ListByTenant(ctx context.Context, tenantID string) ([]entities
 }
 
 func (s *Service) GetBySecret(ctx context.Context, secret string) (*entities.ApiKey, error) {
-	return s.repo.GetBySecret(ctx, s.hash(secret))
+	hash := s.hash(secret)
+	if s.cache != nil {
+		if key, ok := s.cache.get(ctx, hash); ok {
+			return key, nil
+		}
+	}
+	key, err := s.repo.GetBySecret(ctx, hash)
+	if err == nil && s.cache != nil {
+		s.cache.put(ctx, key)
+	}
+	return key, err
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (*entities.ApiKey, error) {
@@ -129,7 +148,11 @@ func (s *Service) Patch(ctx context.Context, id string, enabled *bool, models *[
 	if err := validatePatch(models, scopes, quota, rpm); err != nil {
 		return err
 	}
-	return s.repo.Patch(ctx, id, enabled, models, scopes, quota, rpm)
+	err := s.repo.Patch(ctx, id, enabled, models, scopes, quota, rpm)
+	if err == nil && s.cache != nil {
+		s.cache.invalidate(ctx, id, "")
+	}
+	return err
 }
 
 func (s *Service) PatchForTenant(ctx context.Context, tenantID, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, rpm **int) error {
@@ -140,7 +163,11 @@ func (s *Service) PatchForTenant(ctx context.Context, tenantID, id string, enabl
 	if err := validatePatch(models, scopes, quota, rpm); err != nil {
 		return err
 	}
-	return s.repo.PatchForTenant(ctx, tenantID, id, enabled, models, scopes, quota, rpm)
+	err := s.repo.PatchForTenant(ctx, tenantID, id, enabled, models, scopes, quota, rpm)
+	if err == nil && s.cache != nil {
+		s.cache.invalidate(ctx, id, "")
+	}
+	return err
 }
 
 func (s *Service) PatchQuota(ctx context.Context, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error {
@@ -148,7 +175,11 @@ func (s *Service) PatchQuota(ctx context.Context, id string, enabled *bool, mode
 		return err
 	}
 	if repo, ok := s.repo.(quotaRepository); ok {
-		return repo.PatchQuota(ctx, id, enabled, models, scopes, quota, period, rpm)
+		err := repo.PatchQuota(ctx, id, enabled, models, scopes, quota, period, rpm)
+		if err == nil && s.cache != nil {
+			s.cache.invalidate(ctx, id, "")
+		}
+		return err
 	}
 	return s.repo.Patch(ctx, id, enabled, models, scopes, quota, rpm)
 }
@@ -162,19 +193,33 @@ func (s *Service) PatchQuotaForTenant(ctx context.Context, tenantID, id string, 
 		return err
 	}
 	if repo, ok := s.repo.(quotaRepository); ok {
-		return repo.PatchQuotaForTenant(ctx, tenantID, id, enabled, models, scopes, quota, period, rpm)
+		err := repo.PatchQuotaForTenant(ctx, tenantID, id, enabled, models, scopes, quota, period, rpm)
+		if err == nil && s.cache != nil {
+			s.cache.invalidate(ctx, id, "")
+		}
+		return err
 	}
 	return s.repo.PatchForTenant(ctx, tenantID, id, enabled, models, scopes, quota, rpm)
 }
 
-func (s *Service) Delete(ctx context.Context, id string) error { return s.repo.Delete(ctx, id) }
+func (s *Service) Delete(ctx context.Context, id string) error {
+	err := s.repo.Delete(ctx, id)
+	if err == nil && s.cache != nil {
+		s.cache.invalidate(ctx, id, "")
+	}
+	return err
+}
 
 func (s *Service) DeleteForTenant(ctx context.Context, tenantID, id string) error {
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		return ErrTenantRequired
 	}
-	return s.repo.DeleteForTenant(ctx, tenantID, id)
+	err := s.repo.DeleteForTenant(ctx, tenantID, id)
+	if err == nil && s.cache != nil {
+		s.cache.invalidate(ctx, id, "")
+	}
+	return err
 }
 
 func validatePatch(models *[]string, scopes *[]string, quota **float64, rpm **int) error {
@@ -215,7 +260,7 @@ func normalizeQuota(quota, legacyMonthly *float64, period string) (*float64, str
 	if quota == nil {
 		quota = legacyMonthly
 		if quota != nil && strings.TrimSpace(period) == "" {
-			period = entities.QuotaPeriodMonth
+			period = entities.QuotaPeriodWeek
 		}
 	}
 	normalized, err := normalizePeriod(period, quota != nil)
@@ -234,12 +279,12 @@ func normalizePeriod(period string, hasQuota bool) (string, error) {
 	period = strings.ToLower(strings.TrimSpace(period))
 	if period == "" {
 		if hasQuota {
-			return entities.QuotaPeriodMonth, nil
+			return entities.QuotaPeriodWeek, nil
 		}
 		return entities.QuotaPeriodNone, nil
 	}
 	switch period {
-	case entities.QuotaPeriodNone, entities.QuotaPeriodDay, entities.QuotaPeriodWeek, entities.QuotaPeriodMonth:
+	case entities.QuotaPeriodNone, entities.QuotaPeriodWeek:
 		return period, nil
 	default:
 		return "", ErrInvalidPeriod
