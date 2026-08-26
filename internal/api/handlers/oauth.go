@@ -6,7 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
+	"github.com/kimnt93/gorouter/internal/api/presenter"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 )
@@ -15,12 +16,7 @@ type OAuthConnector struct {
 	Service *oauthpkg.Service
 }
 
-type oauthCompleteBody struct {
-	FlowID      string  `json:"flow_id"`
-	Callback    string  `json:"callback"`
-	Name        string  `json:"name"`
-	OwnerTenant *string `json:"owner_tenant_id"`
-}
+type oauthCompleteBody = OAuthCompleteRequest
 
 func oauthSessionBinding(session *entities.Session) string {
 	if session == nil {
@@ -29,6 +25,14 @@ func oauthSessionBinding(session *entities.Session) string {
 	return session.Role + ":" + session.KeyID + ":" + session.TenantID
 }
 
+// Start begins a provider OAuth flow bound to the current session.
+// @Summary Start OAuth connection
+// @Tags oauth
+// @Security BearerAuth
+// @Param provider path string true "Provider ID"
+// @Success 200 {object} OAuthStartResponse
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/oauth/{provider}/start [post]
 func (h *OAuthConnector) Start(c fiber.Ctx) error {
 	if h.Service == nil {
 		return presenter.ServerError(c, "OAuth connector is unavailable")
@@ -40,9 +44,19 @@ func (h *OAuthConnector) Start(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to start OAuth flow")
 	}
-	return c.JSON(result)
+	return responseapi.JSON(c, result)
 }
 
+// Complete exchanges an OAuth callback/device result and creates a credential.
+// @Summary Complete OAuth connection
+// @Tags oauth
+// @Security BearerAuth
+// @Param provider path string true "Provider ID"
+// @Param request body OAuthCompleteRequest true "OAuth completion"
+// @Success 201 {object} OAuthCompleteResponse
+// @Success 202 {object} OAuthPendingResponse
+// @Failure 400,401,403,500,502 {object} presenter.Error
+// @Router /admin/oauth/{provider}/complete [post]
 func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 	if h.Service == nil {
 		return presenter.ServerError(c, "OAuth connector is unavailable")
@@ -65,7 +79,7 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return presenter.BadRequest(c, "OAuth flow expired or callback did not match")
 	}
 	if errors.Is(err, oauthpkg.ErrAuthorizationPending) {
-		return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "authorization_pending"})
+		return responseapi.JSONStatus(c, fiber.StatusAccepted, OAuthPendingResponse{Status: "authorization_pending"})
 	}
 	if errors.Is(err, oauthpkg.ErrAccessDenied) {
 		return presenter.BadRequest(c, "OAuth authorization was denied")
@@ -73,9 +87,5 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.Err(c, fiber.StatusBadGateway, "OAuth token exchange failed", "upstream_error", "oauth_exchange_failed")
 	}
-	return c.Status(fiber.StatusCreated).JSON(struct {
-		ID       string `json:"id"`
-		Provider string `json:"provider"`
-		Name     string `json:"name"`
-	}{ID: created.ID, Provider: created.Provider, Name: created.Name})
+	return responseapi.JSONStatus(c, fiber.StatusCreated, OAuthCompleteResponse{ID: created.ID, Provider: created.Provider, Name: created.Name})
 }

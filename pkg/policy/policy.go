@@ -129,3 +129,13 @@ func CanGrant(actor entities.Principal, scopes, models []string, allowedModels [
 	}
 	return true
 }
+
+// CredentialVisible enforces global-plus-organization credential visibility.
+// Personal context sees global credentials only; organization context also
+// sees credentials owned by that organization; master sees every credential.
+func CredentialVisible(master bool, organizationID string, ownerOrganizationID *string) bool {
+	if master || ownerOrganizationID == nil {
+		return true
+	}
+	return organizationID != "" && *ownerOrganizationID == organizationID
+}

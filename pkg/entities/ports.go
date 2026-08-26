@@ -152,15 +152,16 @@ type PrincipalUsageRepository interface {
 }
 
 type AuditQuery struct {
-	Visibility UsageVisibility
-	Cursor     string
-	Limit      int
-	Since      *time.Time
-	Until      *time.Time
-	ActorID    string
-	Action     string
-	TargetType string
-	TargetID   string
+	Visibility     UsageVisibility
+	OrganizationID string
+	Cursor         string
+	Limit          int
+	Since          *time.Time
+	Until          *time.Time
+	ActorID        string
+	Action         string
+	TargetType     string
+	TargetID       string
 }
 
 type AuditPage struct {

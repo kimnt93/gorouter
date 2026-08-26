@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
@@ -45,6 +46,10 @@ type ownedRepository interface {
 	Rotate(ctx context.Context, id string) (*entities.ApiKey, error)
 }
 
+type compoundUserRepository interface {
+	CreateUserWithInitialKey(context.Context, entities.User, entities.ApiKey, []entities.AuditEvent) error
+}
+
 type Service struct {
 	repo   Repository
 	hashFn func(string) string
@@ -70,6 +75,66 @@ type CreateInput struct {
 	OwnerUserID           string
 	OwnerOrganizationID   string
 	ContextOrganizationID string
+}
+
+// CreateUserWithInitialKey persists a prepared user, its first personal key,
+// and both audit events as one backend compound mutation. PostgreSQL provides
+// a real transaction; ClickHouse serializes and compensates current-state
+// records on failure.
+func (s *Service) CreateUserWithInitialKey(ctx context.Context, user entities.User, in CreateInput, audits []entities.AuditEvent) (*entities.ApiKey, error) {
+	in.OwnerType, in.OwnerUserID = entities.OwnerUser, user.ID
+	in.OwnerOrganizationID, in.ContextOrganizationID, in.TenantID = "", "", ""
+	key, err := s.prepareOwned(in)
+	if err != nil {
+		return nil, err
+	}
+	repository, ok := s.repo.(compoundUserRepository)
+	if !ok {
+		return nil, errors.New("API key repository does not support atomic user provisioning")
+	}
+	for index := range audits {
+		if audits[index].Action == "key.create" && audits[index].TargetID == "" {
+			audits[index].TargetID = key.ID
+		}
+	}
+	if err = repository.CreateUserWithInitialKey(ctx, user, *key, audits); err != nil {
+		return nil, err
+	}
+	if s.cache != nil {
+		s.cache.put(ctx, key)
+	}
+	return key, nil
+}
+
+func (s *Service) prepareOwned(in CreateInput) (*entities.ApiKey, error) {
+	var err error
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		return nil, ErrNameRequired
+	}
+	if in.Models, err = normalizeModels(in.Models); err != nil {
+		return nil, err
+	}
+	if in.Scopes, err = normalizeScopes(in.Scopes); err != nil {
+		return nil, err
+	}
+	quota, period, err := normalizeQuota(in.QuotaUSD, in.QuotaPeriod)
+	if err != nil {
+		return nil, err
+	}
+	if err = validateLimits(quota, in.RPM); err != nil {
+		return nil, err
+	}
+	plain := s.genFn()
+	prefix := plain
+	if len(prefix) > 11 {
+		prefix = prefix[:11]
+	}
+	key := &entities.ApiKey{ID: entities.NewID("key"), Name: in.Name, SecretHash: s.hashFn(plain), SecretPrefix: prefix, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM, Enabled: true, CreatedAt: time.Now().UTC(), OwnerType: entities.OwnerUser, OwnerUserID: in.OwnerUserID, Plaintext: plain}
+	if err = key.ValidateOwnerShape(); err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey, error) {

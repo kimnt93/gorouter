@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,13 +133,42 @@ func (r *TenantRepo) List(ctx context.Context) ([]entities.Tenant, error) {
 }
 func (r *TenantRepo) Create(ctx context.Context, name string) (*entities.Tenant, error) {
 	t := &entities.Tenant{ID: id("tenant"), Name: name, CreatedAt: time.Now().UTC()}
-	return t, r.s.put(ctx, "tenant", t.ID, t)
+	if err := r.s.put(ctx, "tenant", t.ID, t); err != nil {
+		return nil, err
+	}
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	organization := entities.Organization{ID: t.ID, Name: strings.TrimSpace(name), NormalizedName: normalized, Status: entities.StatusActive, CreatedAt: t.CreatedAt, UpdatedAt: t.CreatedAt}
+	if err := r.s.put(ctx, "organization", organization.ID, organization); err != nil {
+		return nil, err
+	}
+	if err := r.s.put(ctx, "organization_name", normalized, lookupRecord{ID: organization.ID}); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 func (r *TenantRepo) EnsureDefault(ctx context.Context) error {
-	if _, err := get[entities.Tenant](ctx, r.s, "tenant", "tenant_default"); err == nil {
-		return nil
+	now := time.Now().UTC()
+	if _, err := get[entities.Tenant](ctx, r.s, "tenant", "tenant_default"); err != nil {
+		if !errors.Is(err, entities.ErrNotFound) {
+			return err
+		}
+		if err = r.s.put(ctx, "tenant", "tenant_default", entities.Tenant{ID: "tenant_default", Name: "default", CreatedAt: now}); err != nil {
+			return err
+		}
 	}
-	return r.s.put(ctx, "tenant", "tenant_default", entities.Tenant{ID: "tenant_default", Name: "default", CreatedAt: time.Now().UTC()})
+	if _, err := get[entities.Organization](ctx, r.s, "organization", "tenant_default"); err != nil {
+		if !errors.Is(err, entities.ErrNotFound) {
+			return err
+		}
+		organization := entities.Organization{ID: "tenant_default", Name: "default", NormalizedName: "default", Status: entities.StatusActive, CreatedAt: now, UpdatedAt: now}
+		if err = r.s.put(ctx, "organization", organization.ID, organization); err != nil {
+			return err
+		}
+		if err = r.s.put(ctx, "organization_name", "default", lookupRecord{ID: organization.ID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type storedCredential struct {

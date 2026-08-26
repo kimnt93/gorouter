@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	contract "github.com/kimnt93/gorouter/internal/integration"
-	"github.com/kimnt93/gorouter/platform/database"
+	"github.com/kimnt93/gorouter/internal/platform/database"
 )
 
 func TestIdentityBackendContract(t *testing.T) {

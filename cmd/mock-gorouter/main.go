@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kimnt93/gorouter/platform/llm"
+	"github.com/kimnt93/gorouter/internal/platform/llm"
 )
 
 var (

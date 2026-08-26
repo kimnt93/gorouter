@@ -7,6 +7,9 @@ import (
 	"io/fs"
 	"strconv"
 	"time"
+
+	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/policy"
 )
 
 //go:embed templates/*.html static/*
@@ -39,6 +42,17 @@ var Templates = template.Must(template.New("root").Funcs(template.FuncMap{
 			return "-" + raw
 		}
 		return raw
+	},
+	"canManageKey": func(session *entities.Session, key entities.ApiKey) bool {
+		if session == nil {
+			return false
+		}
+		principalType := session.PrincipalType
+		if session.IsMaster() {
+			principalType = entities.PrincipalMaster
+		}
+		actor := entities.Principal{Type: principalType, UserID: session.UserID, OrganizationID: session.OrganizationID, MembershipRole: session.MembershipRole, Scopes: session.Scopes}
+		return policy.ManageKey(actor, key) == nil
 	},
 }).ParseFS(files, "templates/*.html"))
 

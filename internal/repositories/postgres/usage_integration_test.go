@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kimnt93/gorouter/internal/platform/database"
 	"github.com/kimnt93/gorouter/pkg/entities"
-	"github.com/kimnt93/gorouter/platform/database"
 )
 
 func TestTenantUsageQueriesAreIsolated(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
@@ -43,6 +44,47 @@ func NewService(repo Repository, audit entities.AuditRepository) *Service {
 func (s *Service) SetAuthorizationCache(cache AuthorizationCache) { s.cache = cache }
 
 func (s *Service) CreateUser(ctx context.Context, actor entities.Principal, username string) (*entities.User, error) {
+	user, err := s.prepareUser(actor, username)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateUser(ctx, *user); err != nil {
+		return nil, err
+	}
+	if err := s.appendAudit(ctx, actor, "user.create", "user", user.ID, "", map[string]string{"username": user.NormalizedUsername}); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *Service) CreateUserWithInitialKey(ctx context.Context, actor entities.Principal, username string, keys *apikey.Service, input apikey.CreateInput) (*entities.User, *entities.ApiKey, error) {
+	user, err := s.prepareUser(actor, username)
+	if err != nil {
+		return nil, nil, err
+	}
+	if keys == nil {
+		return nil, nil, errors.New("API key service unavailable")
+	}
+	audits := []entities.AuditEvent(nil)
+	if s.audit != nil {
+		now := s.now()
+		label := actor.Username
+		if actor.Type == entities.PrincipalMaster {
+			label = "master"
+		}
+		audits = []entities.AuditEvent{
+			{ID: entities.NewID("audit"), TS: now, ActorType: actor.Type, ActorID: actorID(actor), ActorLabel: label, Action: "user.create", TargetType: "user", TargetID: user.ID, SafeMetadata: map[string]string{"username": user.NormalizedUsername}},
+			{ID: entities.NewID("audit"), TS: now, ActorType: actor.Type, ActorID: actorID(actor), ActorLabel: label, Action: "key.create", TargetType: "api_key", SafeMetadata: map[string]string{"name": strings.TrimSpace(input.Name), "owner_type": entities.OwnerUser}},
+		}
+	}
+	key, err := keys.CreateUserWithInitialKey(ctx, *user, input, audits)
+	if err != nil {
+		return nil, nil, err
+	}
+	return user, key, nil
+}
+
+func (s *Service) prepareUser(actor entities.Principal, username string) (*entities.User, error) {
 	if actor.Type != entities.PrincipalMaster {
 		return nil, errors.New("forbidden")
 	}
@@ -52,12 +94,6 @@ func (s *Service) CreateUser(ctx context.Context, actor entities.Principal, user
 	}
 	now := s.now()
 	user := &entities.User{ID: entities.NewID("usr"), Username: normalized, NormalizedUsername: normalized, Status: entities.StatusActive, CreatedAt: now, UpdatedAt: now}
-	if err := s.repo.CreateUser(ctx, *user); err != nil {
-		return nil, err
-	}
-	if err := s.appendAudit(ctx, actor, "user.create", "user", user.ID, "", map[string]string{"username": normalized}); err != nil {
-		return nil, err
-	}
 	return user, nil
 }
 

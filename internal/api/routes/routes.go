@@ -4,12 +4,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gofiber/contrib/v3/swagger"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
-	"github.com/kimnt93/gorouter/api/handlers"
-	"github.com/kimnt93/gorouter/api/views"
+	"github.com/kimnt93/gorouter/internal/api/handlers"
+	"github.com/kimnt93/gorouter/internal/api/views"
+	"github.com/kimnt93/gorouter/internal/docs"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -44,14 +46,11 @@ type Dependencies struct {
 	Audit        entities.AuditRepository
 }
 
-type healthResponse struct {
-	OK bool `json:"ok"`
-}
-
 func New(d Dependencies) *fiber.App {
 	app := fiber.New(fiber.Config{BodyLimit: d.BodyLimit, ReadTimeout: d.ReadTimeout, IdleTimeout: 60 * time.Second})
 	app.Use(recover.New(), logger.New())
-	app.Get("/healthz", func(c fiber.Ctx) error { return c.JSON(healthResponse{OK: true}) })
+	app.Get("/healthz", handlers.Health)
+	app.Use(swagger.New(swagger.Config{BasePath: "/", Path: "docs", Title: "gorouter API", FileContent: []byte(docs.SwaggerInfo.ReadDoc())}))
 	app.Get("/assets/:name", func(c fiber.Ctx) error {
 		name := filepath.Base(c.Params("name"))
 		body, err := views.ReadAsset(name)
@@ -75,12 +74,20 @@ func New(d Dependencies) *fiber.App {
 	app.Get("/ui/usage", handlers.Require(d.Auth, entities.ScopeUsageRead), ui.UsagePage)
 	app.Get("/ui/users", handlers.Require(d.Auth, ""), ui.UsersPage)
 	app.Post("/ui/users", handlers.Require(d.Auth, ""), ui.UserCreate)
+	app.Get("/ui/users/:id", handlers.Require(d.Auth, ""), ui.UserPage)
+	app.Post("/ui/users/:id/status", handlers.Require(d.Auth, ""), ui.UserStatus)
 	app.Get("/ui/organizations", handlers.Require(d.Auth, ""), ui.OrganizationsPage)
 	app.Post("/ui/organizations", handlers.Require(d.Auth, ""), ui.OrganizationCreate)
+	app.Get("/ui/organizations/:id", handlers.Require(d.Auth, ""), ui.OrganizationPage)
+	app.Post("/ui/organizations/:id", handlers.Require(d.Auth, ""), ui.OrganizationUpdate)
+	app.Post("/ui/organizations/:id/members", handlers.Require(d.Auth, entities.ScopeMembersManage), ui.MemberAdd)
+	app.Post("/ui/organizations/:id/members/:user_id/role", handlers.Require(d.Auth, entities.ScopeMembersManage), ui.MemberRole)
+	app.Delete("/ui/organizations/:id/members/:user_id", handlers.Require(d.Auth, entities.ScopeMembersManage), ui.MemberRemove)
 	app.Get("/ui/audit", handlers.Require(d.Auth, entities.ScopeUsageRead), ui.AuditPage)
 	app.Get("/ui/keys", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeysPage)
 	app.Post("/ui/keys", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeysCreate)
 	app.Post("/ui/keys/:id/toggle", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeyToggle)
+	app.Post("/ui/keys/:id/rotate", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeyRotate)
 	app.Delete("/ui/keys/:id", handlers.Require(d.Auth, entities.ScopeKeysManage), ui.KeyDelete)
 	app.Get("/ui/credentials", handlers.Require(d.Auth, entities.ScopeCredentialsManage), ui.CredentialsPage)
 	app.Get("/ui/providers", handlers.Require(d.Auth, entities.ScopeCredentialsManage), ui.ProvidersPage)

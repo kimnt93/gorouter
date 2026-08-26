@@ -1,15 +1,18 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
+	"github.com/kimnt93/gorouter/internal/api/presenter"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -23,44 +26,21 @@ import (
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
-type okResponse struct {
-	OK bool `json:"ok"`
-}
+type okResponse = OKResponse
 
+// Providers returns the built-in provider catalog.
+// @Summary List providers
+// @Tags providers
+// @Security BearerAuth
+// @Success 200 {object} ProviderListResponse
+// @Failure 401,403 {object} presenter.Error
+// @Router /admin/providers [get]
 func (a *Admin) Providers(c fiber.Ctx) error {
-	return c.JSON(struct {
-		Data []provider.Definition `json:"data"`
-	}{Data: provider.Catalog()})
+	return responseapi.JSON(c, ProviderListResponse{Data: provider.Catalog()})
 }
 
-type loginResponse struct {
-	OK             bool     `json:"ok"`
-	Role           string   `json:"role"`
-	PrincipalType  string   `json:"principal_type"`
-	UserID         string   `json:"user_id,omitempty"`
-	Username       string   `json:"username,omitempty"`
-	OrganizationID string   `json:"organization_id,omitempty"`
-	MembershipRole string   `json:"membership_role,omitempty"`
-	Scopes         []string `json:"scopes"`
-}
-
-type createdAPIKeyResponse struct {
-	ID                    string   `json:"id"`
-	TenantID              string   `json:"tenant_id"`
-	Name                  string   `json:"name"`
-	KeyPrefix             string   `json:"key_prefix"`
-	Models                []string `json:"models"`
-	Scopes                []string `json:"scopes"`
-	QuotaUSD              *float64 `json:"quota_usd"`
-	QuotaPeriod           string   `json:"quota_period"`
-	RPM                   *int     `json:"rpm"`
-	Enabled               bool     `json:"enabled"`
-	Plaintext             string   `json:"plaintext"`
-	OwnerType             string   `json:"owner_type"`
-	OwnerUserID           string   `json:"owner_user_id,omitempty"`
-	OwnerOrganizationID   string   `json:"owner_organization_id,omitempty"`
-	ContextOrganizationID string   `json:"context_organization_id,omitempty"`
-}
+type loginResponse = LoginResponse
+type createdAPIKeyResponse = CreatedAPIKeyResponse
 
 type Admin struct {
 	Auth         *auth.Service
@@ -76,14 +56,19 @@ type Admin struct {
 	AuditRepo    entities.AuditRepository
 }
 
-type priceEstimateResponse struct {
-	Model          string                  `json:"model"`
-	UpstreamModel  string                  `json:"upstream_model,omitempty"`
-	Price          *entities.Price         `json:"price,omitempty"`
-	CacheSupported bool                    `json:"cache_supported"`
-	Estimates      entities.PriceEstimates `json:"estimates"`
-}
+type priceEstimateResponse = PricingEstimateResponse
 
+// PricingEstimate calculates typed cost estimates for token counts.
+// @Summary Estimate model cost
+// @Tags pricing
+// @Security BearerAuth
+// @Param model query string false "Public model"
+// @Param upstream_model query string false "Upstream model"
+// @Param prompt_tokens query int false "Prompt tokens" minimum(0)
+// @Param completion_tokens query int false "Completion tokens" minimum(0)
+// @Success 200 {object} PricingEstimateResponse
+// @Failure 400,401,403,503 {object} presenter.Error
+// @Router /admin/pricing/estimate [get]
 func (a *Admin) PricingEstimate(c fiber.Ctx) error {
 	if a.Pricing == nil {
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "pricing catalog is unavailable", "service_unavailable", "pricing_unavailable")
@@ -110,9 +95,19 @@ func (a *Admin) PricingEstimate(c fiber.Ctx) error {
 	} else if response.Price != nil {
 		response.CacheSupported = response.Price.CachedInputPerM > 0 || response.Price.CacheWritePerM > 0
 	}
-	return c.JSON(response)
+	return responseapi.JSON(c, response)
 }
 
+// PricingCatalog returns the imported price catalog.
+// @Summary List catalog prices
+// @Tags pricing
+// @Security BearerAuth
+// @Param q query string false "Search"
+// @Param limit query int false "Page size" maximum(500)
+// @Param offset query int false "Offset"
+// @Success 200 {object} PricingCatalogResponse
+// @Failure 401,403,503 {object} presenter.Error
+// @Router /admin/pricing/catalog [get]
 func (a *Admin) PricingCatalog(c fiber.Ctx) error {
 	if a.Pricing == nil {
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "pricing catalog is unavailable", "service_unavailable", "pricing_unavailable")
@@ -144,12 +139,7 @@ func (a *Admin) PricingCatalog(c fiber.Ctx) error {
 	if end > len(items) {
 		end = len(items)
 	}
-	return c.JSON(struct {
-		Data   []entities.CatalogPrice `json:"data"`
-		Total  int                     `json:"total"`
-		Offset int                     `json:"offset"`
-		Limit  int                     `json:"limit"`
-	}{Data: items[offset:end], Total: total, Offset: offset, Limit: limit})
+	return responseapi.JSON(c, PricingCatalogResponse{Data: items[offset:end], Total: total, Offset: offset, Limit: limit})
 }
 
 func nonNegativeInt64(value string) (int64, error) {
@@ -160,10 +150,17 @@ func nonNegativeInt64(value string) (int64, error) {
 	return parsed, nil
 }
 
+// Verify authenticates a master or API key and issues a signed session cookie.
+// @Summary Log in
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param request body LoginRequest true "Login key"
+// @Success 200 {object} LoginResponse
+// @Failure 400,401,500 {object} presenter.Error
+// @Router /login [post]
 func (a *Admin) Verify(c fiber.Ctx) error {
-	var body struct {
-		Key string `json:"key"`
-	}
+	var body LoginRequest
 	if err := c.Bind().Body(&body); err != nil || body.Key == "" {
 		body.Key = c.FormValue("key")
 	}
@@ -183,14 +180,30 @@ func (a *Admin) Verify(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodPost && strings.Contains(c.Get("Content-Type"), "application/x-www-form-urlencoded") {
 		return c.Redirect().To("/")
 	}
-	return c.JSON(loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, Scopes: sess.Scopes})
+	return responseapi.JSON(c, loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, Scopes: sess.Scopes})
 }
 
+// Logout clears the signed session cookie.
+// @Summary Log out
+// @Tags authentication
+// @Success 302
+// @Router /logout [post]
 func (a *Admin) Logout(c fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{Name: sessionCookie, Value: "", Expires: time.Unix(0, 0), MaxAge: -1, HTTPOnly: true, Path: "/"})
 	return c.Redirect().To("/login")
 }
 
+// Tenants is the deprecated organization list/create compatibility alias.
+// @Summary Deprecated organization alias
+// @Tags organizations
+// @Deprecated
+// @Security BearerAuth
+// @Param request body OrganizationCreateRequest false "Required for POST"
+// @Success 200 {object} OrganizationListResponse
+// @Success 201 {object} entities.Organization
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/tenants [get]
+// @Router /admin/tenants [post]
 func (a *Admin) Tenants(c fiber.Ctx) error {
 	c.Set("Deprecation", "true")
 	c.Set("Sunset", "Wed, 26 Aug 2027 00:00:00 GMT")
@@ -206,14 +219,12 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
 			v = filterTenants(v, sess.TenantID)
 		}
-		return c.JSON(v)
+		return responseapi.JSON(c, v)
 	}
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can create tenants")
 	}
-	var b struct {
-		Name string `json:"name"`
-	}
+	var b TenantCreateRequest
 	if err := c.Bind().Body(&b); err != nil || strings.TrimSpace(b.Name) == "" {
 		return presenter.BadRequest(c, "name required")
 	}
@@ -221,9 +232,19 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to create tenant")
 	}
-	return c.Status(201).JSON(v)
+	return responseapi.JSONStatus(c, 201, v)
 }
 
+// Credentials lists safe metadata or creates an encrypted credential.
+// @Summary List or create credentials
+// @Tags credentials
+// @Security BearerAuth
+// @Param request body CredentialCreateRequest false "Required for POST"
+// @Success 200 {array} entities.Credential
+// @Success 201 {object} entities.Credential
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/credentials [get]
+// @Router /admin/credentials [post]
 func (a *Admin) Credentials(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodGet {
 		v, err := a.CredsSvc.List(c.Context())
@@ -233,18 +254,9 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
 			v = filterCredentials(v, sess.TenantID)
 		}
-		return c.JSON(v)
+		return responseapi.JSON(c, v)
 	}
-	var b struct {
-		Name         string  `json:"name"`
-		Provider     string  `json:"provider"`
-		Kind         string  `json:"kind"`
-		BaseURL      string  `json:"base_url"`
-		APIKey       string  `json:"api_key"`
-		OAuthAccess  string  `json:"oauth_access"`
-		OAuthRefresh string  `json:"oauth_refresh"`
-		OwnerTenant  *string `json:"owner_tenant_id"`
-	}
+	var b CredentialCreateRequest
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
@@ -261,24 +273,26 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.Status(201).JSON(v)
+	return responseapi.JSONStatus(c, 201, v)
 }
 
+// CredentialByID updates or deletes a credential.
+// @Summary Update or delete a credential
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Param request body CredentialUpdateRequest false "Required for PUT"
+// @Success 200 {object} entities.Credential
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/credentials/{id} [put]
+// @Router /admin/credentials/{id} [delete]
 func (a *Admin) CredentialByID(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	if sess != nil && !sess.IsMaster() && !a.tenantOwnsCredential(c, sess.TenantID, c.Params("id")) {
 		return presenter.NotFound(c, "credential not found")
 	}
 	if c.Method() == fiber.MethodPut {
-		var b struct {
-			Name          string  `json:"name"`
-			BaseURL       string  `json:"base_url"`
-			Status        string  `json:"status"`
-			APIKey        string  `json:"api_key"`
-			OAuthAccess   string  `json:"oauth_access"`
-			OAuthRefresh  string  `json:"oauth_refresh"`
-			OwnerTenantID *string `json:"owner_tenant_id"`
-		}
+		var b CredentialUpdateRequest
 		if err := c.Bind().Body(&b); err != nil {
 			return presenter.BadRequest(c, "invalid body")
 		}
@@ -295,7 +309,7 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 		if err != nil {
 			return presenter.BadRequest(c, err.Error())
 		}
-		return c.JSON(updated)
+		return responseapi.JSON(c, updated)
 	}
 	err := a.CredsSvc.Delete(c.Context(), c.Params("id"))
 	if errors.Is(err, entities.ErrNotFound) {
@@ -304,9 +318,22 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to delete credential")
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
 
+// KeysList returns safe key metadata constrained by principal policy.
+// @Summary List API keys
+// @Tags api-keys
+// @Security BearerAuth
+// @Param owner_type query string false "user or organization"
+// @Param owner_id query string false "Owner user or organization ID"
+// @Param organization_id query string false "Context organization ID"
+// @Param status query string false "enabled or disabled"
+// @Param cursor query string false "Opaque cursor"
+// @Param limit query int false "Page size" default(100) maximum(500)
+// @Success 200 {object} APIKeyListResponse
+// @Failure 401,403,500 {object} presenter.Error
+// @Router /admin/api-keys [get]
 func (a *Admin) KeysList(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	actor := principalFromSession(sess)
@@ -314,31 +341,88 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to load API keys")
 	}
-	if !sess.IsMaster() {
-		filtered := v[:0]
-		for _, key := range v {
-			if policy.ViewKeyMetadata(actor, key) == nil {
-				filtered = append(filtered, key)
-			}
+	ownerType := strings.TrimSpace(c.Query("owner_type"))
+	ownerID := strings.TrimSpace(c.Query("owner_id"))
+	organizationID := strings.TrimSpace(c.Query("organization_id"))
+	status := strings.TrimSpace(c.Query("status"))
+	if ownerType != "" && ownerType != entities.OwnerUser && ownerType != entities.OwnerOrganization {
+		return presenter.BadRequest(c, "owner_type must be user or organization")
+	}
+	if status != "" && status != "enabled" && status != "disabled" {
+		return presenter.BadRequest(c, "status must be enabled or disabled")
+	}
+	filtered := make([]entities.ApiKey, 0, len(v))
+	for _, key := range v {
+		if !sess.IsMaster() && policy.ViewKeyMetadata(actor, key) != nil {
+			continue
 		}
-		v = filtered
+		if ownerType != "" && key.OwnerType != ownerType {
+			continue
+		}
+		keyOwnerID := key.OwnerUserID
+		if key.OwnerType == entities.OwnerOrganization {
+			keyOwnerID = key.OwnerOrganizationID
+		}
+		if ownerID != "" && keyOwnerID != ownerID {
+			continue
+		}
+		if organizationID != "" && key.ContextOrganizationID != organizationID {
+			continue
+		}
+		if status == "enabled" && !key.Enabled || status == "disabled" && key.Enabled {
+			continue
+		}
+		filtered = append(filtered, key)
 	}
-	return c.JSON(v)
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
+			return filtered[i].ID > filtered[j].ID
+		}
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+	if cursor := strings.TrimSpace(c.Query("cursor")); cursor != "" {
+		decoded, decodeErr := base64.RawURLEncoding.DecodeString(cursor)
+		if decodeErr != nil {
+			return presenter.BadRequest(c, "cursor is invalid")
+		}
+		parts := strings.SplitN(string(decoded), "\x00", 2)
+		if len(parts) != 2 {
+			return presenter.BadRequest(c, "cursor is invalid")
+		}
+		createdAt, parseErr := time.Parse(time.RFC3339Nano, parts[0])
+		if parseErr != nil {
+			return presenter.BadRequest(c, "cursor is invalid")
+		}
+		cursorID := parts[1]
+		start := 0
+		for start < len(filtered) && (filtered[start].CreatedAt.After(createdAt) || filtered[start].CreatedAt.Equal(createdAt) && filtered[start].ID >= cursorID) {
+			start++
+		}
+		filtered = filtered[start:]
+	}
+	limit, parseErr := strconv.Atoi(c.Query("limit", "100"))
+	if parseErr != nil || limit < 1 || limit > 500 {
+		return presenter.BadRequest(c, "limit must be between 1 and 500")
+	}
+	next := ""
+	if len(filtered) > limit {
+		last := filtered[limit-1]
+		next = base64.RawURLEncoding.EncodeToString([]byte(last.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + last.ID))
+		filtered = filtered[:limit]
+	}
+	return responseapi.JSON(c, APIKeyListResponse{Object: "list", Data: filtered, NextCursor: next})
 }
+
+// KeysCreate creates a principal-owned key and returns plaintext once.
+// @Summary Create an API key
+// @Tags api-keys
+// @Security BearerAuth
+// @Param request body APIKeyCreateRequest true "Key configuration"
+// @Success 201 {object} CreatedAPIKeyResponse
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/api-keys [post]
 func (a *Admin) KeysCreate(c fiber.Ctx) error {
-	var b struct {
-		TenantID              string   `json:"tenant_id"`
-		Name                  string   `json:"name"`
-		Models                []string `json:"models"`
-		Scopes                []string `json:"scopes"`
-		QuotaUSD              *float64 `json:"quota_usd"`
-		QuotaPeriod           string   `json:"quota_period"`
-		RPM                   *int     `json:"rpm"`
-		OwnerType             string   `json:"owner_type"`
-		OwnerUserID           string   `json:"owner_user_id"`
-		OwnerOrganizationID   string   `json:"owner_organization_id"`
-		ContextOrganizationID string   `json:"context_organization_id"`
-	}
+	var b APIKeyCreateRequest
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
@@ -353,10 +437,23 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 		}
 		switch actor.Type {
 		case entities.PrincipalUser:
-			b.OwnerType = entities.OwnerUser
-			b.OwnerUserID = actor.UserID
-			b.OwnerOrganizationID = ""
-			if b.ContextOrganizationID != "" {
+			if b.OwnerType == entities.OwnerOrganization {
+				organizationID := strings.TrimSpace(b.OwnerOrganizationID)
+				if organizationID == "" {
+					organizationID = strings.TrimSpace(b.ContextOrganizationID)
+				}
+				if actor.MembershipRole != entities.MembershipAdmin || actor.OrganizationID != organizationID {
+					return presenter.Forbidden(c, "organization administration is required")
+				}
+				b.OwnerUserID = ""
+				b.OwnerOrganizationID = organizationID
+				b.ContextOrganizationID = organizationID
+			} else {
+				b.OwnerType = entities.OwnerUser
+				b.OwnerUserID = actor.UserID
+				b.OwnerOrganizationID = ""
+			}
+			if b.OwnerType == entities.OwnerUser && b.ContextOrganizationID != "" {
 				if err := a.IdentitySvc.ValidateUserKeyContext(c.Context(), actor.UserID, b.ContextOrganizationID); err != nil {
 					return presenter.Forbidden(c, "active organization membership is required")
 				}
@@ -384,17 +481,20 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if err = a.appendKeyAudit(c, actor, "key.create", v, map[string]string{"name": v.Name, "owner_type": v.OwnerType}); err != nil {
 		return presenter.ServerError(c, "API key created but audit write failed")
 	}
-	return c.Status(201).JSON(keyCreatedResponse(v))
+	return responseapi.JSONStatus(c, 201, keyCreatedResponse(v))
 }
+
+// KeysPatch changes mutable API-key policy fields.
+// @Summary Update an API key
+// @Tags api-keys
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Param request body APIKeyPatchRequest true "Mutable key fields"
+// @Success 200 {object} OKResponse
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/api-keys/{id} [patch]
 func (a *Admin) KeysPatch(c fiber.Ctx) error {
-	var b struct {
-		Enabled     *bool     `json:"enabled"`
-		Models      *[]string `json:"models"`
-		Scopes      *[]string `json:"scopes"`
-		QuotaUSD    **float64 `json:"quota_usd"`
-		QuotaPeriod *string   `json:"quota_period"`
-		RPM         **int     `json:"rpm"`
-	}
+	var b APIKeyPatchRequest
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
@@ -427,9 +527,24 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 		}
 		return presenter.BadRequest(c, err.Error())
 	}
-	_ = a.appendKeyAudit(c, actor, "key.update", key, map[string]string{"changed": "configuration"})
-	return c.JSON(okResponse{OK: true})
+	action := "key.update"
+	if b.Enabled != nil && !*b.Enabled {
+		action = "key.disable"
+	}
+	if err = a.appendKeyAudit(c, actor, action, key, map[string]string{"changed": "configuration"}); err != nil {
+		return presenter.ServerError(c, "API key updated but audit write failed")
+	}
+	return responseapi.JSON(c, okResponse{OK: true})
 }
+
+// KeysDelete revokes and deletes an API key.
+// @Summary Delete an API key
+// @Tags api-keys
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Success 200 {object} OKResponse
+// @Failure 401,403,404,500 {object} presenter.Error
+// @Router /admin/api-keys/{id} [delete]
 func (a *Admin) KeysDelete(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	key, getErr := a.KeysSvc.GetByID(c.Context(), c.Params("id"))
@@ -446,10 +561,20 @@ func (a *Admin) KeysDelete(c fiber.Ctx) error {
 		}
 		return presenter.ServerError(c, "failed to delete API key")
 	}
-	_ = a.appendKeyAudit(c, actor, "key.delete", key, nil)
-	return c.JSON(okResponse{OK: true})
+	if err = a.appendKeyAudit(c, actor, "key.delete", key, nil); err != nil {
+		return presenter.ServerError(c, "API key deleted but audit write failed")
+	}
+	return responseapi.JSON(c, okResponse{OK: true})
 }
 
+// KeysRotate atomically invalidates the old secret and returns a new one once.
+// @Summary Rotate an API key
+// @Tags api-keys
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Success 200 {object} CreatedAPIKeyResponse
+// @Failure 401,403,404,500 {object} presenter.Error
+// @Router /admin/api-keys/{id}/rotate [post]
 func (a *Admin) KeysRotate(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	key, err := a.KeysSvc.GetByID(c.Context(), c.Params("id"))
@@ -463,7 +588,7 @@ func (a *Admin) KeysRotate(c fiber.Ctx) error {
 	if err = a.appendKeyAudit(c, actor, "key.rotate", rotated, map[string]string{"key_prefix": rotated.SecretPrefix}); err != nil {
 		return presenter.ServerError(c, "API key rotated but audit write failed")
 	}
-	return c.JSON(keyCreatedResponse(rotated))
+	return responseapi.JSON(c, keyCreatedResponse(rotated))
 }
 
 func (a *Admin) appendKeyAudit(c fiber.Ctx, actor entities.Principal, action string, key *entities.ApiKey, metadata map[string]string) error {
@@ -487,6 +612,13 @@ func keyCreatedResponse(v *entities.ApiKey) createdAPIKeyResponse {
 	return createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext, OwnerType: v.OwnerType, OwnerUserID: v.OwnerUserID, OwnerOrganizationID: v.OwnerOrganizationID, ContextOrganizationID: v.ContextOrganizationID}
 }
 
+// ModelsList returns models visible to the principal.
+// @Summary List configured models
+// @Tags models
+// @Security BearerAuth
+// @Success 200 {array} entities.ModelDef
+// @Failure 401,403,500 {object} presenter.Error
+// @Router /admin/models [get]
 func (a *Admin) ModelsList(c fiber.Ctx) error {
 	v, err := a.ModelsSvc.List(c.Context())
 	if err != nil {
@@ -511,8 +643,18 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 			v[i].Routes = routes
 		}
 	}
-	return c.JSON(v)
+	return responseapi.JSON(c, v)
 }
+
+// ModelUpsert creates or replaces a model route definition.
+// @Summary Upsert a model
+// @Tags models
+// @Security BearerAuth
+// @Param name path string true "Public model name"
+// @Param request body entities.ModelDef true "Model definition"
+// @Success 200 {object} OKResponse
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/models/{name} [put]
 func (a *Admin) ModelUpsert(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can change global model routes")
@@ -525,8 +667,17 @@ func (a *Admin) ModelUpsert(c fiber.Ctx) error {
 	if err := a.ModelsSvc.Upsert(c.Context(), m); err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
+
+// ModelDelete removes a model route.
+// @Summary Delete a model
+// @Tags models
+// @Security BearerAuth
+// @Param name path string true "Public model name"
+// @Success 200 {object} OKResponse
+// @Failure 401,403,404,500 {object} presenter.Error
+// @Router /admin/models/{name} [delete]
 func (a *Admin) ModelDelete(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can change global model routes")
@@ -534,8 +685,19 @@ func (a *Admin) ModelDelete(c fiber.Ctx) error {
 	if err := a.ModelsSvc.Delete(c.Context(), decodedPathParam(c, "name")); err != nil {
 		return presenter.ServerError(c, "failed to delete model")
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
+
+// Price sets or deletes a manual model price.
+// @Summary Set or delete a model price
+// @Tags pricing
+// @Security BearerAuth
+// @Param model path string true "Public model name"
+// @Param request body entities.Price false "Required for PUT"
+// @Success 200 {object} OKResponse
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/prices/{model} [put]
+// @Router /admin/prices/{model} [delete]
 func (a *Admin) Price(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can change global prices")
@@ -547,7 +709,7 @@ func (a *Admin) Price(c fiber.Ctx) error {
 			}
 			return presenter.ServerError(c, "failed to delete price")
 		}
-		return c.JSON(okResponse{OK: true})
+		return responseapi.JSON(c, okResponse{OK: true})
 	}
 	var p entities.Price
 	if err := c.Bind().Body(&p); err != nil {
@@ -556,7 +718,7 @@ func (a *Admin) Price(c fiber.Ctx) error {
 	if err := a.ModelsSvc.SetPrice(c.Context(), decodedPathParam(c, "model"), p); err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
 
 func decodedPathParam(c fiber.Ctx, name string) string {
@@ -566,13 +728,32 @@ func decodedPathParam(c fiber.Ctx, name string) string {
 	}
 	return value
 }
+
+// Prices returns manual model prices.
+// @Summary List model prices
+// @Tags pricing
+// @Security BearerAuth
+// @Success 200 {object} PriceListResponse
+// @Failure 401,403,500 {object} presenter.Error
+// @Router /admin/prices [get]
 func (a *Admin) Prices(c fiber.Ctx) error {
 	v, err := a.ModelsSvc.Prices(c.Context())
 	if err != nil {
 		return presenter.ServerError(c, "failed to load prices")
 	}
-	return c.JSON(v)
+	return responseapi.JSON(c, PriceListResponse{Prices: v})
 }
+
+// UsageSummary returns a policy-constrained usage aggregate.
+// @Summary Get usage summary
+// @Tags usage
+// @Security BearerAuth
+// @Param range query string false "24h, 7d, or 30d"
+// @Param organization_id query string false "Organization filter"
+// @Param user_id query string false "User filter"
+// @Success 200 {object} entities.UsageSummary
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/usage/summary [get]
 func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	since := time.Now().Add(-24 * time.Hour)
 	switch c.Query("range") {
@@ -582,27 +763,56 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
 	actor := principalFromSession(SessionFrom(c))
+	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
+		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
+			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
+		}
+	}
 	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
 	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
 	if policyErr != nil {
 		return presenter.Forbidden(c, "usage access is not allowed")
 	}
-	query := entities.UsageQuery{Visibility: visibility, Since: &since, OrganizationID: c.Query("organization_id"), UserID: c.Query("user_id")}
+	query := entities.UsageQuery{Visibility: visibility, Since: &since, OrganizationID: requestedOrganization, UserID: c.Query("user_id")}
 	v, err := a.UsageSvc.SummaryQuery(c.Context(), query)
 	if err != nil {
 		return presenter.ServerError(c, "failed to load usage summary")
 	}
-	return c.JSON(v)
+	return responseapi.JSON(c, v)
 }
+
+// UsageRecent returns cursor-paginated actor snapshot events.
+// @Summary List recent usage
+// @Tags usage
+// @Security BearerAuth
+// @Param cursor query string false "Opaque cursor"
+// @Param limit query int false "Page size" default(100) maximum(500)
+// @Param since query string false "RFC3339 lower bound"
+// @Param until query string false "RFC3339 upper bound"
+// @Param organization_id query string false "Organization filter"
+// @Param user_id query string false "User filter"
+// @Param model query string false "Model filter"
+// @Param api_key_id query string false "API-key filter"
+// @Param status query int false "HTTP status filter"
+// @Success 200 {object} UsageRecentResponse
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/usage/recent [get]
 func (a *Admin) UsageRecent(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
+	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
+		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
+			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
+		}
+	}
 	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
 	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
 	if policyErr != nil {
 		return presenter.Forbidden(c, "usage access is not allowed")
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "100"))
-	query := entities.UsageQuery{Visibility: visibility, Cursor: c.Query("cursor"), Limit: limit, OrganizationID: c.Query("organization_id"), UserID: c.Query("user_id"), Model: c.Query("model"), APIKeyID: c.Query("api_key_id")}
+	query := entities.UsageQuery{Visibility: visibility, Cursor: c.Query("cursor"), Limit: limit, OrganizationID: requestedOrganization, UserID: c.Query("user_id"), Model: c.Query("model"), APIKeyID: c.Query("api_key_id")}
 	if value := c.Query("status"); value != "" {
 		status, parseErr := strconv.Atoi(value)
 		if parseErr != nil {
@@ -628,23 +838,35 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to load recent usage")
 	}
-	return c.JSON(struct {
-		Object     string                 `json:"object"`
-		Data       []entities.RecentEvent `json:"data"`
-		NextCursor string                 `json:"next_cursor,omitempty"`
-	}{"list", page.Data, page.NextCursor})
+	return responseapi.JSON(c, UsageRecentResponse{Object: "list", Data: page.Data, NextCursor: page.NextCursor})
 }
+
+// CacheStats returns safe prompt-cache counters.
+// @Summary Get cache statistics
+// @Tags cache
+// @Security BearerAuth
+// @Success 200 {object} chat.CacheStats
+// @Failure 401,403 {object} presenter.Error
+// @Router /admin/cache/stats [get]
 func (a *Admin) CacheStats(c fiber.Ctx) error {
 	if a.Cache == nil {
-		return c.JSON(chat.CacheStats{})
+		return responseapi.JSON(c, chat.CacheStats{})
 	}
-	return c.JSON(a.Cache.Stats())
+	return responseapi.JSON(c, a.Cache.Stats())
 }
+
+// CacheFlush purges prompt-cache entries.
+// @Summary Flush prompt cache
+// @Tags cache
+// @Security BearerAuth
+// @Success 200 {object} OKResponse
+// @Failure 401,403 {object} presenter.Error
+// @Router /admin/cache/flush [post]
 func (a *Admin) CacheFlush(c fiber.Ctx) error {
 	if a.Cache != nil {
 		a.Cache.Flush()
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
 
 func (a *Admin) tenantOwnsCredential(c fiber.Ctx, tenantID, credentialID string) bool {

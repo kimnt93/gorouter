@@ -10,12 +10,13 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
+	"github.com/kimnt93/gorouter/internal/api/presenter"
+	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
-	"github.com/kimnt93/gorouter/platform/llm"
 )
 
 // CredentialConnectivity is registered separately from Admin so provider
@@ -29,6 +30,15 @@ type CredentialConnectivity struct {
 	ModelRoutes *modelroute.Service
 }
 
+// ImportModels imports selected upstream models into global model routes.
+// @Summary Import provider models
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Param request body ImportModelsRequest true "Models to import"
+// @Success 200 {object} ImportModelsResponse
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/credentials/{id}/models/import [post]
 func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can import global model routes")
@@ -36,9 +46,7 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	if h.ModelRoutes == nil {
 		return presenter.ServerError(c, "model service is unavailable")
 	}
-	var input struct {
-		Models []string `json:"models"`
-	}
+	var input ImportModelsRequest
 	if err := c.Bind().Body(&input); err != nil || len(input.Models) == 0 {
 		return presenter.BadRequest(c, "at least one model is required")
 	}
@@ -82,38 +90,7 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 		}
 		imported = append(imported, name)
 	}
-	return c.JSON(struct {
-		OK       bool     `json:"ok"`
-		Imported []string `json:"imported"`
-	}{OK: true, Imported: imported})
-}
-
-type providerModelResponse struct {
-	ID                 string         `json:"id"`
-	Object             string         `json:"object"`
-	PublicID           string         `json:"public_id"`
-	Default            bool           `json:"default,omitempty"`
-	Created            int64          `json:"created,omitempty"`
-	OwnedBy            string         `json:"owned_by,omitempty"`
-	Permission         []any          `json:"permission"`
-	Root               string         `json:"root,omitempty"`
-	Parent             *string        `json:"parent"`
-	APIFormat          string         `json:"api_format,omitempty"`
-	ContextLength      int64          `json:"context_length,omitempty"`
-	MaxOutputTokens    int64          `json:"max_output_tokens,omitempty"`
-	SupportedEndpoints []string       `json:"supported_endpoints,omitempty"`
-	Capabilities       map[string]any `json:"capabilities,omitempty"`
-	InputModalities    []string       `json:"input_modalities,omitempty"`
-	OutputModalities   []string       `json:"output_modalities,omitempty"`
-	MaxInputTokens     int64          `json:"max_input_tokens,omitempty"`
-	Name               string         `json:"name,omitempty"`
-}
-
-type providerModelsResponse struct {
-	Object       string                  `json:"object"`
-	Provider     string                  `json:"provider"`
-	DefaultModel string                  `json:"default_model,omitempty"`
-	Data         []providerModelResponse `json:"data"`
+	return responseapi.JSON(c, ImportModelsResponse{OK: true, Imported: imported})
 }
 
 func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
@@ -157,6 +134,14 @@ func (h *CredentialConnectivity) adapter(providerID string) (credential.Connecti
 	return value, discoverer, upstream
 }
 
+// Test probes a credential without exposing its secret.
+// @Summary Test credential connectivity
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Success 200 {object} credential.ConnectivityResult
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/credentials/{id}/test [post]
 func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
 	if !h.authorize(c) {
 		return presenter.NotFound(c, "credential not found")
@@ -174,11 +159,19 @@ func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
 		return presenter.BadRequest(c, "unsupported credential provider")
 	}
 	if err != nil {
-		return c.JSON(credential.ConnectivityResult{OK: false})
+		return responseapi.JSON(c, credential.ConnectivityResult{OK: false})
 	}
-	return c.JSON(result)
+	return responseapi.JSON(c, result)
 }
 
+// Models discovers safe model metadata through a credential.
+// @Summary Discover provider models
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Success 200 {object} ProviderModelsResponse
+// @Failure 401,403,404,500,502 {object} presenter.Error
+// @Router /admin/credentials/{id}/models [get]
 func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 	if !h.authorize(c) {
 		return presenter.NotFound(c, "credential not found")
@@ -202,44 +195,56 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 		// other discovered model explicitly.
 		defaultModel = models[0].ID
 	}
-	out := providerModelsResponse{Object: "list", Provider: runtime.Provider, DefaultModel: defaultModel, Data: make([]providerModelResponse, 0, len(models))}
+	out := ProviderModelsResponse{Object: "list", Provider: runtime.Provider, DefaultModel: defaultModel, Data: make([]ProviderModelResponse, 0, len(models))}
 	for _, model := range models {
 		object := model.Object
 		if object == "" {
 			object = "model"
 		}
-		out.Data = append(out.Data, providerModelResponse{
+		permission := make([]json.RawMessage, 0, len(model.Permission))
+		for _, item := range model.Permission {
+			encoded, _ := json.Marshal(item)
+			permission = append(permission, encoded)
+		}
+		capabilities, _ := json.Marshal(model.Capabilities)
+		out.Data = append(out.Data, ProviderModelResponse{
 			ID:                 model.ID,
 			Object:             object,
 			PublicID:           providerpkg.PublicModelID(runtime.Provider, model.ID),
 			Default:            model.ID == defaultModel,
 			Created:            model.Created,
 			OwnedBy:            model.OwnedBy,
-			Permission:         model.Permission,
+			Permission:         permission,
 			Root:               model.Root,
 			Parent:             model.Parent,
 			APIFormat:          model.APIFormat,
 			ContextLength:      model.ContextLength,
 			MaxOutputTokens:    model.MaxOutputTokens,
 			SupportedEndpoints: model.SupportedEndpoints,
-			Capabilities:       model.Capabilities,
+			Capabilities:       capabilities,
 			InputModalities:    model.InputModalities,
 			OutputModalities:   model.OutputModalities,
 			MaxInputTokens:     model.MaxInputTokens,
 			Name:               model.Name,
 		})
 	}
-	return c.JSON(out)
+	return responseapi.JSON(c, out)
 }
 
+// Chat streams a bounded connectivity test through one credential.
+// @Summary Run credential chat test
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Param request body CredentialChatTestRequest true "Test prompt"
+// @Success 200 {string} string "Server-sent events"
+// @Failure 400,401,403,404,500,502 {object} presenter.Error
+// @Router /admin/credentials/{id}/chat-tests [post]
 func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	if !h.authorize(c) {
 		return presenter.NotFound(c, "credential not found")
 	}
-	var input struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-	}
+	var input CredentialChatTestRequest
 	if err := c.Bind().Body(&input); err != nil || strings.TrimSpace(input.Model) == "" || strings.TrimSpace(input.Prompt) == "" {
 		return presenter.BadRequest(c, "model and prompt are required")
 	}

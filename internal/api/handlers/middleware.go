@@ -5,7 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/api/presenter"
+	"github.com/kimnt93/gorouter/internal/api/presenter"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/entities"
 )

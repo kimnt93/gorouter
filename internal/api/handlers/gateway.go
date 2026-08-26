@@ -12,16 +12,18 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
+	"github.com/kimnt93/gorouter/internal/api/presenter"
+	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/policy"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/usage"
-	"github.com/kimnt93/gorouter/platform/llm"
 )
 
 type Gateway struct {
@@ -60,6 +62,16 @@ type PriceCatalog interface {
 	CatalogPrices() []entities.CatalogPrice
 }
 
+// Chat proxies an OpenAI-compatible chat completion with principal policy and attribution.
+// @Summary Create a chat completion
+// @Tags gateway
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body llm.ChatRequest true "Chat request"
+// @Success 200 {object} llm.Response
+// @Failure 400,401,403,404,429,500,502,503 {object} presenter.Error
+// @Router /v1/chat/completions [post]
 func (g *Gateway) Chat(c fiber.Ctx) error {
 	started := time.Now()
 	sess := SessionFrom(c)
@@ -182,7 +194,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	candidates := make([]chat.Candidate, 0, len(routes))
 	for _, route := range routes {
-		if !key.Master && route.OwnerTenant != nil && *route.OwnerTenant != key.TenantID {
+		if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
 			continue
 		}
 		if g.Health.Available(route.CredentialID) {
@@ -278,6 +290,13 @@ func drainAndClose(body io.ReadCloser) {
 	_ = body.Close()
 }
 
+// ListModels returns enabled models allowed by the access context.
+// @Summary List available models
+// @Tags gateway
+// @Security BearerAuth
+// @Success 200 {object} llm.ModelList
+// @Failure 401,403,500 {object} presenter.Error
+// @Router /v1/models [get]
 func (g *Gateway) ListModels(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	key, err := g.accessForSession(c, sess)
@@ -294,7 +313,7 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter"})
 		}
 	}
-	return c.JSON(out)
+	return responseapi.JSON(c, out)
 }
 
 func (g *Gateway) accessForSession(c fiber.Ctx, sess *entities.Session) (*GatewayAccessContext, error) {

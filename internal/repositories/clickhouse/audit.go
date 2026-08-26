@@ -48,6 +48,10 @@ func (r *AuditRepo) QueryAudit(ctx context.Context, query entities.AuditQuery) (
 		clauses = append(clauses, "organization_id=?")
 		args = append(args, query.Visibility.OrganizationID)
 	}
+	if query.OrganizationID != "" {
+		clauses = append(clauses, "organization_id=?")
+		args = append(args, query.OrganizationID)
+	}
 	if query.Since != nil {
 		clauses = append(clauses, "ts>=?")
 		args = append(args, *query.Since)

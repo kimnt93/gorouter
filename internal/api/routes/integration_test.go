@@ -18,23 +18,24 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/kimnt93/gorouter/api/handlers"
-	"github.com/kimnt93/gorouter/api/routes"
+	"github.com/kimnt93/gorouter/internal/api/handlers"
+	"github.com/kimnt93/gorouter/internal/api/routes"
+	"github.com/kimnt93/gorouter/internal/platform/database"
+	"github.com/kimnt93/gorouter/internal/platform/llm"
+	"github.com/kimnt93/gorouter/internal/platform/promptcache"
+	"github.com/kimnt93/gorouter/internal/repositories/postgres"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/config"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
-	"github.com/kimnt93/gorouter/platform/database"
-	"github.com/kimnt93/gorouter/platform/llm"
-	"github.com/kimnt93/gorouter/platform/promptcache"
-	"github.com/kimnt93/gorouter/repositories/postgres"
 )
 
 type integrationHarness struct {
@@ -94,6 +95,9 @@ func newIntegrationHarness(t *testing.T, upstreamURL string) *integrationHarness
 	}
 	credSvc := credential.NewService(postgres.NewCredentialRepo(repoDB), box)
 	keySvc := apikey.NewService(postgres.NewApiKeyRepo(repoDB), postgres.HashSecret, postgres.GenerateSecret)
+	identityRepo := postgres.NewIdentityRepo(repoDB)
+	auditRepo := postgres.NewAuditRepo(repoDB)
+	identitySvc := identity.NewService(identityRepo, auditRepo)
 	modelSvc := modelroute.NewService(postgres.NewModelRouteRepo(repoDB))
 	usageSvc := usage.NewService(postgres.NewUsageRepo(repoDB), 32, usage.NewPending())
 	cacheSvc, redisClient, err := promptcache.New(config.CacheConfig{Enabled: true, TTL: time.Minute, Scope: chat.ScopeKey, MaxEntryBytes: 1 << 20}, redisURL)
@@ -111,11 +115,12 @@ func newIntegrationHarness(t *testing.T, upstreamURL string) *integrationHarness
 	refresher := &llm.AnthropicOAuthRefresher{HTTP: client, TokenURL: strings.TrimSuffix(upstreamURL, "/") + "/oauth/token", ClientID: "integration-client", Persister: credSvc}
 	anthropic.Refresh = refresher.Refresh
 	masterKey := "integration-master-key"
-	authSvc := auth.NewService(masterKey, "integration-session-secret", keySvc)
+	authSvc := auth.NewServiceWithIdentity(masterKey, "integration-session-secret", keySvc, identityRepo)
 	gw := &handlers.Gateway{Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc, Cache: cacheSvc,
 		OpenAI: openai, Anthropic: anthropic, Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc}
 	app := routes.New(routes.Dependencies{Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw, OpenAI: openai, Anthropic: anthropic,
+		Identity: identitySvc, IdentityRepo: identityRepo, Audit: auditRepo,
 		BodyLimit: 2 << 20, ReadTimeout: time.Minute})
 	h := &integrationHarness{app: app, db: db, usage: usageSvc, cache: cacheSvc, redisURL: redisURL, schema: schema,
 		adminURL: upstreamURL, masterKey: masterKey, keys: keySvc, creds: credSvc, models: modelSvc}
@@ -179,6 +184,10 @@ type createKeyRequest struct {
 type createKeyResponse struct {
 	ID        string `json:"id"`
 	Plaintext string `json:"plaintext"`
+}
+type createUserAPIResponse struct {
+	User       entities.User                   `json:"user"`
+	InitialKey *handlers.CreatedAPIKeyResponse `json:"initial_key"`
 }
 
 func decodeResponse[T any](t *testing.T, res *http.Response) T {
@@ -350,6 +359,9 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 	if _, err := h.db.Pool.Exec(context.Background(), `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, "tenant_private", "private", time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := h.db.Pool.Exec(context.Background(), `INSERT INTO organizations (id,name,normalized_name,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$5) ON CONFLICT DO NOTHING`, `tenant_private`, `private`, `private`, entities.StatusActive, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	privateTenant := "tenant_private"
 	privateCredential, err := h.creds.Create(context.Background(), entities.CredentialInput{Name: "private", Provider: entities.ProviderOpenAICompatible,
 		Kind: entities.KindAPIKey, BaseURL: h.adminURL, APIKey: "private-secret", OwnerTenant: &privateTenant})
@@ -389,6 +401,82 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 	if err := h.db.Pool.QueryRow(context.Background(), `SELECT position(convert_to($1,'UTF8') in api_key_enc)=0 FROM credentials LIMIT 1`, "provider-secret-value").Scan(&encrypted); err != nil || !encrypted {
 		t.Fatalf("credential was not encrypted at rest: encrypted=%v err=%v", encrypted, err)
 	}
+}
+
+func TestIdentityOrganizationAPIAndRoleMatrix(t *testing.T) {
+	upstream, _ := mockOpenAIUpstream(t)
+	h := newIntegrationHarness(t, upstream.URL)
+	createUser := func(username string) createUserAPIResponse {
+		response := h.request(t, http.MethodPost, "/admin/users", h.masterKey, handlers.UserCreateRequest{Username: username, GenerateInitialKey: true, InitialKey: handlers.InitialKeyRequest{Name: "login", Scopes: []string{entities.ScopeChat, entities.ScopeKeysManage, entities.ScopeMembersManage, entities.ScopeUsageRead}}})
+		if response.StatusCode != http.StatusCreated {
+			t.Fatalf("create user %s: %d %s", username, response.StatusCode, readBody(t, response))
+		}
+		return decodeResponse[createUserAPIResponse](t, response)
+	}
+	adminUser := createUser("admin@example.com")
+	memberUser := createUser("member@example.com")
+	foreignUser := createUser("foreign@example.com")
+	organizationResponse := h.request(t, http.MethodPost, "/admin/organizations", h.masterKey, handlers.OrganizationCreateRequest{Name: "Acme"})
+	if organizationResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("create organization=%d", organizationResponse.StatusCode)
+	}
+	organization := decodeResponse[entities.Organization](t, organizationResponse)
+	for _, request := range []handlers.MembershipCreateRequest{{UserID: adminUser.User.ID, Role: entities.MembershipAdmin}, {UserID: memberUser.User.ID, Role: entities.MembershipMember}} {
+		response := h.request(t, http.MethodPost, "/admin/organizations/"+organization.ID+"/members", h.masterKey, request)
+		if response.StatusCode != http.StatusCreated {
+			t.Fatalf("add member=%d %s", response.StatusCode, readBody(t, response))
+		}
+	}
+	adminKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "scoped admin", OwnerType: entities.OwnerUser, OwnerUserID: adminUser.User.ID, ContextOrganizationID: organization.ID, Scopes: []string{entities.ScopeChat, entities.ScopeKeysManage, entities.ScopeMembersManage, entities.ScopeUsageRead}})
+	if adminKeyResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("admin key=%d %s", adminKeyResponse.StatusCode, readBody(t, adminKeyResponse))
+	}
+	adminKey := decodeResponse[handlers.CreatedAPIKeyResponse](t, adminKeyResponse)
+	membersResponse := h.request(t, http.MethodGet, "/admin/organizations/"+organization.ID+"/members", adminKey.Plaintext, nil)
+	if membersResponse.StatusCode != http.StatusOK {
+		t.Fatalf("admin list members=%d %s", membersResponse.StatusCode, readBody(t, membersResponse))
+	}
+	members := decodeResponse[handlers.MembershipListResponse](t, membersResponse)
+	if len(members.Data) != 2 {
+		t.Fatalf("members=%+v", members.Data)
+	}
+	memberKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "scoped member", OwnerType: entities.OwnerUser, OwnerUserID: memberUser.User.ID, ContextOrganizationID: organization.ID, Scopes: []string{entities.ScopeMembersManage, entities.ScopeUsageRead}})
+	memberKey := decodeResponse[handlers.CreatedAPIKeyResponse](t, memberKeyResponse)
+	denied := h.request(t, http.MethodGet, "/admin/organizations/"+organization.ID+"/members", memberKey.Plaintext, nil)
+	if denied.StatusCode != http.StatusForbidden {
+		t.Fatalf("member list members=%d", denied.StatusCode)
+	}
+	denied.Body.Close()
+	organizationKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", adminKey.Plaintext, handlers.APIKeyCreateRequest{Name: "shared", OwnerType: entities.OwnerOrganization, OwnerOrganizationID: organization.ID, ContextOrganizationID: organization.ID, Scopes: []string{entities.ScopeUsageRead}})
+	if organizationKeyResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("organization key=%d %s", organizationKeyResponse.StatusCode, readBody(t, organizationKeyResponse))
+	}
+	organizationKey := decodeResponse[handlers.CreatedAPIKeyResponse](t, organizationKeyResponse)
+	login := h.request(t, http.MethodPost, "/login", "", handlers.LoginRequest{Key: organizationKey.Plaintext})
+	if login.StatusCode != http.StatusOK {
+		t.Fatalf("organization login=%d", login.StatusCode)
+	}
+	loginResult := decodeResponse[handlers.LoginResponse](t, login)
+	if loginResult.PrincipalType != entities.PrincipalOrganization || loginResult.OrganizationID != organization.ID {
+		t.Fatalf("organization login=%+v", loginResult)
+	}
+	foreignKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "foreign personal", OwnerType: entities.OwnerUser, OwnerUserID: foreignUser.User.ID, Scopes: []string{entities.ScopeKeysManage}})
+	foreignKey := decodeResponse[handlers.CreatedAPIKeyResponse](t, foreignKeyResponse)
+	foreignList := h.request(t, http.MethodGet, "/admin/api-keys", adminKey.Plaintext, nil)
+	body := readBody(t, foreignList)
+	if strings.Contains(body, foreignKey.ID) {
+		t.Fatal("organization admin saw unrelated personal key")
+	}
+	disable := h.request(t, http.MethodPatch, "/admin/users/"+adminUser.User.ID, h.masterKey, handlers.UserStatusRequest{Status: entities.StatusDisabled})
+	if disable.StatusCode != http.StatusOK {
+		t.Fatalf("disable user=%d", disable.StatusCode)
+	}
+	disable.Body.Close()
+	stale := h.request(t, http.MethodGet, "/admin/organizations", adminKey.Plaintext, nil)
+	if stale.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("disabled user key status=%d", stale.StatusCode)
+	}
+	stale.Body.Close()
 }
 
 func TestDistributedQuotaAndRPM(t *testing.T) {

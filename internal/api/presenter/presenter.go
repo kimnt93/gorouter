@@ -2,21 +2,15 @@ package presenter
 
 import (
 	"github.com/gofiber/fiber/v3"
+
+	response "github.com/kimnt93/gorouter/internal/api"
 )
 
-type Error struct {
-	Error Detail `json:"error"`
-}
-
-type Detail struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code,omitempty"`
-}
+type Error = response.ErrorResponse
+type Detail = response.ErrorDetail
 
 func Err(c fiber.Ctx, status int, msg, typ, code string) error {
-	c.Status(status)
-	return c.JSON(Error{Error: Detail{Message: msg, Type: typ, Code: code}})
+	return response.Response().Error(status, msg, typ, code).Send(c)
 }
 
 func BadRequest(c fiber.Ctx, msg string) error {
@@ -35,4 +29,4 @@ func ServerError(c fiber.Ctx, msg string) error {
 	return Err(c, fiber.StatusInternalServerError, msg, "server_error", "")
 }
 
-func OK(c fiber.Ctx, v any) error { return c.JSON(v) }
+func OK(c fiber.Ctx, v any) error { return response.Response().Data(v).Send(c) }

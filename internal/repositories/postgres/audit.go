@@ -64,8 +64,9 @@ func (r *AuditRepo) QueryAudit(ctx context.Context, query entities.AuditQuery) (
 		($4::timestamptz='0001-01-01 00:00:00+00' OR ts <= $4) AND
 		($5::timestamptz='0001-01-01 00:00:00+00' OR (ts,id) < ($5,$6)) AND
 		($7='' OR actor_id=$7) AND ($8='' OR action=$8) AND
-		($9='' OR target_type=$9) AND ($10='' OR target_id=$10)
-		ORDER BY ts DESC,id DESC LIMIT $11`, master, query.Visibility.OrganizationID, since, until, cursor.TS, cursor.ID, query.ActorID, query.Action, query.TargetType, query.TargetID, limit+1)
+		($9='' OR target_type=$9) AND ($10='' OR target_id=$10) AND
+		($11='' OR organization_id=$11)
+		ORDER BY ts DESC,id DESC LIMIT $12`, master, query.Visibility.OrganizationID, since, until, cursor.TS, cursor.ID, query.ActorID, query.Action, query.TargetType, query.TargetID, query.OrganizationID, limit+1)
 	if err != nil {
 		return nil, err
 	}

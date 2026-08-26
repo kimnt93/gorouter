@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -51,6 +52,48 @@ func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*e
 		return nil, e
 	}
 	return &input, nil
+}
+
+func (r *ApiKeyRepo) CreateUserWithInitialKey(ctx context.Context, user entities.User, key entities.ApiKey, audits []entities.AuditEvent) error {
+	if key.OwnerType != entities.OwnerUser || key.OwnerUserID != user.ID || key.ContextOrganizationID != "" || key.ID == "" || key.SecretHash == "" || key.CreatedAt.IsZero() {
+		return entities.ErrInvalidOwnership
+	}
+	return r.s.mutate(ctx, "user_username:"+user.NormalizedUsername, func() error {
+		if _, err := get[lookupRecord](ctx, r.s, "user_username", user.NormalizedUsername); err == nil {
+			return entities.ErrConflict
+		} else if !errors.Is(err, entities.ErrNotFound) {
+			return err
+		}
+		rollback := func() {
+			_ = r.s.del(ctx, "api_key_hash", key.SecretHash)
+			_ = r.s.del(ctx, "api_key", key.ID)
+			_ = r.s.del(ctx, "user_username", user.NormalizedUsername)
+			_ = r.s.del(ctx, "user", user.ID)
+		}
+		if err := r.s.put(ctx, "user", user.ID, user); err != nil {
+			return err
+		}
+		if err := r.s.put(ctx, "user_username", user.NormalizedUsername, lookupRecord{ID: user.ID}); err != nil {
+			rollback()
+			return err
+		}
+		if err := r.s.put(ctx, "api_key", key.ID, storedAPIKey{key, key.SecretHash}); err != nil {
+			rollback()
+			return err
+		}
+		if err := r.s.put(ctx, "api_key_hash", key.SecretHash, key.ID); err != nil {
+			rollback()
+			return err
+		}
+		auditRepo := NewAuditRepo(r.s)
+		for _, event := range audits {
+			if err := auditRepo.AppendAudit(ctx, event); err != nil {
+				rollback()
+				return err
+			}
+		}
+		return nil
+	})
 }
 func (r *ApiKeyRepo) Rotate(ctx context.Context, keyID string) (*entities.ApiKey, error) {
 	var result *entities.ApiKey

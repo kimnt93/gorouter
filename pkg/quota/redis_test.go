@@ -139,9 +139,11 @@ func TestWindowUTCBoundaries(t *testing.T) {
 
 func TestWindowConfigurableWeekStart(t *testing.T) {
 	SetWeekStart(time.Monday)
-	t.Cleanup(func(){ SetWeekStart(time.Sunday) })
-	start,end,suffix,err:=Window("week",time.Date(2027,time.January,1,12,0,0,0,time.UTC))
-	if err!=nil || start.Format("2006-01-02")!="2026-12-28" || end.Format("2006-01-02")!="2027-01-04" || suffix!="2026-12-28" { t.Fatalf("window = %s %s %s err=%v",start,end,suffix,err) }
+	t.Cleanup(func() { SetWeekStart(time.Sunday) })
+	start, end, suffix, err := Window("week", time.Date(2027, time.January, 1, 12, 0, 0, 0, time.UTC))
+	if err != nil || start.Format("2006-01-02") != "2026-12-28" || end.Format("2006-01-02") != "2027-01-04" || suffix != "2026-12-28" {
+		t.Fatalf("window = %s %s %s err=%v", start, end, suffix, err)
+	}
 }
 
 func TestNoLimitBypassesRedis(t *testing.T) {

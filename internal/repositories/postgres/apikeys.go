@@ -39,8 +39,19 @@ func (r *TenantRepo) List(ctx context.Context) ([]entities.Tenant, error) {
 
 func (r *TenantRepo) Create(ctx context.Context, name string) (*entities.Tenant, error) {
 	t := &entities.Tenant{ID: NewID("tenant"), Name: name, CreatedAt: time.Now().UTC()}
-	_, err := r.db.Pool.Exec(ctx, `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3)`, t.ID, t.Name, t.CreatedAt)
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	tx, err := r.db.Pool.Begin(ctx)
 	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3)`, t.ID, t.Name, t.CreatedAt); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO organizations (id,name,normalized_name,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$5)`, t.ID, t.Name, normalized, entities.StatusActive, t.CreatedAt); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -48,8 +59,18 @@ func (r *TenantRepo) Create(ctx context.Context, name string) (*entities.Tenant,
 
 func (r *TenantRepo) EnsureDefault(ctx context.Context) error {
 	createdAt := time.Now().UTC()
-	_, err := r.db.Pool.Exec(ctx, `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, "tenant_default", "default", createdAt)
-	return err
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, "tenant_default", "default", createdAt); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO organizations (id,name,normalized_name,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$5) ON CONFLICT (id) DO NOTHING`, `tenant_default`, `default`, `default`, entities.StatusActive, createdAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 type CredentialRepo struct{ db *DB }
@@ -383,6 +404,36 @@ func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*e
 		return nil, err
 	}
 	return &input, nil
+}
+
+func (r *ApiKeyRepo) CreateUserWithInitialKey(ctx context.Context, user entities.User, key entities.ApiKey, audits []entities.AuditEvent) error {
+	if key.OwnerType != entities.OwnerUser || key.OwnerUserID != user.ID || key.ContextOrganizationID != "" || key.ID == "" || key.SecretHash == "" || key.CreatedAt.IsZero() {
+		return entities.ErrInvalidOwnership
+	}
+	modelsJSON, _ := json.Marshal(orEmpty(key.Models))
+	scopesJSON, _ := json.Marshal(orEmpty(key.Scopes))
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `INSERT INTO users (id,username,normalized_username,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6)`, user.ID, user.Username, user.NormalizedUsername, user.Status, user.CreatedAt, user.UpdatedAt); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id)
+		VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,NULL)`, key.ID, key.Name, key.SecretHash, key.SecretPrefix, modelsJSON, scopesJSON, key.QuotaUSD, key.QuotaPeriod, key.RPM, key.Enabled, key.CreatedAt, key.OwnerType, key.OwnerUserID); err != nil {
+		return err
+	}
+	for _, event := range audits {
+		metadata, marshalErr := json.Marshal(event.SafeMetadata)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO audit_events (id,ts,actor_type,actor_id,actor_label,organization_id,action,target_type,target_id,safe_metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`, event.ID, event.TS, event.ActorType, event.ActorID, event.ActorLabel, event.OrganizationID, event.Action, event.TargetType, event.TargetID, metadata); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *ApiKeyRepo) Rotate(ctx context.Context, id string) (*entities.ApiKey, error) {

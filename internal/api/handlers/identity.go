@@ -7,17 +7,12 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/kimnt93/gorouter/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
+	"github.com/kimnt93/gorouter/internal/api/presenter"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/policy"
 )
-
-type listResponse[T any] struct {
-	Object     string `json:"object"`
-	Data       []T    `json:"data"`
-	NextCursor string `json:"next_cursor,omitempty"`
-}
 
 func principalFromSession(session *entities.Session) entities.Principal {
 	if session == nil {
@@ -39,6 +34,20 @@ func pageQuery(c fiber.Ctx) entities.PageQuery {
 	return entities.PageQuery{Cursor: c.Query("cursor"), Limit: limit, Query: c.Query("q"), Status: c.Query("status")}
 }
 
+// Users lists or creates users.
+// @Summary List or create users
+// @Tags users
+// @Security BearerAuth
+// @Param cursor query string false "Opaque cursor"
+// @Param limit query int false "Page size" default(100) maximum(500)
+// @Param q query string false "Username search"
+// @Param status query string false "Status filter"
+// @Param request body UserCreateRequest false "Required for POST"
+// @Success 200 {object} UserListResponse
+// @Success 201 {object} UserCreateResponse
+// @Failure 400,401,403,409,500 {object} presenter.Error
+// @Router /admin/users [get]
+// @Router /admin/users [post]
 func (a *Admin) Users(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if err := policy.ManageUsers(actor); err != nil {
@@ -52,42 +61,41 @@ func (a *Admin) Users(c fiber.Ctx) error {
 		if err != nil {
 			return presenter.ServerError(c, "failed to list users")
 		}
-		return c.JSON(listResponse[entities.User]{Object: "list", Data: users, NextCursor: next})
+		return responseapi.JSON(c, UserListResponse{Object: "list", Data: users, NextCursor: next})
 	}
-	var body struct {
-		Username           string `json:"username"`
-		GenerateInitialKey bool   `json:"generate_initial_key"`
-		InitialKey         struct {
-			Name   string   `json:"name"`
-			Models []string `json:"models"`
-			Scopes []string `json:"scopes"`
-		} `json:"initial_key"`
-	}
+	var body UserCreateRequest
 	if err := c.Bind().Body(&body); err != nil {
 		return presenter.BadRequest(c, "invalid user request")
 	}
-	user, err := a.IdentitySvc.CreateUser(c.Context(), actor, body.Username)
-	if err != nil {
-		return identityError(c, err)
-	}
-	response := struct {
-		User *entities.User         `json:"user"`
-		Key  *createdAPIKeyResponse `json:"initial_key,omitempty"`
-	}{User: user}
 	if body.GenerateInitialKey {
 		name := strings.TrimSpace(body.InitialKey.Name)
 		if name == "" {
 			name = "Initial login key"
 		}
-		key, keyErr := a.KeysSvc.Create(c.Context(), apikey.CreateInput{Name: name, Models: body.InitialKey.Models, Scopes: body.InitialKey.Scopes, OwnerType: entities.OwnerUser, OwnerUserID: user.ID})
-		if keyErr != nil {
-			return presenter.ServerError(c, "user created but initial key creation failed")
+		user, key, err := a.IdentitySvc.CreateUserWithInitialKey(c.Context(), actor, body.Username, a.KeysSvc, apikey.CreateInput{Name: name, Models: body.InitialKey.Models, Scopes: body.InitialKey.Scopes})
+		if err != nil {
+			return identityError(c, err)
 		}
-		response.Key = &createdAPIKeyResponse{ID: key.ID, Name: key.Name, KeyPrefix: key.SecretPrefix, Models: key.Models, Scopes: key.Scopes, QuotaUSD: key.QuotaUSD, QuotaPeriod: key.QuotaPeriod, RPM: key.RPM, Enabled: key.Enabled, Plaintext: key.Plaintext}
+		initial := keyCreatedResponse(key)
+		return responseapi.JSONStatus(c, fiber.StatusCreated, UserCreateResponse{User: user, InitialKey: &initial})
 	}
-	return c.Status(fiber.StatusCreated).JSON(response)
+	user, err := a.IdentitySvc.CreateUser(c.Context(), actor, body.Username)
+	if err != nil {
+		return identityError(c, err)
+	}
+	return responseapi.JSONStatus(c, fiber.StatusCreated, UserCreateResponse{User: user})
 }
 
+// UserByID returns user detail or changes user status.
+// @Summary Get or update a user
+// @Tags users
+// @Security BearerAuth
+// @Param id path string true "User ID"
+// @Param request body UserStatusRequest false "Required for PATCH"
+// @Success 200 {object} UserDetailResponse
+// @Failure 400,401,403,404,500 {object} presenter.Error
+// @Router /admin/users/{id} [get]
+// @Router /admin/users/{id} [patch]
 func (a *Admin) UserByID(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if err := policy.ManageUsers(actor); err != nil {
@@ -102,23 +110,32 @@ func (a *Admin) UserByID(c fiber.Ctx) error {
 		if memberErr != nil {
 			return presenter.ServerError(c, "failed to load user memberships")
 		}
-		return c.JSON(struct {
-			User        *entities.User        `json:"user"`
-			Memberships []entities.Membership `json:"memberships"`
-		}{user, memberships})
+		return responseapi.JSON(c, UserDetailResponse{User: user, Memberships: memberships})
 	}
-	var body struct {
-		Status string `json:"status"`
-	}
+	var body UserStatusRequest
 	if err = c.Bind().Body(&body); err != nil {
 		return presenter.BadRequest(c, "invalid user update")
 	}
 	if err = a.IdentitySvc.SetUserStatus(c.Context(), actor, user.ID, body.Status); err != nil {
 		return identityError(c, err)
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
 
+// Organizations lists visible organizations or creates one as master.
+// @Summary List or create organizations
+// @Tags organizations
+// @Security BearerAuth
+// @Param cursor query string false "Opaque cursor"
+// @Param limit query int false "Page size" default(100) maximum(500)
+// @Param q query string false "Name search"
+// @Param status query string false "Status filter"
+// @Param request body OrganizationCreateRequest false "Required for POST"
+// @Success 200 {object} OrganizationListResponse
+// @Success 201 {object} entities.Organization
+// @Failure 400,401,403,409,500 {object} presenter.Error
+// @Router /admin/organizations [get]
+// @Router /admin/organizations [post]
 func (a *Admin) Organizations(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if a.IdentityRepo == nil {
@@ -128,9 +145,7 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 		if err := policy.ManageOrganizations(actor); err != nil {
 			return presenter.Forbidden(c, "only master may create organizations")
 		}
-		var body struct {
-			Name string `json:"name"`
-		}
+		var body OrganizationCreateRequest
 		if err := c.Bind().Body(&body); err != nil {
 			return presenter.BadRequest(c, "invalid organization request")
 		}
@@ -138,7 +153,7 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 		if err != nil {
 			return identityError(c, err)
 		}
-		return c.Status(fiber.StatusCreated).JSON(organization)
+		return responseapi.JSONStatus(c, fiber.StatusCreated, organization)
 	}
 	organizations, next, err := a.IdentityRepo.ListOrganizations(c.Context(), pageQuery(c))
 	if err != nil {
@@ -147,6 +162,8 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 	if actor.Type != entities.PrincipalMaster {
 		allowed := map[string]bool{}
 		if actor.Type == entities.PrincipalOrganization {
+			allowed[actor.OrganizationID] = true
+		} else if actor.OrganizationID != "" {
 			allowed[actor.OrganizationID] = true
 		} else {
 			memberships, _ := a.IdentityRepo.ListMembershipsForUser(c.Context(), actor.UserID)
@@ -163,16 +180,30 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 		organizations = filtered
 		next = ""
 	}
-	return c.JSON(listResponse[entities.Organization]{Object: "list", Data: organizations, NextCursor: next})
+	return responseapi.JSON(c, OrganizationListResponse{Object: "list", Data: organizations, NextCursor: next})
 }
 
+// OrganizationByID returns or updates an organization.
+// @Summary Get or update an organization
+// @Tags organizations
+// @Security BearerAuth
+// @Param id path string true "Organization ID"
+// @Param request body OrganizationUpdateRequest false "Required for PATCH"
+// @Success 200 {object} OrganizationDetailResponse
+// @Failure 400,401,403,404,409,500 {object} presenter.Error
+// @Router /admin/organizations/{id} [get]
+// @Router /admin/organizations/{id} [patch]
 func (a *Admin) OrganizationByID(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	id := c.Params("id")
 	if actor.Type == entities.PrincipalUser && actor.OrganizationID != id {
-		if membership, err := a.IdentityRepo.Membership(c.Context(), id, actor.UserID); err == nil {
-			actor.OrganizationID = id
-			actor.MembershipRole = membership.Role
+		// An organization-scoped key is fixed to its signed context. A personal
+		// key may select any current membership without mutating key context.
+		if actor.OrganizationID == "" {
+			if membership, err := a.IdentityRepo.Membership(c.Context(), id, actor.UserID); err == nil {
+				actor.OrganizationID = id
+				actor.MembershipRole = membership.Role
+			}
 		}
 	}
 	if err := policy.ViewOrganization(actor, id); err != nil {
@@ -187,15 +218,9 @@ func (a *Admin) OrganizationByID(c fiber.Ctx) error {
 		if actor.Type == entities.PrincipalUser {
 			own, _ = a.IdentityRepo.Membership(c.Context(), id, actor.UserID)
 		}
-		return c.JSON(struct {
-			Organization *entities.Organization `json:"organization"`
-			Membership   *entities.Membership   `json:"membership,omitempty"`
-		}{organization, own})
+		return responseapi.JSON(c, OrganizationDetailResponse{Organization: organization, Membership: own})
 	}
-	var body struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
-	}
+	var body OrganizationUpdateRequest
 	if err := c.Bind().Body(&body); err != nil {
 		return presenter.BadRequest(c, "invalid organization update")
 	}
@@ -203,9 +228,20 @@ func (a *Admin) OrganizationByID(c fiber.Ctx) error {
 	if err != nil {
 		return identityError(c, err)
 	}
-	return c.JSON(organization)
+	return responseapi.JSON(c, organization)
 }
 
+// Members lists or adds organization memberships.
+// @Summary List or add organization members
+// @Tags memberships
+// @Security BearerAuth
+// @Param id path string true "Organization ID"
+// @Param request body MembershipCreateRequest false "Required for POST"
+// @Success 200 {object} MembershipListResponse
+// @Success 201 {object} entities.Membership
+// @Failure 400,401,403,404,409,500 {object} presenter.Error
+// @Router /admin/organizations/{id}/members [get]
+// @Router /admin/organizations/{id}/members [post]
 func (a *Admin) Members(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	organizationID := c.Params("id")
@@ -217,12 +253,9 @@ func (a *Admin) Members(c fiber.Ctx) error {
 		if err != nil {
 			return presenter.ServerError(c, "failed to list members")
 		}
-		return c.JSON(listResponse[entities.Membership]{Object: "list", Data: members})
+		return responseapi.JSON(c, MembershipListResponse{Object: "list", Data: members})
 	}
-	var body struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
-	}
+	var body MembershipCreateRequest
 	if err := c.Bind().Body(&body); err != nil {
 		return presenter.BadRequest(c, "invalid membership request")
 	}
@@ -230,9 +263,20 @@ func (a *Admin) Members(c fiber.Ctx) error {
 	if err != nil {
 		return identityError(c, err)
 	}
-	return c.Status(fiber.StatusCreated).JSON(membership)
+	return responseapi.JSONStatus(c, fiber.StatusCreated, membership)
 }
 
+// MemberByID changes a membership role or removes it.
+// @Summary Update or remove an organization member
+// @Tags memberships
+// @Security BearerAuth
+// @Param id path string true "Organization ID"
+// @Param user_id path string true "User ID"
+// @Param request body MembershipUpdateRequest false "Required for PATCH"
+// @Success 200 {object} OKResponse
+// @Failure 400,401,403,404,409,500 {object} presenter.Error
+// @Router /admin/organizations/{id}/members/{user_id} [patch]
+// @Router /admin/organizations/{id}/members/{user_id} [delete]
 func (a *Admin) MemberByID(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	organizationID, userID := c.Params("id"), c.Params("user_id")
@@ -243,9 +287,7 @@ func (a *Admin) MemberByID(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodDelete {
 		err = a.IdentitySvc.RemoveMembership(c.Context(), actor, organizationID, userID)
 	} else {
-		var body struct {
-			Role string `json:"role"`
-		}
+		var body MembershipUpdateRequest
 		if bindErr := c.Bind().Body(&body); bindErr != nil {
 			return presenter.BadRequest(c, "invalid membership update")
 		}
@@ -254,17 +296,39 @@ func (a *Admin) MemberByID(c fiber.Ctx) error {
 	if err != nil {
 		return identityError(c, err)
 	}
-	return c.JSON(okResponse{OK: true})
+	return responseapi.JSON(c, okResponse{OK: true})
 }
 
+// AuditEvents returns principal-filtered administrative audit history.
+// @Summary List audit events
+// @Tags audit
+// @Security BearerAuth
+// @Param cursor query string false "Opaque cursor"
+// @Param limit query int false "Page size" default(100) maximum(500)
+// @Param since query string false "RFC3339 lower time bound"
+// @Param until query string false "RFC3339 upper time bound"
+// @Param organization_id query string false "Organization filter"
+// @Param actor_id query string false "Actor ID"
+// @Param action query string false "Action"
+// @Param target_type query string false "Target type"
+// @Param target_id query string false "Target ID"
+// @Success 200 {object} AuditListResponse
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/audit/events [get]
 func (a *Admin) AuditEvents(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
+	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
+		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
+			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
+		}
+	}
 	visibility, err := policy.AuditVisibility(actor)
 	if err != nil {
 		return presenter.Forbidden(c, "audit access is not allowed")
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "100"))
-	query := entities.AuditQuery{Visibility: visibility, Cursor: c.Query("cursor"), Limit: limit, ActorID: c.Query("actor_id"), Action: c.Query("action"), TargetType: c.Query("target_type"), TargetID: c.Query("target_id")}
+	query := entities.AuditQuery{Visibility: visibility, OrganizationID: c.Query("organization_id"), Cursor: c.Query("cursor"), Limit: limit, ActorID: c.Query("actor_id"), Action: c.Query("action"), TargetType: c.Query("target_type"), TargetID: c.Query("target_id")}
 	if value := c.Query("since"); value != "" {
 		parsed, parseErr := time.Parse(time.RFC3339, value)
 		if parseErr != nil {
@@ -283,11 +347,7 @@ func (a *Admin) AuditEvents(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to load audit events")
 	}
-	return c.JSON(struct {
-		Object     string                `json:"object"`
-		Data       []entities.AuditEvent `json:"data"`
-		NextCursor string                `json:"next_cursor,omitempty"`
-	}{"list", page.Data, page.NextCursor})
+	return responseapi.JSON(c, AuditListResponse{Object: "list", Data: page.Data, NextCursor: page.NextCursor})
 }
 
 func identityError(c fiber.Ctx, err error) error {

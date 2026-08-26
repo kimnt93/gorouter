@@ -15,6 +15,7 @@ type IdentityKeyRepository interface {
 	GetBySecret(context.Context, string) (*entities.ApiKey, error)
 	Rotate(context.Context, string) (*entities.ApiKey, error)
 	Patch(context.Context, string, *bool, *[]string, *[]string, **float64, **int) error
+	CreateUserWithInitialKey(context.Context, entities.User, entities.ApiKey, []entities.AuditEvent) error
 }
 
 type IdentityUsageRepository interface {
@@ -51,6 +52,29 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 	user2, err := service.CreateUser(ctx, master, "second-"+suffix+"@example.com")
 	if err != nil {
 		t.Fatal(err)
+	}
+	provisionedAt := time.Now().UTC()
+	provisionedUser := entities.User{ID: entities.NewID("usr"), Username: "provisioned-" + suffix + "@example.com", NormalizedUsername: "provisioned-" + suffix + "@example.com", Status: entities.StatusActive, CreatedAt: provisionedAt, UpdatedAt: provisionedAt}
+	provisionedKey := entities.ApiKey{ID: entities.NewID("key"), Name: "initial", SecretHash: "hash-" + suffix, SecretPrefix: "nr-preview", Models: []string{"m"}, Scopes: []string{entities.ScopeChat}, QuotaPeriod: entities.QuotaPeriodNone, Enabled: true, CreatedAt: provisionedAt, OwnerType: entities.OwnerUser, OwnerUserID: provisionedUser.ID}
+	provisionAudit := []entities.AuditEvent{{ID: entities.NewID("audit"), TS: provisionedAt, ActorType: entities.ActorMaster, ActorID: "master", ActorLabel: "master", Action: "user.create", TargetType: "user", TargetID: provisionedUser.ID, SafeMetadata: map[string]string{"username": provisionedUser.Username}}}
+	if err := backend.Keys.CreateUserWithInitialKey(ctx, provisionedUser, provisionedKey, provisionAudit); err != nil {
+		t.Fatalf("compound user/key provisioning: %v", err)
+	}
+	if _, err := backend.Identity.UserByID(ctx, provisionedUser.ID); err != nil {
+		t.Fatalf("compound user missing: %v", err)
+	}
+	if _, err := backend.Keys.GetBySecret(ctx, provisionedKey.SecretHash); err != nil {
+		t.Fatalf("compound key missing: %v", err)
+	}
+	failedUser := provisionedUser
+	failedUser.ID = entities.NewID("usr")
+	failedKey := provisionedKey
+	failedKey.ID, failedKey.OwnerUserID, failedKey.SecretHash = entities.NewID("key"), failedUser.ID, "failed-hash-"+suffix
+	if err := backend.Keys.CreateUserWithInitialKey(ctx, failedUser, failedKey, nil); err == nil {
+		t.Fatal("duplicate compound provisioning succeeded")
+	}
+	if _, err := backend.Keys.GetBySecret(ctx, failedKey.SecretHash); err == nil {
+		t.Fatal("failed compound provisioning left a key behind")
 	}
 	organization1, err := service.CreateOrganization(ctx, master, " Acme "+suffix)
 	if err != nil {

@@ -11,9 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/kimnt93/gorouter/internal/platform/database"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/seal"
-	"github.com/kimnt93/gorouter/platform/database"
 )
 
 func TestOAuthCredentialMetadataIsEncryptedAndPreservedAcrossRefresh(t *testing.T) {

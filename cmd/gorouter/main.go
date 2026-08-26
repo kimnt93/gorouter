@@ -1,5 +1,15 @@
 package main
 
+// @title gorouter API
+// @version 1.0
+// @description Principal-aware model gateway and administration API.
+// @BasePath /
+// @schemes http https
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Use "Bearer {master-or-api-key}".
+
 import (
 	"context"
 	"errors"
@@ -12,8 +22,14 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/kimnt93/gorouter/api/handlers"
-	"github.com/kimnt93/gorouter/api/routes"
+	"github.com/kimnt93/gorouter/internal/api/handlers"
+	"github.com/kimnt93/gorouter/internal/api/routes"
+	"github.com/kimnt93/gorouter/internal/platform/database"
+	"github.com/kimnt93/gorouter/internal/platform/llm"
+	platformpricing "github.com/kimnt93/gorouter/internal/platform/pricing"
+	"github.com/kimnt93/gorouter/internal/platform/promptcache"
+	clickhouserepo "github.com/kimnt93/gorouter/internal/repositories/clickhouse"
+	"github.com/kimnt93/gorouter/internal/repositories/postgres"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -28,12 +44,6 @@ import (
 	"github.com/kimnt93/gorouter/pkg/seal"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
-	"github.com/kimnt93/gorouter/platform/database"
-	"github.com/kimnt93/gorouter/platform/llm"
-	platformpricing "github.com/kimnt93/gorouter/platform/pricing"
-	"github.com/kimnt93/gorouter/platform/promptcache"
-	clickhouserepo "github.com/kimnt93/gorouter/repositories/clickhouse"
-	"github.com/kimnt93/gorouter/repositories/postgres"
 )
 
 type modelStore interface {

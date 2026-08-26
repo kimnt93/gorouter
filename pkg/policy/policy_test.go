@@ -47,3 +47,26 @@ func TestCanGrantDoesNotEscalate(t *testing.T) {
 		t.Fatal("scope/model escalation accepted")
 	}
 }
+
+func TestCredentialVisibility(t *testing.T) {
+	organizationA, organizationB := "org-a", "org-b"
+	for name, test := range map[string]struct {
+		master  bool
+		context string
+		owner   *string
+		want    bool
+	}{
+		"master foreign":        {master: true, owner: &organizationB, want: true},
+		"personal global":       {want: true},
+		"personal organization": {owner: &organizationA},
+		"organization global":   {context: organizationA, want: true},
+		"organization own":      {context: organizationA, owner: &organizationA, want: true},
+		"organization foreign":  {context: organizationA, owner: &organizationB},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := CredentialVisible(test.master, test.context, test.owner); got != test.want {
+				t.Fatalf("got %v want %v", got, test.want)
+			}
+		})
+	}
+}

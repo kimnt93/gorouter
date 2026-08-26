@@ -7,16 +7,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
-	"github.com/kimnt93/gorouter/platform/llm"
+	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
 func TestRetryableStatus(t *testing.T) {
@@ -178,6 +181,72 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "model-a") {
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+}
+
+type captureUsageRepository struct {
+	mu     sync.Mutex
+	events []entities.UsageEvent
+}
+
+func (*captureUsageRepository) SpendForKeySince(context.Context, string, time.Time) (float64, error) {
+	return 0, nil
+}
+func (*captureUsageRepository) Summary(context.Context, time.Time) (*entities.UsageSummary, error) {
+	return &entities.UsageSummary{}, nil
+}
+func (*captureUsageRepository) Recent(context.Context, int) ([]entities.RecentEvent, error) {
+	return nil, nil
+}
+func (*captureUsageRepository) SummaryForTenant(context.Context, string, time.Time) (*entities.UsageSummary, error) {
+	return &entities.UsageSummary{}, nil
+}
+func (*captureUsageRepository) RecentForTenant(context.Context, string, int) ([]entities.RecentEvent, error) {
+	return nil, nil
+}
+func (r *captureUsageRepository) InsertBatch(_ context.Context, events []entities.UsageEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, events...)
+	return nil
+}
+
+func TestGatewayRecordsPrincipalAttributionForSuccessCacheStreamAndError(t *testing.T) {
+	cases := []struct {
+		name      string
+		access    GatewayAccessContext
+		cacheHit  bool
+		status    int
+		errorText string
+		wantKeyID string
+		wantActor string
+		wantUser  string
+		wantLabel string
+		wantOrg   string
+	}{
+		{name: "personal non-stream", access: GatewayAccessContext{ApiKey: &entities.ApiKey{ID: "key-personal"}, StoredKey: &entities.ApiKey{ID: "key-personal"}, Actor: entities.UsageActor{Type: entities.ActorUser, UserID: "usr-1", Username: "person@example.com"}}, status: 200, wantKeyID: "key-personal", wantActor: entities.ActorUser, wantUser: "usr-1", wantLabel: "person@example.com"},
+		{name: "scoped user stream", access: GatewayAccessContext{ApiKey: &entities.ApiKey{ID: "key-scoped", TenantID: "org-1"}, StoredKey: &entities.ApiKey{ID: "key-scoped"}, Actor: entities.UsageActor{Type: entities.ActorUser, UserID: "usr-1", Username: "person@example.com", OrganizationID: "org-1"}}, status: 200, wantKeyID: "key-scoped", wantActor: entities.ActorUser, wantUser: "usr-1", wantLabel: "person@example.com", wantOrg: "org-1"},
+		{name: "organization cache hit", access: GatewayAccessContext{ApiKey: &entities.ApiKey{ID: "key-org", TenantID: "org-1"}, StoredKey: &entities.ApiKey{ID: "key-org"}, Actor: entities.UsageActor{Type: entities.ActorOrganization, Username: "org:Acme", OrganizationID: "org-1"}}, cacheHit: true, status: 200, wantKeyID: "key-org", wantActor: entities.ActorOrganization, wantLabel: "org:Acme", wantOrg: "org-1"},
+		{name: "master error", access: GatewayAccessContext{ApiKey: &entities.ApiKey{ID: "master"}, Actor: entities.UsageActor{Type: entities.ActorMaster, Username: "master"}, Master: true}, status: 502, errorText: "safe upstream failure", wantActor: entities.ActorMaster, wantLabel: "master"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			repository := &captureUsageRepository{}
+			service := usage.NewService(repository, 16, nil)
+			gateway := &Gateway{Usage: service}
+			gateway.recordCostError(&test.access, &entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a"}, "cred-1", llm.Usage{PromptTokens: 2, CompletionTokens: 3}, test.cacheHit, test.status, time.Now().Add(-time.Millisecond), entities.Cost{USD: 0.01, Priced: true}, test.errorText)
+			service.Close()
+			if len(repository.events) != 1 {
+				t.Fatalf("events=%+v", repository.events)
+			}
+			event := repository.events[0]
+			if event.ApiKeyID != test.wantKeyID || event.ActorType != test.wantActor || event.UserID != test.wantUser || event.Username != test.wantLabel || event.OrganizationID != test.wantOrg || event.CacheHit != test.cacheHit || event.StatusCode != test.status || event.Error != test.errorText {
+				t.Fatalf("event=%+v", event)
+			}
+			if test.name == "personal non-stream" && event.OrganizationID != "" {
+				t.Fatal("personal usage acquired organization context")
+			}
+		})
 	}
 }
 

@@ -10,17 +10,31 @@ import (
 
 func TestKeysTemplateRendersImportedModelsAsCheckboxes(t *testing.T) {
 	data := struct {
-		Title          string
-		Session        *entities.Session
-		CanUsage       bool
-		CanKeys        bool
-		CanCredentials bool
-		CanModels      bool
-		CanCache       bool
-		CreatedSecret  string
-		Keys           []entities.ApiKey
-		Tenants        []entities.Tenant
-		Models         []entities.ModelDef
+		Title                  string
+		Session                *entities.Session
+		CanUsage               bool
+		CanAudit               bool
+		CanKeys                bool
+		CanCredentials         bool
+		CanModels              bool
+		CanCache               bool
+		CreatedSecret          string
+		Keys                   []entities.ApiKey
+		Tenants                []entities.Tenant
+		Models                 []entities.ModelDef
+		Users                  []entities.User
+		Organizations          []entities.Organization
+		PrincipalLabel         string
+		CurrentPath            string
+		ContextLocked          bool
+		AllowPersonalContext   bool
+		ActiveOrganizationID   string
+		ActiveOrganizationName string
+		KeyViews               []struct {
+			Key       entities.ApiKey
+			CanManage bool
+		}
+		CanCreateOrgKey bool
 	}{
 		Title:   "API keys",
 		Session: &entities.Session{Role: entities.RoleMaster},
@@ -47,17 +61,31 @@ func TestKeysTemplateRendersImportedModelsAsCheckboxes(t *testing.T) {
 
 func TestKeysTemplatePromptsForProviderImportWhenNoModelsExist(t *testing.T) {
 	data := struct {
-		Title          string
-		Session        *entities.Session
-		CanUsage       bool
-		CanKeys        bool
-		CanCredentials bool
-		CanModels      bool
-		CanCache       bool
-		CreatedSecret  string
-		Keys           []entities.ApiKey
-		Tenants        []entities.Tenant
-		Models         []entities.ModelDef
+		Title                  string
+		Session                *entities.Session
+		CanUsage               bool
+		CanAudit               bool
+		CanKeys                bool
+		CanCredentials         bool
+		CanModels              bool
+		CanCache               bool
+		CreatedSecret          string
+		Keys                   []entities.ApiKey
+		Tenants                []entities.Tenant
+		Models                 []entities.ModelDef
+		Users                  []entities.User
+		Organizations          []entities.Organization
+		PrincipalLabel         string
+		CurrentPath            string
+		ContextLocked          bool
+		AllowPersonalContext   bool
+		ActiveOrganizationID   string
+		ActiveOrganizationName string
+		KeyViews               []struct {
+			Key       entities.ApiKey
+			CanManage bool
+		}
+		CanCreateOrgKey bool
 	}{Title: "API keys", Session: &entities.Session{Role: entities.RoleMaster}}
 	var output bytes.Buffer
 	if err := Render(&output, "keys.html", data); err != nil {
