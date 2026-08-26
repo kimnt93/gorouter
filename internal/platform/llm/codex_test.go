@@ -45,7 +45,7 @@ func TestCodexAdapterTranslatesRequestAndNonStreamingResponse(t *testing.T) {
 	if err := json.Unmarshal(responseBody, &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Model != "gpt-5.5" || response.Choices[0].Message.Content != "hello world" || response.Usage.PromptTokens != 8 || response.Usage.CacheReadTokens != 3 {
+	if response.Model != "gpt-5.5" || response.Choices[0].Message.Content != "hello world" || response.Usage.PromptTokens != 5 || response.Usage.CacheReadTokens != 3 {
 		t.Fatalf("response = %+v", response)
 	}
 	if upstream["model"] != "gpt-5.5" || upstream["instructions"] != "be terse" || upstream["stream"] != true || upstream["store"] != false {
@@ -82,7 +82,7 @@ func TestCodexAdapterStreamingAndModelDiscovery(t *testing.T) {
 	}
 	stream, _ := io.ReadAll(result.Body)
 	_ = result.Body.Close()
-	if !strings.Contains(string(stream), `"content":"hello "`) || !strings.Contains(string(stream), `"prompt_tokens":8`) || !strings.Contains(string(stream), "data: [DONE]") {
+	if !strings.Contains(string(stream), `"content":"hello "`) || !strings.Contains(string(stream), `"prompt_tokens":5`) || !strings.Contains(string(stream), `"cache_read_tokens":3`) || !strings.Contains(string(stream), "data: [DONE]") {
 		t.Fatalf("stream = %s", stream)
 	}
 	models, err := adapter.DiscoverModels(context.Background(), runtime)

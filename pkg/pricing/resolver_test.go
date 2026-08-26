@@ -56,6 +56,34 @@ func TestResolverManualMutationsAreImmediate(t *testing.T) {
 	}
 }
 
+func TestResolverMapsPublicProviderIDsToOriginalCatalogModels(t *testing.T) {
+	repo := &resolverRepo{catalog: []entities.CatalogPrice{
+		{Model: "openai/gpt-5.6-luna", CacheSupported: true, Price: entities.Price{InputPerM: .2, CachedInputPerM: .02}},
+		{Model: "deepseek/deepseek-v4-flash", CacheSupported: true, Price: entities.Price{InputPerM: .0679}},
+	}}
+	r := NewResolver(repo)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		model, upstream string
+		want            float64
+	}{
+		{"cx/gpt-5.6-luna", "gpt-5.6-luna", .2},
+		{"blend/luna", "gpt-5.6-luna", .2},
+		{"ocz/deepseek-v4-flash", "deepseek-v4-flash", .0679},
+	} {
+		price, ok := r.Resolve(test.model, test.upstream)
+		if !ok || price.InputPerM != test.want {
+			t.Fatalf("Resolve(%q,%q) = %+v,%v", test.model, test.upstream, price, ok)
+		}
+	}
+	catalog, ok := r.Catalog("cx/gpt-5.6-luna", "gpt-5.6-luna")
+	if !ok || catalog.Model != "openai/gpt-5.6-luna" || !catalog.CacheSupported {
+		t.Fatalf("catalog resolution = %+v,%v", catalog, ok)
+	}
+}
+
 func TestResolverEstimatesPreserveSelectedSourceCacheCapability(t *testing.T) {
 	repo := &resolverRepo{
 		manual:  map[string]entities.Price{"alias": {InputPerM: 2, OutputPerM: 4, CachedInputPerM: 0.2}},

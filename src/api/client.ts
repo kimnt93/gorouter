@@ -1,4 +1,4 @@
-import type { APIKey, AuditEvent, AuditFilters, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, ProviderDefinition, ProviderModelsResponse, RouterCacheStats, Session, UsageActivityResponse, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import type { APIKey, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, RouterCacheStats, Session, UsageActivityResponse, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
 
 export class APIError extends Error {
   constructor(readonly status: number, message: string) {
@@ -122,6 +122,15 @@ export const getModels = (): Promise<ModelDefinition[]> => request<ModelDefiniti
 export const saveModel = (model: ModelDefinition): Promise<{ ok: boolean }> => request(`/admin/models/${encodeURIComponent(model.name)}`, { method: 'PUT', body: JSON.stringify(model) })
 export const deleteModel = (name: string): Promise<{ ok: boolean }> => request(`/admin/models/${encodeURIComponent(name)}`, { method: 'DELETE' })
 export const savePrice = (name: string, price: object): Promise<{ ok: boolean }> => request(`/admin/prices/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(price) })
+export const deletePrice = (name: string): Promise<{ ok: boolean }> => request(`/admin/prices/${encodeURIComponent(name)}`, { method: 'DELETE' })
+export const getPricingCatalog = async (): Promise<CatalogPrice[]> => {
+  const data: CatalogPrice[] = []
+  for (let offset = 0; ; offset += 500) {
+    const page = await request<PricingCatalogResponse>(`/admin/pricing/catalog?limit=500&offset=${offset}`)
+    data.push(...page.data)
+    if (data.length >= page.total || page.data.length === 0) return data
+  }
+}
 
 export const getAuditEvents = (filters: AuditFilters, cursor = ''): Promise<ListResponse<AuditEvent>> => {
   const params = new URLSearchParams({ limit: '100' })

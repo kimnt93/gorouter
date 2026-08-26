@@ -200,12 +200,14 @@ func main() {
 	amazonQ := &llm.AmazonQAdapter{HTTP: client, Persister: credSvc}
 	antigravity := &llm.AntigravityAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.AntigravityOAuthClientID, ClientSecret: cfg.AntigravityOAuthClientSecret}
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
+	opencodeZen := &llm.OpenCodeZenAdapter{HTTP: client}
 	providerProbes := map[string]credential.ConnectivityProber{
 		"claude":         claudeCode,
 		"github-copilot": copilot,
 		"grok-build":     grokBuild, "xai-oauth": xaiOAuth, "cline": cline, "clinepass": clinePass, "kilo-code": kiloCode,
 		"kimi-code": kimiCode, "cursor": cursor, "kiro": kiro, "amazon-q": amazonQ, "antigravity": antigravity,
-		"opencode-go": opencodeGo,
+		"opencode-go":  opencodeGo,
+		"opencode-zen": opencodeZen,
 	}
 	providerUpstreams := make(map[string]entities.Upstream, len(providerProbes))
 	for id, adapter := range providerProbes {

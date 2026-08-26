@@ -98,7 +98,7 @@ try {
     if (!response.ok) return
     const credentials = await response.json()
     if (!Array.isArray(credentials)) return
-    for (const credential of credentials) if (credential.name === name) await fetch(`/admin/credentials/${encodeURIComponent(credential.id)}`, { method: 'DELETE', credentials: 'include' })
+    for (const credential of credentials) if (credential.name === name || credential.name?.endsWith(name)) await fetch(`/admin/credentials/${encodeURIComponent(credential.id)}`, { method: 'DELETE', credentials: 'include' })
   }, smokeConnectionName).catch(() => undefined)
   await browser.close()
 }

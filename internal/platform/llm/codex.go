@@ -318,6 +318,20 @@ type codexOutputItem struct {
 	} `json:"content"`
 }
 
+func codexUsage(totalInput, output, cachedInput int64) Usage {
+	if cachedInput < 0 {
+		cachedInput = 0
+	}
+	if cachedInput > totalInput {
+		cachedInput = totalInput
+	}
+	return Usage{
+		PromptTokens:     totalInput - cachedInput,
+		CompletionTokens: output,
+		CacheReadTokens:  cachedInput,
+	}
+}
+
 type codexToolStreamState struct {
 	Index     int
 	ID        string
@@ -460,7 +474,7 @@ func transformCodexStream(source io.Reader, target io.Writer, model string) erro
 					}
 				}
 			}
-			usage := Usage{PromptTokens: value.Response.Usage.InputTokens, CompletionTokens: value.Response.Usage.OutputTokens, CacheReadTokens: value.Response.Usage.InputDetails.CachedTokens}
+			usage := codexUsage(value.Response.Usage.InputTokens, value.Response.Usage.OutputTokens, value.Response.Usage.InputDetails.CachedTokens)
 			finishReason := "stop"
 			if len(toolOrder) != 0 {
 				finishReason = "tool_calls"
@@ -541,7 +555,7 @@ func collectCodexResponse(source io.Reader, model string) (Response, error) {
 			}
 		}
 		if value.Type == "response.completed" {
-			response.Usage = Usage{PromptTokens: value.Response.Usage.InputTokens, CompletionTokens: value.Response.Usage.OutputTokens, CacheReadTokens: value.Response.Usage.InputDetails.CachedTokens}
+			response.Usage = codexUsage(value.Response.Usage.InputTokens, value.Response.Usage.OutputTokens, value.Response.Usage.InputDetails.CachedTokens)
 			if content.Len() == 0 {
 				for _, item := range value.Response.Output {
 					for _, part := range item.Content {

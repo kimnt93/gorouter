@@ -104,6 +104,8 @@ export interface OAuthCompleteResponse { id?: string; provider?: string; name?: 
 export interface ModelRoute { credential_id: string; priority: number; weight: number; enabled: boolean }
 export interface Price { input_per_m: number; output_per_m: number; cached_input_per_m: number; cache_write_per_m: number }
 export interface ModelDefinition { name: string; strategy: string; upstream_model: string; enabled: boolean; routes: ModelRoute[]; price?: Price }
+export interface CatalogPrice { model: string; name?: string; provider?: string; context_length?: number; cache_supported: boolean; price: Price; source: string; updated_at: string }
+export interface PricingCatalogResponse { data: CatalogPrice[]; total: number; offset: number; limit: number }
 
 export interface UserCreateResponse { user: User; initial_key?: CreatedAPIKey }
 export interface AuditFilters { organizationId: string; actorId: string; action: string; targetType: string; targetId: string; since: string; until: string }
