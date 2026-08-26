@@ -83,6 +83,14 @@ try {
   await assertLayout('cache-mobile', '/dashboard/cache', { width: 375, height: 812 })
   await assertLayout('providers-mobile', '/dashboard/providers', { width: 375, height: 812 })
   await assertLayout('keys-mobile', '/dashboard/keys', { width: 375, height: 812 })
+  const activeNavigationVisible = await page.$eval('.sidebar nav', (navigation) => {
+    const active = navigation.querySelector('.nav-link.active')
+    if (!active) return false
+    const navigationBounds = navigation.getBoundingClientRect()
+    const activeBounds = active.getBoundingClientRect()
+    return activeBounds.left >= navigationBounds.left && activeBounds.right <= navigationBounds.right
+  })
+  if (!activeNavigationVisible) throw new Error('active mobile navigation item is outside the visible navigation area')
   process.stdout.write(`${JSON.stringify({ ok: true, screenshots: screenshotDir, results }, null, 2)}\n`)
 } finally {
   await page.evaluate(async (name) => {

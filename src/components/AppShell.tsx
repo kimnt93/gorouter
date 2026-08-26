@@ -16,7 +16,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const queryContext = new URLSearchParams(window.location.search).get('organization_id') ?? session?.organization_id ?? ''
   useEffect(() => { void getOrganizations().then((response) => setOrganizations(response.data)).catch(() => setOrganizations([])) }, [])
-  useEffect(() => { navRef.current?.querySelector('.nav-link.active')?.scrollIntoView({ block: 'nearest', inline: 'center' }) }, [path])
+  useEffect(() => { navRef.current?.querySelector('.nav-link.active')?.scrollIntoView({ block: 'nearest', inline: 'center' }) }, [path, session])
   const hrefFor = (href: string) => queryContext ? `${href}?organization_id=${encodeURIComponent(queryContext)}` : href
   const changeContext = (organizationID: string) => { const url = new URL(window.location.href); if (organizationID) url.searchParams.set('organization_id', organizationID); else url.searchParams.delete('organization_id'); window.location.assign(url.toString()) }
   const observeLinks = has('usage:read') ? links : []
