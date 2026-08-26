@@ -77,7 +77,7 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 		t.Fatalf("prices=%+v err=%v", prices, err)
 	}
 	usage := NewUsageRepo(s)
-	event := entities.UsageEvent{TS: time.Now().UTC(), TenantID: tenant.ID, ApiKeyID: key.ID, CredentialID: cred.ID, Model: modelName, CostUSD: .25, Priced: true, StatusCode: 200}
+	event := entities.UsageEvent{TS: time.Now().UTC(), TenantID: tenant.ID, ApiKeyID: key.ID, CredentialID: cred.ID, Model: modelName, PromptTokens: 10, CompletionTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 3, CostUSD: .25, Priced: true, StatusCode: 200}
 	if err = usage.InsertBatch(ctx, []entities.UsageEvent{event}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,5 +88,9 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	recent, err := usage.RecentForTenant(ctx, tenant.ID, 10)
 	if err != nil || len(recent) != 1 || recent[0].ID == "" || recent[0].TS.IsZero() {
 		t.Fatalf("usage identity/time=%+v err=%v", recent, err)
+	}
+	activity, err := usage.ActivityUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, APIKeyID: key.ID}, "hour")
+	if err != nil || len(activity) != 1 || activity[0].Requests != 1 || activity[0].PromptTokens != 10 || activity[0].CompletionTokens != 5 || activity[0].CacheReadTokens != 4 || activity[0].CacheWriteTokens != 3 || activity[0].CostUSD != .25 {
+		t.Fatalf("usage activity=%+v err=%v", activity, err)
 	}
 }

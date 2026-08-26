@@ -252,9 +252,11 @@ func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery
 	out := make([]entities.UsageActivityBucket, 0)
 	for rows.Next() {
 		var bucket entities.UsageActivityBucket
-		if err := rows.Scan(&bucket.Start, &bucket.Requests, &bucket.PromptTokens, &bucket.CompletionTokens, &bucket.CacheReadTokens, &bucket.CacheWriteTokens, &bucket.CostUSD); err != nil {
+		var requests uint64
+		if err := rows.Scan(&bucket.Start, &requests, &bucket.PromptTokens, &bucket.CompletionTokens, &bucket.CacheReadTokens, &bucket.CacheWriteTokens, &bucket.CostUSD); err != nil {
 			return nil, err
 		}
+		bucket.Requests = int64(requests)
 		out = append(out, bucket)
 	}
 	return out, rows.Err()

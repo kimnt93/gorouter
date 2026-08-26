@@ -222,11 +222,11 @@ func (r *UsageRepo) Summary(ctx context.Context, since time.Time) (*entities.Usa
 	s := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT COUNT(*), COALESCE(SUM(cost_usd),0), COALESCE(SUM(prompt_tokens),0),
-		       COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		       COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
 		       COALESCE(SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN NOT priced THEN 1 ELSE 0 END),0)
 		FROM usage_events WHERE ts >= $1`, since).
-		Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheHits, &s.Unpriced)
+		Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheWriteTok, &s.CacheHits, &s.Unpriced)
 	if err != nil {
 		return nil, err
 	}

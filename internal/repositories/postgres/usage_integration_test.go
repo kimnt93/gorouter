@@ -39,8 +39,8 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 	})
 	now := time.Now().UTC()
 	_, err = pool.Exec(ctx, `INSERT INTO usage_events
-		(event_id,ts,tenant_id,api_key_id,model,cost_usd,priced,actor_type,user_id,username,organization_id) VALUES
-		($1,$2,$3,$4,'model-a',1,true,'legacy','','legacy',$3),($5,$6,$7,$8,'model-b',2,true,'legacy','','legacy',$7)`,
+		(event_id,ts,tenant_id,api_key_id,model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,actor_type,user_id,username,organization_id) VALUES
+		($1,$2,$3,$4,'model-a',10,5,4,3,1,true,'legacy','','legacy',$3),($5,$6,$7,$8,'model-b',20,8,6,4,2,true,'legacy','','legacy',$7)`,
 		entities.NewID("usage"), now, id+"-tenant-a", keyA,
 		entities.NewID("usage"), now, id+"-tenant-b", keyB)
 	if err != nil {
@@ -51,7 +51,7 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.Requests != 1 || summary.CostUSD != 1 || summary.ByModel["model-b"].Requests != 0 {
+	if summary.Requests != 1 || summary.CostUSD != 1 || summary.CacheReadTok != 4 || summary.CacheWriteTok != 3 || summary.ByModel["model-b"].Requests != 0 {
 		t.Fatalf("tenant summary leaked another tenant: %+v", summary)
 	}
 	recent, err := repo.RecentForTenant(ctx, id+"-tenant-a", 10)
@@ -60,5 +60,12 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 	}
 	if len(recent) != 1 || recent[0].ID == "" || recent[0].TS.IsZero() || recent[0].TenantID != id+"-tenant-a" || recent[0].KeyID != keyA {
 		t.Fatalf("tenant recent usage leaked: %+v", recent)
+	}
+	activity, err := repo.ActivityUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, APIKeyID: keyA}, "hour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(activity) != 1 || activity[0].Requests != 1 || activity[0].PromptTokens != 10 || activity[0].CompletionTokens != 5 || activity[0].CacheReadTokens != 4 || activity[0].CacheWriteTokens != 3 || activity[0].CostUSD != 1 {
+		t.Fatalf("activity aggregation=%+v", activity)
 	}
 }
