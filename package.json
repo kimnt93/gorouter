@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
+    "smoke:ui": "node scripts/ui-smoke.mjs",
     "css": "tailwindcss -i ./ui/tailwind.css -o ./internal/api/views/static/tailwind.css --minify"
   },
   "devDependencies": {
@@ -16,6 +17,7 @@
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
     "jsdom": "^30.0.1",
+    "puppeteer-core": "^25.9.0",
     "tailwindcss": "^4.1.12",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",

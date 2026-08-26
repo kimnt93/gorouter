@@ -1,13 +1,17 @@
-.PHONY: run build test tidy css compose-postgres compose-clickhouse
+.PHONY: run build ui test tidy css compose-postgres compose-clickhouse
 
 run: build
 	./bin/gorouter
 
-build:
+build: ui
 	go build -o bin/gorouter ./cmd/gorouter
 	go build -o bin/mock-gorouter ./cmd/mock-gorouter
 
+ui:
+	npm run build
+
 test:
+	npm test
 	TEST_DATABASE_URL="$${TEST_DATABASE_URL:-postgres://gorouter:change-me-postgres-password@127.0.0.1:54329/gorouter}" \
 	TEST_REDIS_URL="$${TEST_REDIS_URL:-redis://127.0.0.1:63899/0}" \
 	go test ./...

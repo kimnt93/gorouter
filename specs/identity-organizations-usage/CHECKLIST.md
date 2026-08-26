@@ -212,3 +212,30 @@ Run the same contract scenarios against PostgreSQL and ClickHouse:
   PostgreSQL startup with ClickHouse variables absent, and ClickHouse startup
   with PostgreSQL variables absent. Both standalone servers returned 200 for
   health, master login, and `/docs`.
+
+## React operations dashboard follow-up (2026-08-26)
+
+- [x] Add a reusable Vite, React, and TypeScript application under `src/`.
+- [x] Display request tokens as input/output/cache-read/cache-write and open a
+      safe metadata modal from each request row.
+- [x] Keep prompts, completions, provider errors, cookies, hashes, and secret
+      material out of the React UI.
+- [x] Add provider-reported cache-read/cache-write analysis while clearly
+      separating gorouter response-cache counters.
+- [x] Add horizontal activity bars with user/API-key filters, 1D/7D/30D/90D/
+      YTD/All/custom ranges, and hour/day/week grouping.
+- [x] Implement the typed activity endpoint for both PostgreSQL and ClickHouse
+      with the existing principal-aware visibility filter.
+- [x] Embed the production Vite build in Go, preserve management pages, and
+      redirect the legacy usage/cache pages to the React views.
+- [x] Verify desktop and mobile layouts, request modal safety, asset delivery,
+      frontend tests/build, Go tests/vet, and live PostgreSQL/ClickHouse
+      activity aggregation.
+
+Follow-up evidence: `npm run build`, `npm test`, `go vet ./...`, and
+`go test ./...` pass. `scripts/ui-smoke.mjs` logged in to the live PostgreSQL
+deployment and exercised analysis, logs, the request modal, and provider cache
+views at 1440x900 and 375x812 without document overflow. The PostgreSQL
+`TestTenantUsageQueriesAreIsolated` and ClickHouse `TestPrimaryStoreRoundTrip`
+integration tests assert identical hour-bucket request, cost, and all four token
+aggregates.
