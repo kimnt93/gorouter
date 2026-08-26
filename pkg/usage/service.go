@@ -206,6 +206,14 @@ func (s *Service) SummaryQuery(ctx context.Context, query entities.UsageQuery) (
 	return repo.SummaryUsage(ctx, query)
 }
 
+func (s *Service) Detail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	repo, ok := s.repo.(principalRepository)
+	if !ok {
+		return nil, errors.New("principal usage queries unavailable")
+	}
+	return repo.UsageDetail(ctx, id, visibility)
+}
+
 func (s *Service) Activity(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {
 	repo, ok := s.repo.(entities.UsageActivityRepository)
 	if !ok {
