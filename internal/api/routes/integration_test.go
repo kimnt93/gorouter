@@ -406,6 +406,8 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 func TestIdentityOrganizationAPIAndRoleMatrix(t *testing.T) {
 	upstream, _ := mockOpenAIUpstream(t)
 	h := newIntegrationHarness(t, upstream.URL)
+	configured := createConfiguredKey(t, h, "identity-model", nil, nil)
+	_ = configured
 	createUser := func(username string) createUserAPIResponse {
 		response := h.request(t, http.MethodPost, "/admin/users", h.masterKey, handlers.UserCreateRequest{Username: username, GenerateInitialKey: true, InitialKey: handlers.InitialKeyRequest{Name: "login", Scopes: []string{entities.ScopeChat, entities.ScopeKeysManage, entities.ScopeMembersManage, entities.ScopeUsageRead}}})
 		if response.StatusCode != http.StatusCreated {
@@ -427,7 +429,7 @@ func TestIdentityOrganizationAPIAndRoleMatrix(t *testing.T) {
 			t.Fatalf("add member=%d %s", response.StatusCode, readBody(t, response))
 		}
 	}
-	adminKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "scoped admin", OwnerType: entities.OwnerUser, OwnerUserID: adminUser.User.ID, ContextOrganizationID: organization.ID, Scopes: []string{entities.ScopeChat, entities.ScopeKeysManage, entities.ScopeMembersManage, entities.ScopeUsageRead}})
+	adminKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "scoped admin", OwnerType: entities.OwnerUser, OwnerUserID: adminUser.User.ID, ContextOrganizationID: organization.ID, Models: []string{"identity-model"}, Scopes: []string{entities.ScopeChat, entities.ScopeKeysManage, entities.ScopeMembersManage, entities.ScopeUsageRead}})
 	if adminKeyResponse.StatusCode != http.StatusCreated {
 		t.Fatalf("admin key=%d %s", adminKeyResponse.StatusCode, readBody(t, adminKeyResponse))
 	}
@@ -447,7 +449,7 @@ func TestIdentityOrganizationAPIAndRoleMatrix(t *testing.T) {
 		t.Fatalf("member list members=%d", denied.StatusCode)
 	}
 	denied.Body.Close()
-	organizationKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", adminKey.Plaintext, handlers.APIKeyCreateRequest{Name: "shared", OwnerType: entities.OwnerOrganization, OwnerOrganizationID: organization.ID, ContextOrganizationID: organization.ID, Scopes: []string{entities.ScopeUsageRead}})
+	organizationKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", adminKey.Plaintext, handlers.APIKeyCreateRequest{Name: "shared", OwnerType: entities.OwnerOrganization, OwnerOrganizationID: organization.ID, ContextOrganizationID: organization.ID, Models: []string{"identity-model"}, Scopes: []string{entities.ScopeChat, entities.ScopeUsageRead}})
 	if organizationKeyResponse.StatusCode != http.StatusCreated {
 		t.Fatalf("organization key=%d %s", organizationKeyResponse.StatusCode, readBody(t, organizationKeyResponse))
 	}
@@ -459,6 +461,52 @@ func TestIdentityOrganizationAPIAndRoleMatrix(t *testing.T) {
 	loginResult := decodeResponse[handlers.LoginResponse](t, login)
 	if loginResult.PrincipalType != entities.PrincipalOrganization || loginResult.OrganizationID != organization.ID {
 		t.Fatalf("organization login=%+v", loginResult)
+	}
+	personalKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "personal call", OwnerType: entities.OwnerUser, OwnerUserID: foreignUser.User.ID, Models: []string{"identity-model"}, Scopes: []string{entities.ScopeChat, entities.ScopeUsageRead}})
+	personalKey := decodeResponse[handlers.CreatedAPIKeyResponse](t, personalKeyResponse)
+	for label, secret := range map[string]string{"personal": personalKey.Plaintext, "scoped": adminKey.Plaintext, "organization": organizationKey.Plaintext, "master": h.masterKey} {
+		response := h.request(t, http.MethodPost, "/v1/chat/completions", secret, chatBody("identity-model", false, label))
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s model call=%d %s", label, response.StatusCode, readBody(t, response))
+		}
+		response.Body.Close()
+	}
+	var attribution *entities.UsagePage
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		attribution, _ = h.usage.Query(context.Background(), entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, Model: "identity-model", Limit: 20})
+		if attribution != nil && len(attribution.Data) >= 4 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	wantActors := map[string]bool{entities.ActorMaster: false, entities.ActorOrganization: false, entities.ActorUser + ":personal": false, entities.ActorUser + ":organization": false}
+	for _, event := range attribution.Data {
+		switch {
+		case event.ActorType == entities.ActorMaster && event.Username == "master" && event.KeyID == "":
+			wantActors[entities.ActorMaster] = true
+		case event.ActorType == entities.ActorOrganization && event.Username == "org:"+organization.Name && event.OrganizationID == organization.ID:
+			wantActors[entities.ActorOrganization] = true
+		case event.ActorType == entities.ActorUser && event.UserID == foreignUser.User.ID && event.OrganizationID == "":
+			wantActors[entities.ActorUser+":personal"] = true
+		case event.ActorType == entities.ActorUser && event.UserID == adminUser.User.ID && event.OrganizationID == organization.ID:
+			wantActors[entities.ActorUser+":organization"] = true
+		}
+	}
+	for actor, found := range wantActors {
+		if !found {
+			t.Fatalf("missing %s attribution in %+v", actor, attribution)
+		}
+	}
+	organizationUsage := h.request(t, http.MethodGet, "/admin/usage/recent?model=identity-model", organizationKey.Plaintext, nil)
+	organizationEvents := decodeResponse[handlers.UsageRecentResponse](t, organizationUsage)
+	if len(organizationEvents.Data) != 2 {
+		t.Fatalf("organization usage visibility=%+v", organizationEvents.Data)
+	}
+	personalUsage := h.request(t, http.MethodGet, "/admin/usage/recent?model=identity-model", personalKey.Plaintext, nil)
+	personalEvents := decodeResponse[handlers.UsageRecentResponse](t, personalUsage)
+	if len(personalEvents.Data) != 1 || personalEvents.Data[0].OrganizationID != "" {
+		t.Fatalf("personal usage visibility=%+v", personalEvents.Data)
 	}
 	foreignKeyResponse := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, handlers.APIKeyCreateRequest{Name: "foreign personal", OwnerType: entities.OwnerUser, OwnerUserID: foreignUser.User.ID, Scopes: []string{entities.ScopeKeysManage}})
 	foreignKey := decodeResponse[handlers.CreatedAPIKeyResponse](t, foreignKeyResponse)

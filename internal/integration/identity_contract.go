@@ -169,6 +169,14 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 			}
 		}
 	}
+	legacy := entities.UsageEvent{ID: entities.NewID("usage"), TS: now.Add(-time.Second), TenantID: organization1.ID, Model: "legacy", Priced: true, StatusCode: 200, ActorType: entities.ActorLegacy, Username: "legacy", OrganizationID: organization1.ID}
+	if err := backend.Usage.InsertBatch(ctx, []entities.UsageEvent{legacy}); err != nil {
+		t.Fatal(err)
+	}
+	legacyPage, err := backend.Usage.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, Model: "legacy", Limit: 20})
+	if err != nil || len(legacyPage.Data) != 1 || legacyPage.Data[0].ActorType != entities.ActorLegacy || legacyPage.Data[0].Username != "legacy" || legacyPage.Data[0].UserID != "" {
+		t.Fatalf("legacy attribution=%+v err=%v", legacyPage, err)
+	}
 	narrowed, err := backend.Usage.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: user1.ID}, OrganizationID: organization2.ID, Limit: 20})
 	if err != nil || len(narrowed.Data) != 0 {
 		t.Fatalf("filter broadened visibility=%+v err=%v", narrowed, err)

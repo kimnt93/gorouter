@@ -152,6 +152,9 @@ type UserCreateResponse struct {
 type UserDetailResponse struct {
 	User        *entities.User        `json:"user"`
 	Memberships []entities.Membership `json:"memberships"`
+	Keys        []entities.ApiKey      `json:"keys"`
+	Usage       *entities.UsageSummary `json:"usage"`
+	Recent      []entities.RecentEvent `json:"recent"`
 }
 type UserStatusRequest struct {
 	Status string `json:"status"`

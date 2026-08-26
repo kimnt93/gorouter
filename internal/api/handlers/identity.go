@@ -110,7 +110,27 @@ func (a *Admin) UserByID(c fiber.Ctx) error {
 		if memberErr != nil {
 			return presenter.ServerError(c, "failed to load user memberships")
 		}
-		return responseapi.JSON(c, UserDetailResponse{User: user, Memberships: memberships})
+		keys, keyErr := a.KeysSvc.List(c.Context())
+		if keyErr != nil {
+			return presenter.ServerError(c, "failed to load user keys")
+		}
+		ownedKeys := make([]entities.ApiKey, 0)
+		for _, key := range keys {
+			if key.OwnerUserID == user.ID {
+				ownedKeys = append(ownedKeys, key)
+			}
+		}
+		since := time.Now().UTC().Add(-30 * 24 * time.Hour)
+		usageQuery := entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, UserID: user.ID, Since: &since, Limit: 20}
+		summary, usageErr := a.UsageSvc.SummaryQuery(c.Context(), usageQuery)
+		if usageErr != nil {
+			return presenter.ServerError(c, "failed to load user usage")
+		}
+		recent, recentErr := a.UsageSvc.Query(c.Context(), usageQuery)
+		if recentErr != nil {
+			return presenter.ServerError(c, "failed to load recent user activity")
+		}
+		return responseapi.JSON(c, UserDetailResponse{User: user, Memberships: memberships, Keys: ownedKeys, Usage: summary, Recent: recent.Data})
 	}
 	var body UserStatusRequest
 	if err = c.Bind().Body(&body); err != nil {
