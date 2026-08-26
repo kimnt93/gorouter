@@ -2,7 +2,9 @@ package clickhouse
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -23,7 +25,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 	if len(events) == 0 {
 		return nil
 	}
-	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id)`)
+	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,request_body,response_body,content_truncated)`)
 	if e != nil {
 		return e
 	}
@@ -39,7 +41,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if v.ActorType == "" {
 			v.ActorType, v.Username, v.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, v.TenantID
 		}
-		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID); e != nil {
+		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID, v.RequestBody, v.ResponseBody, v.ContentTruncated); e != nil {
 			return e
 		}
 	}
@@ -189,6 +191,27 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 		page.Data = page.Data[:limit]
 	}
 	return page, nil
+}
+
+func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	clauses, args := usageWhere(entities.UsageQuery{Visibility: visibility}, false)
+	clauses = append(clauses, "event_id=?")
+	args = append(args, id)
+	var event entities.UsageDetail
+	var status int32
+	err := r.s.Conn.QueryRow(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,request_body,response_body,content_truncated FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` LIMIT 1`, args...).Scan(
+		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Model, &event.UpstreamModel,
+		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
+		&event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID,
+		&event.RequestBody, &event.ResponseBody, &event.ContentTruncated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, entities.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	event.StatusCode = int(status)
+	return &event, nil
 }
 
 func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {

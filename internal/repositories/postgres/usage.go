@@ -28,12 +28,12 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		}
 		b.Queue(`INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,
 			prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-			actor_type,user_id,username,organization_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+			actor_type,user_id,username,organization_id,request_body,response_body,content_truncated)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 			ev.ID, ev.TS, ev.TenantID, ev.ApiKeyID, ev.CredentialID, ev.Model, ev.UpstreamModel,
 			ev.PromptTokens, ev.CompletionTokens, ev.CacheReadTokens, ev.CacheWriteTokens,
 			ev.CostUSD, ev.Priced, ev.CacheHit, ev.StatusCode, ev.DurationMS, ev.Error,
-			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID)
+			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID, ev.RequestBody, ev.ResponseBody, ev.ContentTruncated)
 	}
 	return r.db.Pool.SendBatch(ctx, b).Close()
 }
@@ -164,6 +164,28 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 		page.Data = page.Data[:limit]
 	}
 	return page, nil
+}
+
+func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	master := visibility.PrincipalType == entities.PrincipalMaster
+	organizationWide := visibility.OrganizationWide && visibility.OrganizationID != ""
+	var event entities.UsageDetail
+	err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,model,upstream_model,
+		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
+		actor_type,user_id,username,organization_id,request_body,response_body,content_truncated
+		FROM usage_events WHERE COALESCE(event_id,'legacy_' || seq::text)=$1 AND
+		($2 OR ($3 AND organization_id=$4) OR (NOT $3 AND user_id=$5))`, id, master, organizationWide, visibility.OrganizationID, visibility.UserID).Scan(
+		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Model, &event.UpstreamModel,
+		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
+		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID,
+		&event.RequestBody, &event.ResponseBody, &event.ContentTruncated)
+	if err == pgx.ErrNoRows {
+		return nil, entities.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &event, nil
 }
 
 func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {

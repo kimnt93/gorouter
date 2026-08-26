@@ -161,6 +161,9 @@ type UsageEvent struct {
 	UserID           string    `json:"user_id"`
 	Username         string    `json:"username"`
 	OrganizationID   string    `json:"organization_id"`
+	RequestBody      string    `json:"-"`
+	ResponseBody     string    `json:"-"`
+	ContentTruncated bool      `json:"-"`
 }
 
 type RecentEvent struct {
@@ -185,6 +188,13 @@ type RecentEvent struct {
 	UserID           string    `json:"user_id"`
 	Username         string    `json:"username"`
 	OrganizationID   string    `json:"organization_id"`
+}
+
+type UsageDetail struct {
+	RecentEvent
+	RequestBody      string `json:"request_body"`
+	ResponseBody     string `json:"response_body"`
+	ContentTruncated bool   `json:"content_truncated"`
 }
 
 type UsageSummary struct {

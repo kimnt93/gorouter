@@ -29,11 +29,12 @@ type Definition struct {
 	CustomBaseURL        bool   `json:"custom_base_url"`
 	OAuthSupported       bool   `json:"oauth_supported"`
 	OAuthRefreshRequired bool   `json:"oauth_refresh_required"`
+	QuotaSupported       bool   `json:"quota_supported"`
 }
 
 var definitions = []Definition{
-	{ID: "claude", Name: "Claude Code", Description: "Connect a Claude subscription using the browser OAuth flow.", Auth: AuthOAuth, Protocol: ProtocolAnthropic, DefaultBaseURL: "https://api.anthropic.com", ModelPrefix: "cc", OAuthSupported: true, OAuthRefreshRequired: true},
-	{ID: "codex", Name: "OpenAI Codex", Description: "Connect a ChatGPT/Codex subscription using browser OAuth.", Auth: AuthOAuth, Protocol: ProtocolCodex, DefaultBaseURL: "https://chatgpt.com/backend-api", ModelPrefix: "cx", OAuthSupported: true, OAuthRefreshRequired: true},
+	{ID: "claude", Name: "Claude Code", Description: "Connect a Claude subscription using the browser OAuth flow.", Auth: AuthOAuth, Protocol: ProtocolAnthropic, DefaultBaseURL: "https://api.anthropic.com", ModelPrefix: "cc", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
+	{ID: "codex", Name: "OpenAI Codex", Description: "Connect a ChatGPT/Codex subscription using browser OAuth.", Auth: AuthOAuth, Protocol: ProtocolCodex, DefaultBaseURL: "https://chatgpt.com/backend-api", ModelPrefix: "cx", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
 	{ID: "github-copilot", Name: "GitHub Copilot", Description: "Connect Copilot using GitHub's device authorization flow.", Auth: AuthOAuth, Protocol: ProtocolCopilot, DefaultBaseURL: "https://api.githubcopilot.com", ModelPrefix: "ghc", OAuthSupported: true},
 	{ID: "cursor", Name: "Cursor", Description: "Connect Cursor using deep-control login or imported credentials.", Auth: AuthOAuth, Protocol: ProtocolCursor, DefaultBaseURL: "https://api2.cursor.sh", ModelPrefix: "cursor", OAuthSupported: true},
 	{ID: "grok-build", Name: "Grok Build", Description: "Connect the Grok coding subscription using device authorization.", Auth: AuthOAuth, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://cli-chat-proxy.grok.com/v1", ModelPrefix: "gb", OAuthSupported: true, OAuthRefreshRequired: true},
@@ -42,16 +43,16 @@ var definitions = []Definition{
 	{ID: "cline", Name: "Cline", Description: "Connect a Cline account using its browser callback flow.", Auth: AuthOAuth, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.cline.bot/api/v1", ModelPrefix: "cline", OAuthSupported: true},
 	{ID: "clinepass", Name: "ClinePass", Description: "Connect a ClinePass account using the Cline callback flow.", Auth: AuthOAuth, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.cline.bot/api/v1", ModelPrefix: "clinepass", OAuthSupported: true},
 	{ID: "kilo-code", Name: "Kilo Code", Description: "Connect Kilo Code using device authorization.", Auth: AuthOAuth, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.kilo.ai/api/openrouter", ModelPrefix: "kilo", OAuthSupported: true},
-	{ID: "kiro", Name: "Kiro", Description: "Connect Kiro through AWS Builder ID device authorization.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "kiro", OAuthSupported: true, OAuthRefreshRequired: true},
-	{ID: "amazon-q", Name: "Amazon Q Developer", Description: "Connect Amazon Q Developer through AWS Builder ID.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "amazonq", OAuthSupported: true, OAuthRefreshRequired: true},
+	{ID: "kiro", Name: "Kiro", Description: "Connect Kiro through AWS Builder ID device authorization.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "kiro", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
+	{ID: "amazon-q", Name: "Amazon Q Developer", Description: "Connect Amazon Q Developer through AWS Builder ID.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "amazonq", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
 	{ID: "antigravity", Name: "Google Antigravity", Description: "Connect Google Cloud Code Assist using browser OAuth.", Auth: AuthOAuth, Protocol: ProtocolAntigravity, DefaultBaseURL: "https://cloudcode-pa.googleapis.com", ModelPrefix: "ag", OAuthSupported: true, OAuthRefreshRequired: true},
 	{ID: "openai", Name: "OpenAI", Description: "OpenAI API models and compatible chat completions.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.openai.com/v1", ModelPrefix: "openai"},
 	{ID: "anthropic", Name: "Anthropic", Description: "Claude models using an Anthropic API key.", Auth: AuthAPIKey, Protocol: ProtocolAnthropic, DefaultBaseURL: "https://api.anthropic.com", ModelPrefix: "anthropic"},
 	{ID: "gemini", Name: "Google Gemini", Description: "Gemini through Google's OpenAI-compatible API.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", ModelPrefix: "gemini"},
 	{ID: "groq", Name: "Groq", Description: "Low-latency hosted open models.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.groq.com/openai/v1", ModelPrefix: "groq"},
 	{ID: "openrouter", Name: "OpenRouter", Description: "One API key for models from many providers.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://openrouter.ai/api/v1", ModelPrefix: "openrouter"},
-	{ID: "opencode-zen", Name: "OpenCode Zen", Description: "OpenCode Zen hosted and free-tier models.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://opencode.ai/zen/v1", ModelPrefix: "ocz"},
-	{ID: "opencode-go", Name: "OpenCode Go", Description: "OpenCode Go models using an OpenCode API key.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://opencode.ai/zen/go/v1", ModelPrefix: "ocg"},
+	{ID: "opencode-zen", Name: "OpenCode Zen", Description: "OpenCode Zen hosted and free-tier models.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://opencode.ai/zen/v1", ModelPrefix: "ocz", QuotaSupported: true},
+	{ID: "opencode-go", Name: "OpenCode Go", Description: "OpenCode Go models using an OpenCode API key.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://opencode.ai/zen/go/v1", ModelPrefix: "ocg", QuotaSupported: true},
 	{ID: "xai", Name: "xAI", Description: "Grok models through the xAI API.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.x.ai/v1", ModelPrefix: "xai"},
 	{ID: "deepseek", Name: "DeepSeek", Description: "DeepSeek chat and reasoning models.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.deepseek.com/v1", ModelPrefix: "deepseek"},
 	{ID: "moonshot", Name: "Moonshot", Description: "Moonshot and Kimi API models.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.moonshot.ai/v1", ModelPrefix: "moonshot"},

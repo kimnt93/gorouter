@@ -162,7 +162,7 @@ func (r *Resolver) Resolve(model, upstreamModel string) (entities.Price, bool) {
 	if item, ok := catalogPrice(s, upstreamModel); ok {
 		return item.Price, true
 	}
-	return entities.Price{}, false
+	return entities.Price{}, true
 }
 
 func (r *Resolver) Catalog(model, upstreamModel string) (entities.CatalogPrice, bool) {
@@ -200,5 +200,6 @@ func (r *Resolver) Estimates(model, upstreamModel string, promptTokens, completi
 	if item, ok := catalogPrice(s, upstreamModel); ok {
 		return entities.EstimateCosts(&item.Price, promptTokens, completionTokens, item.CacheSupported)
 	}
-	return entities.PriceEstimates{}
+	free := entities.Price{}
+	return entities.EstimateCosts(&free, promptTokens, completionTokens, true)
 }

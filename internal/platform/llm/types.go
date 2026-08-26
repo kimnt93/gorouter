@@ -139,9 +139,11 @@ type ChunkChoice struct {
 }
 
 type ModelInfo struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	OwnedBy string `json:"owned_by"`
+	ID            string          `json:"id"`
+	Object        string          `json:"object"`
+	OwnedBy       string          `json:"owned_by"`
+	UpstreamModel string          `json:"upstream_model,omitempty"`
+	Pricing       *entities.Price `json:"pricing,omitempty"`
 }
 
 type ModelList struct {

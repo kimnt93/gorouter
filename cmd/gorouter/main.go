@@ -40,6 +40,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 	"github.com/kimnt93/gorouter/pkg/pricing"
+	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 	"github.com/kimnt93/gorouter/pkg/tenant"
@@ -222,18 +223,19 @@ func main() {
 		KimiClientID: cfg.KimiOAuthClientID, AntigravityClientID: cfg.AntigravityOAuthClientID,
 		AntigravityClientSecret: cfg.AntigravityOAuthClientSecret,
 	})
+	providerQuotaSvc := providerquota.New(client, credSvc)
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
 		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerUpstreams,
 		Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc,
-		Pricing: priceResolver,
+		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
 	}
 	app := routes.New(routes.Dependencies{
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
 		Identity: identitySvc, IdentityRepo: identityRepo, Audit: auditRepo,
 		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc,
-		Pricing:   priceResolver,
+		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
 		BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
 	})
 

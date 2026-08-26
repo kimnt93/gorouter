@@ -30,7 +30,9 @@ cost = input_tokens * input_price / 1e6
       + cache_write_tokens * cache_write_price / 1e6
 ```
 
-Missing price means unpriced usage; do not invent a price.
+A model missing from manual and catalog pricing is explicitly treated as Free:
+all four rates and the recorded cost are zero, and the usage event remains
+priced so quota and reporting never carry an ambiguous unpriced state.
 
 `GET /admin/pricing/catalog` exposes search (`q`) and pagination (`limit`, `offset`). `GET /admin/pricing/estimate` accepts `model` or `upstream_model`, plus non-negative `prompt_tokens` and `completion_tokens`, and returns rates with derived `without_cache` and `with_cache` costs. If cache pricing is unavailable, the cached estimate uses the regular input rate; it must not imply free cache reads.
 

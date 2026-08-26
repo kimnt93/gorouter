@@ -39,8 +39,8 @@ func TestResolverManualPrecedenceAndUpstreamFallback(t *testing.T) {
 	if price, ok := r.Resolve("other-alias", "upstream/model"); !ok || price.InputPerM != 3 {
 		t.Fatalf("upstream fallback = %+v, %v", price, ok)
 	}
-	if _, ok := r.Resolve("missing", "also-missing"); ok {
-		t.Fatal("missing model was priced")
+	if price, ok := r.Resolve("missing", "also-missing"); !ok || price != (entities.Price{}) {
+		t.Fatalf("missing model should resolve as free: %+v, %v", price, ok)
 	}
 }
 
@@ -51,8 +51,8 @@ func TestResolverManualMutationsAreImmediate(t *testing.T) {
 		t.Fatalf("set manual = %+v, %v", price, ok)
 	}
 	r.DeleteManual("model")
-	if _, ok := r.Resolve("model", ""); ok {
-		t.Fatal("deleted manual price remained cached")
+	if price, ok := r.Resolve("model", ""); !ok || price != (entities.Price{}) {
+		t.Fatalf("deleted manual price should fall back to free: %+v, %v", price, ok)
 	}
 }
 
