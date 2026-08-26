@@ -249,9 +249,17 @@
     if (oauthPollTimer) window.clearTimeout(oauthPollTimer);
     const dialog = byID("oauth-dialog");
     const link = byID("oauth-authorize-link");
+    const callbackField = byID("oauth-callback-field");
+    const devicePanel = byID("oauth-device-flow");
+    const deviceCodeRow = byID("oauth-device-code-row");
     byID("oauth-dialog-title").textContent = `Connect ${button.textContent.replace(/^Connect\s+/, "")}`;
+    byID("oauth-dialog-instructions").textContent = "Creating a secure authorization flow…";
     byID("oauth-callback").value = "";
-    byID("oauth-callback").closest("label").hidden = false;
+    callbackField.hidden = false;
+    devicePanel.hidden = true;
+    deviceCodeRow.hidden = true;
+    byID("oauth-user-code").textContent = "";
+    byID("oauth-complete").textContent = "Complete connection";
     link.hidden = true;
     link.removeAttribute("href");
     setResult(byID("oauth-dialog-result"), "Creating a secure authorization flow…", "loading");
@@ -264,13 +272,27 @@
       if (!oauthFlowID || !payload.authorize_url) throw new Error("OAuth start response was incomplete.");
       link.href = payload.authorize_url;
       link.hidden = false;
-      const code = payload.user_code ? ` Device code: ${payload.user_code}.` : "";
-      setResult(byID("oauth-dialog-result"), (payload.instructions || "Open the authorization page, then paste the callback here.") + code, "success");
-      const callbackField = byID("oauth-callback").closest("label");
-      callbackField.hidden = oauthFlowType === "device_code" || oauthFlowType === "cursor_poll";
-      if (callbackField.hidden) oauthPollTimer = window.setTimeout(() => completeOAuth(byID("oauth-complete"), true), Math.max(1000, (payload.interval || 3) * 1000));
+      const automaticFlow = oauthFlowType === "device_code" || oauthFlowType === "cursor_poll";
+      callbackField.hidden = automaticFlow;
+      devicePanel.hidden = !automaticFlow;
+      byID("oauth-dialog-instructions").textContent = automaticFlow
+        ? "Open the provider page and finish signing in. Keep this dialog open while authorization is checked automatically."
+        : "Open the provider page, finish signing in, then paste the complete redirected URL or returned code#state below.";
+      if (automaticFlow) {
+        byID("oauth-device-message").textContent = payload.instructions || "Finish signing in on the provider page. There is no callback URL to paste.";
+        if (payload.user_code) {
+          byID("oauth-user-code").textContent = payload.user_code;
+          deviceCodeRow.hidden = false;
+        }
+        byID("oauth-complete").textContent = "Check authorization";
+        setResult(byID("oauth-dialog-result"), "Waiting for you to authorize this connection…", "loading");
+        oauthPollTimer = window.setTimeout(() => completeOAuth(byID("oauth-complete"), true), Math.max(1000, (payload.interval || 3) * 1000));
+      } else {
+        setResult(byID("oauth-dialog-result"), payload.instructions || "Paste the callback URL after authorization.", "success");
+      }
     } catch (error) {
       setResult(byID("oauth-dialog-result"), error.message, "error");
+      button.disabled = false;
     } finally {
       button.disabled = false;
     }
@@ -306,6 +328,7 @@
       window.setTimeout(() => window.location.reload(), 450);
     } catch (error) {
       setResult(byID("oauth-dialog-result"), error.message, "error");
+      button.disabled = false;
     } finally {
       if (!polling || !oauthFlowID) button.disabled = false;
     }
@@ -327,6 +350,13 @@
     else if (button.id === "chat-send") streamChat(button);
     else if (button.id === "chat-stop" && chatController) chatController.abort();
     else if (button.id === "oauth-complete") completeOAuth(button);
+    else if (button.id === "oauth-copy-code") {
+      const code = byID("oauth-user-code").textContent;
+      navigator.clipboard.writeText(code).then(
+        () => setResult(byID("oauth-dialog-result"), "Device code copied. Finish authorization in the provider tab.", "success"),
+        () => setResult(byID("oauth-dialog-result"), "Could not copy automatically. Select the device code and copy it manually.", "error"),
+      );
+    }
   });
 
   byID("oauth-dialog")?.addEventListener("close", () => {

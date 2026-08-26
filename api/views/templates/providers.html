@@ -8,14 +8,18 @@
   <div class="provider-body">
     {{range .Credentials}}
     <div class="provider-account" data-credential-account="{{.ID}}">
-      <span class="status-dot {{if eq .Status "active"}}ok{{end}}"></span>
-      <div class="provider-account-name"><strong>{{.Name}}</strong><small><code>{{.KeyPreview}}</code> · {{.BaseURL}}</small></div>
-      <span class="badge">{{.Kind}}</span>
-      <button type="button" data-credential-test="{{.ID}}">Test health</button>
-      <button type="button" data-credential-models="{{.ID}}" data-provider-name="{{.Provider}}">Discover models</button>
-      <button type="button" data-credential-chat="{{.ID}}" data-provider-name="{{.Provider}}">Test chat</button>
-      <form hx-post="/ui/credentials/{{.ID}}/toggle" hx-target="body" hx-swap="outerHTML"><button>{{if eq .Status "active"}}Disable{{else}}Enable{{end}}</button></form>
-      <button class="danger" hx-delete="/ui/credentials/{{.ID}}" hx-confirm="Delete this connection and its routes?" hx-target="body" hx-swap="outerHTML">Delete</button>
+      <div class="provider-account-main">
+        <span class="status-dot {{if eq .Status "active"}}ok{{end}}"></span>
+        <div class="provider-account-name"><strong>{{.Name}}</strong><small><code>{{.KeyPreview}}</code> · {{.BaseURL}}</small></div>
+        <span class="badge">{{.Kind}}</span>
+      </div>
+      <div class="provider-account-actions">
+        <button type="button" data-credential-test="{{.ID}}">Test health</button>
+        <button type="button" data-credential-models="{{.ID}}" data-provider-name="{{.Provider}}">Discover models</button>
+        <button type="button" data-credential-chat="{{.ID}}" data-provider-name="{{.Provider}}">Test chat</button>
+        <form hx-post="/ui/credentials/{{.ID}}/toggle" hx-target="body" hx-swap="outerHTML"><button>{{if eq .Status "active"}}Disable{{else}}Enable{{end}}</button></form>
+        <button class="danger" hx-delete="/ui/credentials/{{.ID}}" hx-confirm="Delete this connection and its routes?" hx-target="body" hx-swap="outerHTML">Delete</button>
+      </div>
       <div class="provider-result" id="credential-result-{{.ID}}" role="status" aria-live="polite"></div>
     </div>
     {{end}}
@@ -48,5 +52,5 @@
 
   <dialog id="models-dialog" class="console-dialog" data-can-import="{{.CanManageGlobal}}"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2>Provider models</h2><p class="muted" id="models-dialog-provider"></p><div class="dialog-scroll model-picker" id="models-dialog-list" aria-busy="false"></div><div class="dialog-actions"><button type="button" id="models-select-all">Select all</button>{{if .CanManageGlobal}}<button type="button" class="primary" id="models-import">Import selected</button>{{end}}</div>{{if not .CanManageGlobal}}<p class="muted dialog-note">Only the master session can import models into global routes.</p>{{end}}<div class="provider-result" id="models-dialog-result" role="status" aria-live="polite"></div></dialog>
   <dialog id="chat-dialog" class="console-dialog"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2>Streaming chat test</h2><p class="muted" id="chat-dialog-provider">This sends a real request and may incur provider cost.</p><label>Model<select id="chat-model"></select></label><label>Prompt<textarea id="chat-prompt" rows="4">Reply with exactly: connection healthy</textarea></label><div class="dialog-actions"><button type="button" class="primary" id="chat-send">Send streaming test</button><button type="button" id="chat-stop" hidden>Stop</button></div><pre id="chat-output" class="chat-output" role="log" aria-live="polite">Choose a model and send a prompt.</pre></dialog>
-  <dialog id="oauth-dialog" class="console-dialog"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2 id="oauth-dialog-title">Connect subscription</h2><p class="muted">Authorization secrets are held only for this short-lived, single-use flow. Open the provider page, then paste its complete callback URL or returned <code>code#state</code>.</p><a id="oauth-authorize-link" class="button primary oauth-authorize-link" target="_blank" rel="noopener noreferrer" hidden>Open authorization page ↗</a><label>Connection name<input id="oauth-name" autocomplete="off" placeholder="Subscription account"></label>{{if .CanManageGlobal}}<label>Owner tenant<select id="oauth-owner"><option value="">Shared</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>{{end}}<label>Callback URL or code<textarea id="oauth-callback" rows="4" spellcheck="false" placeholder="http://localhost:1455/auth/callback?code=...&amp;state=..."></textarea></label><div class="dialog-actions"><button type="button" class="primary" id="oauth-complete">Complete connection</button></div><div class="provider-result" id="oauth-dialog-result" role="status" aria-live="polite"></div></dialog>
+  <dialog id="oauth-dialog" class="console-dialog"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2 id="oauth-dialog-title">Connect subscription</h2><p class="muted" id="oauth-dialog-instructions">Authorization secrets are held only for this short-lived, single-use flow.</p><a id="oauth-authorize-link" class="button primary oauth-authorize-link" target="_blank" rel="noopener noreferrer" hidden>Open authorization page ↗</a><label>Connection name<input id="oauth-name" autocomplete="off" placeholder="Subscription account"></label>{{if .CanManageGlobal}}<label>Owner tenant<select id="oauth-owner"><option value="">Shared</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>{{end}}<section id="oauth-device-flow" class="oauth-flow-panel" hidden><p id="oauth-device-message">Finish signing in on the provider page. This dialog checks authorization automatically; there is no callback URL to paste.</p><div id="oauth-device-code-row" class="oauth-device-code" hidden><span>Device code</span><output id="oauth-user-code"></output><button type="button" id="oauth-copy-code">Copy code</button></div></section><label id="oauth-callback-field">Callback URL or code<textarea id="oauth-callback" rows="4" spellcheck="false" placeholder="Paste the complete redirected URL or code#state"></textarea><small>After signing in, copy the complete URL from the browser address bar, even if that page did not load.</small></label><div class="dialog-actions"><button type="button" class="primary" id="oauth-complete">Complete connection</button></div><div class="provider-result" id="oauth-dialog-result" role="status" aria-live="polite"></div></dialog>
 </main></body></html>
