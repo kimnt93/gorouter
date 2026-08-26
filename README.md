@@ -38,6 +38,13 @@ Useful pages:
 - `/dashboard/analysis` — filterable usage activity
 - `/dashboard/logs` — request logs and token details
 - `/dashboard/cache` — provider cache-read/cache-write metrics
+- `/dashboard/providers` — API-key and OAuth provider connections
+- `/dashboard/credentials` — connection inventory
+- `/dashboard/models` — model routes and pricing
+- `/dashboard/users` — users and initial login keys
+- `/dashboard/organizations` — organizations and memberships
+- `/dashboard/keys` — API-key policies and rotation
+- `/dashboard/audit` — administrative audit events
 - `/docs` — API documentation
 
 ## Environment configuration

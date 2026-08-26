@@ -2505,6 +2505,22 @@ paths:
       summary: List providers
       tags:
       - providers
+  /admin/session:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.LoginResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error'
+      security:
+      - BearerAuth: []
+      summary: Get current session
+      tags:
+      - authentication
   /admin/tenants:
     get:
       deprecated: true

@@ -17,6 +17,11 @@ const docTemplate = `{
     "paths": {
         "/admin/api-keys": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "api-keys"
                 ],
@@ -86,14 +91,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "tags": [
                     "api-keys"
                 ],
@@ -146,16 +151,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/api-keys/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "api-keys"
                 ],
@@ -200,14 +205,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
+                }
+            },
+            "patch": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "patch": {
+                ],
                 "tags": [
                     "api-keys"
                 ],
@@ -267,16 +272,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/api-keys/{id}/rotate": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "api-keys"
                 ],
@@ -321,16 +326,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/audit/events": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "audit"
                 ],
@@ -424,16 +429,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/cache/flush": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "cache"
                 ],
@@ -457,16 +462,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/cache/stats": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "cache"
                 ],
@@ -490,16 +495,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/credentials": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -554,14 +559,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -616,16 +621,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/credentials/{id}": {
             "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -684,14 +689,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -750,16 +755,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/credentials/{id}/chat-tests": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -825,16 +830,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/credentials/{id}/models": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -885,16 +890,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/credentials/{id}/models/import": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -954,16 +959,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/credentials/{id}/test": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "credentials"
                 ],
@@ -1014,16 +1019,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/models": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "models"
                 ],
@@ -1056,16 +1061,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/models/{name}": {
             "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "models"
                 ],
@@ -1119,14 +1124,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "tags": [
                     "models"
                 ],
@@ -1171,16 +1176,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/oauth/{provider}/complete": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "oauth"
                 ],
@@ -1246,16 +1251,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/oauth/{provider}/start": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "oauth"
                 ],
@@ -1300,16 +1305,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/organizations": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "organizations"
                 ],
@@ -1393,14 +1398,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "organizations"
                 ],
@@ -1484,16 +1489,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/organizations/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "organizations"
                 ],
@@ -1558,14 +1563,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "organizations"
                 ],
@@ -1630,16 +1635,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/organizations/{id}/members": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "memberships"
                 ],
@@ -1710,14 +1715,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "memberships"
                 ],
@@ -1788,16 +1793,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/organizations/{id}/members/{user_id}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "memberships"
                 ],
@@ -1869,14 +1874,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "memberships"
                 ],
@@ -1948,16 +1953,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/prices": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "pricing"
                 ],
@@ -1987,16 +1992,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/prices/{model}": {
             "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "pricing"
                 ],
@@ -2055,14 +2060,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "pricing"
                 ],
@@ -2121,16 +2126,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/pricing/catalog": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "pricing"
                 ],
@@ -2181,16 +2186,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/pricing/estimate": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "pricing"
                 ],
@@ -2254,16 +2259,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/providers": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "providers"
                 ],
@@ -2287,16 +2292,43 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
+                }
+            }
+        },
+        "/admin/session": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
+                ],
+                "tags": [
+                    "authentication"
+                ],
+                "summary": "Get current session",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.LoginResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
+                        }
+                    }
+                }
             }
         },
         "/admin/tenants": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "organizations"
                 ],
@@ -2349,14 +2381,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "organizations"
                 ],
@@ -2409,16 +2441,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/usage/activity": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "usage"
                 ],
@@ -2499,16 +2531,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/usage/recent": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "usage"
                 ],
@@ -2602,16 +2634,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/usage/summary": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "usage"
                 ],
@@ -2667,16 +2699,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/users": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "users"
                 ],
@@ -2760,14 +2792,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "users"
                 ],
@@ -2851,16 +2883,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/admin/users/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "users"
                 ],
@@ -2919,14 +2951,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "users"
                 ],
@@ -2985,12 +3017,7 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/healthz": {
@@ -3075,6 +3102,11 @@ const docTemplate = `{
         },
         "/v1/chat/completions": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -3151,16 +3183,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v1/models": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "tags": [
                     "gateway"
                 ],
@@ -3190,12 +3222,7 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api_presenter.Error"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         }
     },

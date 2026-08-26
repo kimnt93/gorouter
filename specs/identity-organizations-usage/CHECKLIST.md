@@ -239,3 +239,27 @@ views at 1440x900 and 375x812 without document overflow. The PostgreSQL
 `TestTenantUsageQueriesAreIsolated` and ClickHouse `TestPrimaryStoreRoundTrip`
 integration tests assert identical hour-bucket request, cost, and all four token
 aggregates.
+
+## React management dashboard follow-up (2026-08-26)
+
+- [x] Expose a secret-safe current-session contract and use scopes to hide
+      unauthorized navigation and mutations.
+- [x] Restore provider connection workflows for API-key, browser OAuth, and
+      device authorization providers.
+- [x] Add connection health tests, model discovery/import, bounded streaming
+      chat tests, enable/disable, and deletion.
+- [x] Add reusable React management components for users, organizations,
+      memberships, API keys, one-time secrets, model routes/pricing, and audit.
+- [x] Support multiple editable provider routes per model.
+- [x] Preserve organization context across analysis, logs, cache, audit, and
+      dashboard navigation.
+- [x] Redirect legacy management GET pages to React while retaining mutation
+      endpoint compatibility.
+- [x] Keep every management page usable on desktop and mobile, including
+      horizontally scrollable tables and navigation to the active page.
+
+Follow-up evidence: `npm run build`, `npm test`, `go vet ./...`, and
+`go test ./...` pass. The live browser smoke covers all ten React routes,
+creates and removes a temporary API-key provider connection, exercises the
+multi-route model editor, checks the safe request modal and token ordering, and
+verifies 1440×900 and 375×812 layouts without document-level overflow.
