@@ -1,4 +1,4 @@
-import type { APIKey, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, RouterCacheStats, Session, UsageActivityResponse, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
 
 export class APIError extends Error {
   constructor(readonly status: number, message: string) {
@@ -86,9 +86,18 @@ export function getRecent(filters: UsageFilters, cursor = ''): Promise<UsageRece
   return request(`/admin/usage/recent?${params}`)
 }
 
+export const getUsageDetail = (id: string, organizationId = ''): Promise<UsageDetail> => {
+  const params = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : ''
+  return request(`/admin/usage/events/${encodeURIComponent(id)}${params}`)
+}
+
 const normalizeList = <T>(response: ListResponse<T>): ListResponse<T> => ({ ...response, data: response.data ?? [] })
 export const getUsers = (): Promise<ListResponse<User>> => request<ListResponse<User>>('/admin/users?limit=500').then(normalizeList)
 export const getAPIKeys = (): Promise<ListResponse<APIKey>> => request<ListResponse<APIKey>>('/admin/api-keys?limit=500').then(normalizeList)
+export const getAPIKeyModels = (organizationId = ''): Promise<ListResponse<APIKeyModelOption>> => {
+  const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : ''
+  return request<ListResponse<APIKeyModelOption>>(`/admin/api-keys/models${query}`).then(normalizeList)
+}
 export const getRouterCacheStats = (): Promise<RouterCacheStats> => request('/admin/cache/stats')
 export const getSession = (): Promise<Session> => request('/admin/session')
 export const getOrganizations = (): Promise<ListResponse<Organization>> => request<ListResponse<Organization>>('/admin/organizations?limit=500').then(normalizeList)
@@ -113,6 +122,8 @@ export const createCredential = (body: object): Promise<Credential> => request('
 export const updateCredential = (id: string, body: object): Promise<Credential> => request(`/admin/credentials/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) })
 export const deleteCredential = (id: string): Promise<{ ok: boolean }> => request(`/admin/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const testCredential = (id: string): Promise<ConnectivityResult> => request(`/admin/credentials/${encodeURIComponent(id)}/test`, { method: 'POST' })
+export const getCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`)
+export const refreshCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`, { method: 'POST' })
 export const discoverModels = (id: string): Promise<ProviderModelsResponse> => request(`/admin/credentials/${encodeURIComponent(id)}/models`)
 export const importModels = (id: string, models: string[]): Promise<{ ok: boolean; imported: string[] }> => request(`/admin/credentials/${encodeURIComponent(id)}/models/import`, { method: 'POST', body: JSON.stringify({ models }) })
 export const startOAuth = (provider: string): Promise<OAuthStartResponse> => request(`/admin/oauth/${encodeURIComponent(provider)}/start`, { method: 'POST' })

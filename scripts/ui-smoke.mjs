@@ -42,8 +42,9 @@ try {
   if (row) {
     await row.click()
     await page.waitForSelector('[role="dialog"]')
+    await page.waitForSelector('.conversation-section')
     const privacy = await page.$eval('.safe-note', (element) => element.textContent ?? '')
-    if (!privacy.includes('excludes prompts')) throw new Error('safe modal boundary is missing')
+    if (!privacy.includes('never captured')) throw new Error('conversation access boundary is missing')
     await page.keyboard.press('Escape')
   }
   await assertLayout('cache-desktop', '/dashboard/cache', { width: 1440, height: 900 })

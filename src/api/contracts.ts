@@ -27,6 +27,12 @@ export interface UsageRecentResponse {
   next_cursor?: string
 }
 
+export interface UsageDetail extends UsageEvent {
+  request_body: string
+  response_body: string
+  content_truncated: boolean
+}
+
 export interface UsageActivityBucket {
   start: string
   requests: number
@@ -69,6 +75,7 @@ export interface APIKey {
 }
 
 export interface CreatedAPIKey extends APIKey { plaintext: string }
+export interface APIKeyModelOption { id: string; upstream_model: string; price: Price; free: boolean }
 
 export interface Session {
   ok: boolean
@@ -87,7 +94,13 @@ export interface AuditEvent { id: string; ts: string; actor_type: string; actor_
 
 export interface ProviderDefinition {
   id: string; name: string; description: string; auth: 'api_key' | 'oauth'; protocol: string
-  default_base_url: string; model_prefix: string; custom_base_url: boolean; oauth_supported: boolean; oauth_refresh_required: boolean
+  default_base_url: string; model_prefix: string; custom_base_url: boolean; oauth_supported: boolean; oauth_refresh_required: boolean; quota_supported: boolean
+}
+
+export interface ProviderQuotaWindow { name: string; used_percent: number; remaining_percent: number; reset_at?: string }
+export interface ProviderQuotaSnapshot {
+  credential_id: string; provider: string; account: string; plan?: string; fetched_at?: string
+  available: boolean; windows: ProviderQuotaWindow[]; message?: string
 }
 
 export interface Credential {

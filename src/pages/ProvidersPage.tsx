@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentials, getOrganizations, getProviders, importModels, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
-import type { Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel } from '../api/contracts'
+import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
+import type { Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
 import { Modal } from '../components/Modal'
 import { PageLoading } from '../components/PageState'
@@ -42,22 +42,53 @@ function ProviderSection({ title, detail, providers, credentials, onConnect, onM
   return <section className="provider-section-react"><div className="section-heading"><div><h2>{title}</h2><p>{detail}</p></div><Badge>{providers.length}</Badge></div><div className="provider-grid-react">{providers.map((provider) => {
     const accounts = credentials.filter((credential) => credential.provider === provider.id)
     return <article className="provider-card-react" key={provider.id}><div className="provider-card-head"><span className="provider-monogram">{provider.name.slice(0, 2)}</span><div><h3>{provider.name}</h3><p>{provider.description}</p></div><Badge tone={accounts.length ? 'good' : ''}>{accounts.length ? `${accounts.length} connected` : provider.auth}</Badge></div>
-      {accounts.map((credential) => <ConnectionRow credential={credential} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}
+      {accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}
       <button className="button connect-button" onClick={() => onConnect(provider)}>Connect {provider.name}</button>
     </article>
   })}</div></section>
 }
 
-function ConnectionRow({ credential, onModels, onChat, onRefresh }: { credential: Credential; onModels: () => void; onChat: () => void; onRefresh: () => Promise<void> }) {
+function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh }: { credential: Credential; quotaSupported: boolean; onModels: () => void; onChat: () => void; onRefresh: () => Promise<void> }) {
   const [result, setResult] = useState('')
   const [busy, setBusy] = useState(false)
+  const [quota, setQuota] = useState<ProviderQuotaSnapshot | null>(null)
+  const [quotaBusy, setQuotaBusy] = useState(false)
+  useEffect(() => {
+    if (!quotaSupported) return
+    let active = true
+    void getCredentialQuota(credential.id).then((value) => { if (active) setQuota(value) }).catch((reason: Error) => { if (active) setResult(reason.message) })
+    return () => { active = false }
+  }, [credential.id, quotaSupported])
   const run = async (action: () => Promise<void>) => { setBusy(true); setResult(''); try { await action() } catch (reason) { setResult((reason as Error).message) } finally { setBusy(false) } }
-  return <div className="connection-row"><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{credential.name}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div><div className="compact-actions">
+  const reloadQuota = async () => { setQuotaBusy(true); setResult(''); try { setQuota(await refreshCredentialQuota(credential.id)) } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) } }
+  return <div className="connection-row"><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{credential.name}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div>
+    {quotaSupported && <QuotaPanel quota={quota} busy={quotaBusy} onReload={() => void reloadQuota()} />}
+    <div className="compact-actions">
     <button disabled={busy} onClick={() => void run(async () => { const response = await testCredential(credential.id); setResult(response.ok ? `Healthy · ${response.status ?? 'OK'} · ${response.latency_ms} ms` : 'Health check failed') })}>Test</button>
     <button onClick={onModels}>Models</button><button onClick={onChat}>Chat</button>
     <button disabled={busy} onClick={() => void run(async () => { await updateCredential(credential.id, { name: credential.name, base_url: credential.base_url, status: credential.status === 'active' ? 'disabled' : 'active', api_key: '', oauth_access: '', oauth_refresh: '', owner_tenant_id: credential.owner_tenant_id }); await onRefresh() })}>{credential.status === 'active' ? 'Disable' : 'Enable'}</button>
     <button className="danger-text" disabled={busy} onClick={() => { if (window.confirm(`Delete ${credential.name}?`)) void run(async () => { await deleteCredential(credential.id); await onRefresh() }) }}>Delete</button>
   </div>{result && <small className="inline-result">{result}</small>}</div>
+}
+
+function QuotaPanel({ quota, busy, onReload }: { quota: ProviderQuotaSnapshot | null; busy: boolean; onReload: () => void }) {
+  return <div className="provider-quota"><div className="provider-quota-head"><div><strong>{quota?.account || 'Connected account'}</strong>{quota?.plan && <small>{quota.plan}</small>}</div><button disabled={busy} onClick={onReload}>{busy ? 'Reloading…' : 'Reload'}</button></div>
+    {quota?.windows.map((window) => { const remaining = Math.max(0, Math.min(100, window.remaining_percent)); const tone = remaining <= 10 ? 'critical' : remaining <= 30 ? 'warning' : 'good'; return <div className="quota-window" key={window.name}><div><span>{window.name}</span><strong>{remaining.toFixed(1)}% remaining</strong></div><div className="quota-track"><i className={tone} style={{ width: `${remaining}%` }} /></div>{window.reset_at && <small>Resets {relativeTime(window.reset_at)}</small>}</div> })}
+    {quota?.message && <small className="quota-message">{quota.message}</small>}
+    {quota?.fetched_at && <small className="quota-fetched">Updated {relativeTime(quota.fetched_at)}</small>}
+  </div>
+}
+
+function relativeTime(value: string): string {
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return value
+  const seconds = Math.round((timestamp - Date.now()) / 1000)
+  const absolute = Math.abs(seconds)
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  if (absolute < 60) return formatter.format(seconds, 'second')
+  if (absolute < 3600) return formatter.format(Math.round(seconds / 60), 'minute')
+  if (absolute < 86_400) return formatter.format(Math.round(seconds / 3600), 'hour')
+  return formatter.format(Math.round(seconds / 86_400), 'day')
 }
 
 function ConnectProviderModal({ provider, organizations, isMaster, onClose, onConnected }: { provider: ProviderDefinition; organizations: Organization[]; isMaster: boolean; onClose: () => void; onConnected: () => void }) {
