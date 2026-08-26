@@ -42,6 +42,18 @@ type Store interface {
 	SetInUse(ctx context.Context, credentialID, provider string) error
 }
 
+// StateCache coordinates mutable routing state across all application replicas.
+// Durable snapshots remain in Store; short-lived exhaustion and active-account
+// selection use Redis in distributed deployments.
+type StateCache interface {
+	Snapshot(ctx context.Context, credentialID string) (Snapshot, bool, error)
+	PutSnapshot(ctx context.Context, snapshot Snapshot) error
+	ExhaustedUntil(ctx context.Context, credentialID string) (time.Time, error)
+	MarkExhausted(ctx context.Context, credentialID string, until time.Time) error
+	ActiveCredential(ctx context.Context, provider string) (string, error)
+	MarkActive(ctx context.Context, provider, credentialID string) error
+}
+
 type Service struct {
 	client      *http.Client
 	credentials *credential.Service
@@ -50,6 +62,7 @@ type Service struct {
 	exhausted   map[string]time.Time
 	active      map[string]string
 	store       Store
+	state       StateCache
 }
 
 func New(client *http.Client, credentials *credential.Service) *Service {
@@ -60,6 +73,7 @@ func New(client *http.Client, credentials *credential.Service) *Service {
 }
 
 func (s *Service) SetStore(store Store) { s.store = store }
+func (s *Service) SetStateCache(state StateCache) { s.state = state }
 
 // Restore warms the read-only quota cache from durable snapshots. It does not
 // contact any provider and is safe to call during startup.
@@ -79,6 +93,13 @@ func (s *Service) Restore(ctx context.Context) error {
 		}
 	}
 	s.mu.Unlock()
+	if s.state != nil {
+		for _, snapshot := range snapshots {
+			if _, ok, stateErr := s.state.Snapshot(ctx, snapshot.CredentialID); stateErr == nil && !ok {
+				_ = s.state.PutSnapshot(ctx, snapshot)
+			}
+		}
+	}
 	return nil
 }
 
@@ -92,6 +113,15 @@ func Supported(provider string) bool {
 }
 
 func (s *Service) Cached(id string) (Snapshot, bool) {
+	if s.state != nil {
+		if snapshot, ok, err := s.state.Snapshot(context.Background(), id); err == nil && ok {
+			if active, activeErr := s.state.ActiveCredential(context.Background(), snapshot.Provider); activeErr == nil {
+				snapshot.InUse = active == id
+			}
+			snapshot.Available = s.Available(id)
+			return snapshot, true
+		}
+	}
 	s.mu.RLock()
 	snapshot, ok := s.snapshots[id]
 	s.mu.RUnlock()
@@ -103,10 +133,21 @@ func (s *Service) Cached(id string) (Snapshot, bool) {
 
 func (s *Service) Available(id string) bool {
 	now := time.Now()
+	var distributed Snapshot
+	hasDistributed := false
+	if s.state != nil {
+		if until, err := s.state.ExhaustedUntil(context.Background(), id); err == nil && until.After(now) {
+			return false
+		}
+		distributed, hasDistributed, _ = s.state.Snapshot(context.Background(), id)
+	}
 	s.mu.RLock()
 	until := s.exhausted[id]
 	snapshot, ok := s.snapshots[id]
 	s.mu.RUnlock()
+	if hasDistributed {
+		snapshot, ok = distributed, true
+	}
 	if until.After(now) {
 		return false
 	}
@@ -125,7 +166,13 @@ func (s *Service) MarkExhausted(id string) {
 	now := time.Now()
 	until := now.Add(5 * time.Minute)
 	s.mu.Lock()
-	if snapshot, ok := s.snapshots[id]; ok {
+	snapshot, ok := s.snapshots[id]
+	if s.state != nil {
+		if shared, sharedOK, err := s.state.Snapshot(context.Background(), id); err == nil && sharedOK {
+			snapshot, ok = shared, true
+		}
+	}
+	if ok {
 		for _, window := range snapshot.Windows {
 			if window.ResetAt != nil && window.ResetAt.After(now) && (until.Equal(now.Add(5*time.Minute)) || window.ResetAt.Before(until)) {
 				until = *window.ResetAt
@@ -134,6 +181,9 @@ func (s *Service) MarkExhausted(id string) {
 	}
 	s.exhausted[id] = until
 	s.mu.Unlock()
+	if s.state != nil {
+		_ = s.state.MarkExhausted(context.Background(), id, until)
+	}
 }
 
 // MarkInUse records the credential that most recently accepted a gateway
@@ -144,7 +194,12 @@ func (s *Service) MarkInUse(id string) {
 	alreadyActive := ok && s.active[target.Provider] == id
 	s.mu.RUnlock()
 	if alreadyActive {
-		return
+		if s.state == nil {
+			return
+		}
+		if active, err := s.state.ActiveCredential(context.Background(), target.Provider); err == nil && active == id {
+			return
+		}
 	}
 	if !ok {
 		runtime, err := s.credentials.Runtime(context.Background(), id)
@@ -165,6 +220,10 @@ func (s *Service) MarkInUse(id string) {
 	s.snapshots[id] = target
 	s.active[provider] = id
 	s.mu.Unlock()
+	if s.state != nil {
+		_ = s.state.PutSnapshot(context.Background(), target)
+		_ = s.state.MarkActive(context.Background(), provider, id)
+	}
 	if s.store != nil {
 		_ = s.store.Save(context.Background(), target)
 		_ = s.store.SetInUse(context.Background(), id, provider)
@@ -255,12 +314,23 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 		}
 	}
 	s.mu.Lock()
-	snapshot.InUse = s.active[snapshot.Provider] == id
+	activeID := s.active[snapshot.Provider]
+	if s.state != nil {
+		if sharedActive, activeErr := s.state.ActiveCredential(ctx, snapshot.Provider); activeErr == nil {
+			activeID = sharedActive
+		}
+	}
+	snapshot.InUse = activeID == id
 	s.snapshots[id] = snapshot
 	if usableRefresh && snapshot.Available {
 		delete(s.exhausted, id)
 	}
 	s.mu.Unlock()
+	if s.state != nil {
+		if stateErr := s.state.PutSnapshot(ctx, snapshot); stateErr != nil {
+			return Snapshot{}, fmt.Errorf("cache quota snapshot: %w", stateErr)
+		}
+	}
 	if s.store != nil {
 		if saveErr := s.store.Save(ctx, snapshot); saveErr != nil {
 			return Snapshot{}, fmt.Errorf("save quota snapshot: %w", saveErr)
