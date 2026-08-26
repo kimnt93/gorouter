@@ -61,10 +61,12 @@ func (r *UsageRepo) summary(ctx context.Context, tenant string, since time.Time)
 		where = "tenant_id=? AND ts>=?"
 		args = []any{tenant, since.UTC()}
 	}
-	e := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheWriteTok, &s.CacheHits, &s.Unpriced)
+	var requests, cacheHits, unpriced uint64
+	e := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheWriteTok, &cacheHits, &unpriced)
 	if e != nil {
 		return nil, e
 	}
+	s.Requests, s.CacheHits, s.Unpriced = int64(requests), int64(cacheHits), int64(unpriced)
 	rows, e := r.s.Conn.Query(ctx, `SELECT model,count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens) FROM usage_events WHERE `+where+` GROUP BY model ORDER BY sum(cost_usd) DESC LIMIT 50`, args...)
 	if e != nil {
 		return nil, e
@@ -72,10 +74,12 @@ func (r *UsageRepo) summary(ctx context.Context, tenant string, since time.Time)
 	for rows.Next() {
 		var k string
 		var v entities.ModelU
-		if e = rows.Scan(&k, &v.Requests, &v.CostUSD, &v.InTok, &v.OutTok); e != nil {
+		var requests uint64
+		if e = rows.Scan(&k, &requests, &v.CostUSD, &v.InTok, &v.OutTok); e != nil {
 			rows.Close()
 			return nil, e
 		}
+		v.Requests = int64(requests)
 		s.ByModel[k] = v
 	}
 	rows.Close()
@@ -87,9 +91,11 @@ func (r *UsageRepo) summary(ctx context.Context, tenant string, since time.Time)
 	for rows.Next() {
 		var k string
 		var v entities.KeyU
-		if e = rows.Scan(&k, &v.Requests, &v.CostUSD); e != nil {
+		var requests uint64
+		if e = rows.Scan(&k, &requests, &v.CostUSD); e != nil {
 			return nil, e
 		}
+		v.Requests = int64(requests)
 		s.ByKey[k] = v
 	}
 	return s, rows.Err()
@@ -222,9 +228,11 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 	clauses, args := usageWhere(query, false)
 	where := strings.Join(clauses, " AND ")
 	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
-	if err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(input_cost_usd),sum(output_cost_usd),sum(cache_read_cost_usd),sum(cache_write_cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.InputCostUSD, &summary.OutputCostUSD, &summary.CacheReadCostUSD, &summary.CacheWriteCostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced); err != nil {
+	var requests, cacheHits, unpriced uint64
+	if err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(input_cost_usd),sum(output_cost_usd),sum(cache_read_cost_usd),sum(cache_write_cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&requests, &summary.CostUSD, &summary.InputCostUSD, &summary.OutputCostUSD, &summary.CacheReadCostUSD, &summary.CacheWriteCostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &cacheHits, &unpriced); err != nil {
 		return nil, err
 	}
+	summary.Requests, summary.CacheHits, summary.Unpriced = int64(requests), int64(cacheHits), int64(unpriced)
 	rows, err := r.s.Conn.Query(ctx, `SELECT model,count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens) FROM usage_events WHERE `+where+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err
@@ -232,10 +240,12 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 	for rows.Next() {
 		var name string
 		var value entities.ModelU
-		if err = rows.Scan(&name, &value.Requests, &value.CostUSD, &value.InTok, &value.OutTok, &value.CacheReadTok, &value.CacheWriteTok); err != nil {
+		var requests uint64
+		if err = rows.Scan(&name, &requests, &value.CostUSD, &value.InTok, &value.OutTok, &value.CacheReadTok, &value.CacheWriteTok); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		value.Requests = int64(requests)
 		summary.ByModel[name] = value
 	}
 	if err = rows.Err(); err != nil {
@@ -251,9 +261,11 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 	for rows.Next() {
 		var name string
 		var value entities.KeyU
-		if err = rows.Scan(&name, &value.Requests, &value.CostUSD); err != nil {
+		var requests uint64
+		if err = rows.Scan(&name, &requests, &value.CostUSD); err != nil {
 			return nil, err
 		}
+		value.Requests = int64(requests)
 		summary.ByKey[name] = value
 	}
 	return summary, rows.Err()

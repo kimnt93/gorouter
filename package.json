@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
+    "seed:smoke": "node scripts/seed-smoke.mjs",
     "smoke:ui": "node scripts/ui-smoke.mjs",
     "css": "tailwindcss -i ./ui/tailwind.css -o ./internal/api/views/static/tailwind.css --minify"
   },

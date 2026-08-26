@@ -22,7 +22,7 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(db.Close)
 	if err = db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +33,11 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = s.del(context.Background(), "tenant", tenant.ID)
+		_ = s.del(context.Background(), "organization", tenant.ID)
+		_ = s.del(context.Background(), "organization_name", "integration-"+suffix)
+	})
 	keyRepo := NewApiKeyRepo(s)
 	limit := 3.5
 	key, err := keyRepo.CreateWithQuota(ctx, tenant.ID, "key", []string{"model-" + suffix}, []string{"chat"}, &limit, entities.QuotaPeriodWeek, nil)
@@ -78,10 +83,13 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 		t.Fatalf("prices=%+v err=%v", prices, err)
 	}
 	usage := NewUsageRepo(s)
-	event := entities.UsageEvent{TS: time.Now().UTC(), TenantID: tenant.ID, ApiKeyID: key.ID, CredentialID: cred.ID, Model: modelName, PromptTokens: 10, CompletionTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 3, CostUSD: .25, InputCostUSD: .1, OutputCostUSD: .08, CacheReadCostUSD: .03, CacheWriteCostUSD: .04, Priced: true, StatusCode: 200}
+	event := entities.UsageEvent{ID: entities.NewID("usage"), TS: time.Now().UTC(), TenantID: tenant.ID, ApiKeyID: key.ID, CredentialID: cred.ID, Model: modelName, PromptTokens: 10, CompletionTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 3, CostUSD: .25, InputCostUSD: .1, OutputCostUSD: .08, CacheReadCostUSD: .03, CacheWriteCostUSD: .04, Priced: true, StatusCode: 200}
 	if err = usage.InsertBatch(ctx, []entities.UsageEvent{event}); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = db.Conn.Exec(context.Background(), `ALTER TABLE usage_events DELETE WHERE event_id=? SETTINGS mutations_sync=1`, event.ID)
+	})
 	spent, err := usage.SpendForKeySince(ctx, key.ID, event.TS.Add(-time.Second))
 	if err != nil || spent != .25 {
 		t.Fatalf("spend=%v err=%v", spent, err)
@@ -93,6 +101,10 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	activity, err := usage.ActivityUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, APIKeyID: key.ID}, "hour")
 	if err != nil || len(activity) != 1 || activity[0].Requests != 1 || activity[0].PromptTokens != 10 || activity[0].CompletionTokens != 5 || activity[0].CacheReadTokens != 4 || activity[0].CacheWriteTokens != 3 || activity[0].CostUSD != .25 || activity[0].InputCostUSD != .1 || activity[0].OutputCostUSD != .08 || activity[0].CacheReadCostUSD != .03 || activity[0].CacheWriteCostUSD != .04 {
 		t.Fatalf("usage activity=%+v err=%v", activity, err)
+	}
+	summary, err := usage.Summary(ctx, event.TS.Add(-time.Second))
+	if err != nil || summary.Requests < 1 || summary.ByModel[modelName].Requests != 1 {
+		t.Fatalf("usage summary=%+v err=%v", summary, err)
 	}
 	quotaRepo := NewProviderQuotaRepo(s)
 	quotaProvider := "integration-" + suffix

@@ -146,7 +146,19 @@ func (a *OpenAIAdapter) DiscoverModels(ctx context.Context, cr *entities.Credent
 		_, _ = io.Copy(io.Discard, io.LimitReader(result.Body, 64<<10))
 		return nil, fmt.Errorf("provider model endpoint returned HTTP %d", result.StatusCode)
 	}
-	return decodeProviderModels(result.Body)
+	models, err := decodeProviderModels(result.Body)
+	if err != nil {
+		return nil, err
+	}
+	// Google's native model catalog prefixes resource names with "models/",
+	// while its OpenAI-compatible chat endpoint expects the bare model ID.
+	if cr.Provider == "gemini" {
+		for i := range models {
+			models[i].ID = strings.TrimPrefix(models[i].ID, "models/")
+			models[i].Root = strings.TrimPrefix(models[i].Root, "models/")
+		}
+	}
+	return models, nil
 }
 
 func (a *AnthropicAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {

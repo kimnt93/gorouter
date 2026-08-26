@@ -22,8 +22,10 @@ type MutationLocker interface {
 }
 
 type Store struct {
-	Conn   ch.Conn
-	locker MutationLocker
+	Conn        ch.Conn
+	locker      MutationLocker
+	versionMu   sync.Mutex
+	lastVersion time.Time
 }
 
 func New(conn ch.Conn) *Store { return &Store{Conn: conn, locker: newProcessLocker()} }
@@ -73,13 +75,27 @@ func (s *Store) put(ctx context.Context, entity, key string, value any) error {
 	if err != nil {
 		return err
 	}
-	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,?,0)`, entity, key, string(b), time.Now().UTC())
+	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,parseDateTime64BestEffort(?),0)`, entity, key, string(b), s.nextVersion().Format(time.RFC3339Nano))
 }
 func (s *Store) del(ctx context.Context, entity, key string) error {
 	if _, err := s.raw(ctx, entity, key); err != nil {
 		return err
 	}
-	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,?,1)`, entity, key, "{}", time.Now().UTC())
+	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,parseDateTime64BestEffort(?),1)`, entity, key, "{}", s.nextVersion().Format(time.RFC3339Nano))
+}
+
+// config_records stores microsecond timestamps as versions. Generate a
+// strictly increasing value so consecutive writes cannot tie after ClickHouse
+// truncates Go's nanosecond clock value.
+func (s *Store) nextVersion() time.Time {
+	s.versionMu.Lock()
+	defer s.versionMu.Unlock()
+	next := time.Now().UTC().Truncate(time.Microsecond)
+	if !next.After(s.lastVersion) {
+		next = s.lastVersion.Add(time.Microsecond)
+	}
+	s.lastVersion = next
+	return next
 }
 func (s *Store) raw(ctx context.Context, entity, key string) (string, error) {
 	var payload string

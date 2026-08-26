@@ -50,6 +50,20 @@ func TestOpenAIModelDiscoveryAcceptsFullChatEndpointAndOpenAILikeVariants(t *tes
 	}
 }
 
+func TestGeminiModelDiscoveryRemovesNativeResourcePrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"models/gemini-2.5-flash","root":"models/gemini-2.5-flash"}]}`))
+	}))
+	defer server.Close()
+
+	models, err := (&OpenAIAdapter{HTTP: server.Client()}).DiscoverModels(context.Background(), &entities.CredentialRuntime{
+		Provider: "gemini", BaseURL: server.URL + "/v1beta/openai", APIKey: "secret",
+	})
+	if err != nil || len(models) != 1 || models[0].ID != "gemini-2.5-flash" || models[0].Root != "gemini-2.5-flash" {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+}
+
 func TestAnthropicModelDiscoveryUsesDefaultHTTPClient(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

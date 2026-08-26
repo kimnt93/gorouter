@@ -15,6 +15,9 @@ type AuditRepo struct{ s *Store }
 func NewAuditRepo(store *Store) *AuditRepo { return &AuditRepo{s: store} }
 
 func (r *AuditRepo) AppendAudit(ctx context.Context, event entities.AuditEvent) error {
+	if event.SafeMetadata == nil {
+		event.SafeMetadata = map[string]string{}
+	}
 	metadata, err := json.Marshal(event.SafeMetadata)
 	if err != nil {
 		return err
@@ -95,6 +98,9 @@ func (r *AuditRepo) QueryAudit(ctx context.Context, query entities.AuditQuery) (
 		seen[event.ID] = struct{}{}
 		if err := json.Unmarshal([]byte(metadata), &event.SafeMetadata); err != nil {
 			return nil, err
+		}
+		if event.SafeMetadata == nil {
+			event.SafeMetadata = map[string]string{}
 		}
 		page.Data = append(page.Data, event)
 	}
