@@ -180,7 +180,25 @@ func (a *Admin) Verify(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodPost && strings.Contains(c.Get("Content-Type"), "application/x-www-form-urlencoded") {
 		return c.Redirect().To("/")
 	}
-	return responseapi.JSON(c, loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, Scopes: sess.Scopes})
+	return responseapi.JSON(c, sessionResponse(sess))
+}
+
+// Session returns safe metadata for the current browser or bearer session.
+// @Summary Get current session
+// @Tags authentication
+// @Security BearerAuth
+// @Success 200 {object} LoginResponse
+// @Failure 401 {object} presenter.Error
+// @Router /admin/session [get]
+func (a *Admin) Session(c fiber.Ctx) error {
+	return responseapi.JSON(c, sessionResponse(SessionFrom(c)))
+}
+
+func sessionResponse(sess *entities.Session) loginResponse {
+	if sess == nil {
+		return loginResponse{Scopes: []string{}}
+	}
+	return loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, Scopes: append([]string(nil), sess.Scopes...)}
 }
 
 // Logout clears the signed session cookie.
