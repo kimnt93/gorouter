@@ -17,6 +17,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/policy"
 	"github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
@@ -44,17 +45,21 @@ type loginResponse struct {
 }
 
 type createdAPIKeyResponse struct {
-	ID          string   `json:"id"`
-	TenantID    string   `json:"tenant_id"`
-	Name        string   `json:"name"`
-	KeyPrefix   string   `json:"key_prefix"`
-	Models      []string `json:"models"`
-	Scopes      []string `json:"scopes"`
-	QuotaUSD    *float64 `json:"quota_usd"`
-	QuotaPeriod string   `json:"quota_period"`
-	RPM         *int     `json:"rpm"`
-	Enabled     bool     `json:"enabled"`
-	Plaintext   string   `json:"plaintext"`
+	ID                    string   `json:"id"`
+	TenantID              string   `json:"tenant_id"`
+	Name                  string   `json:"name"`
+	KeyPrefix             string   `json:"key_prefix"`
+	Models                []string `json:"models"`
+	Scopes                []string `json:"scopes"`
+	QuotaUSD              *float64 `json:"quota_usd"`
+	QuotaPeriod           string   `json:"quota_period"`
+	RPM                   *int     `json:"rpm"`
+	Enabled               bool     `json:"enabled"`
+	Plaintext             string   `json:"plaintext"`
+	OwnerType             string   `json:"owner_type"`
+	OwnerUserID           string   `json:"owner_user_id,omitempty"`
+	OwnerOrganizationID   string   `json:"owner_organization_id,omitempty"`
+	ContextOrganizationID string   `json:"context_organization_id,omitempty"`
 }
 
 type Admin struct {
@@ -298,53 +303,82 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 
 func (a *Admin) KeysList(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	var v []entities.ApiKey
-	var err error
-	if sess != nil && !sess.IsMaster() {
-		v, err = a.KeysSvc.ListByTenant(c.Context(), sess.TenantID)
-	} else {
-		v, err = a.KeysSvc.List(c.Context())
-	}
+	actor := principalFromSession(sess)
+	v, err := a.KeysSvc.List(c.Context())
 	if err != nil {
 		return presenter.ServerError(c, "failed to load API keys")
+	}
+	if !sess.IsMaster() {
+		filtered := v[:0]
+		for _, key := range v {
+			if policy.ViewKeyMetadata(actor, key) == nil {
+				filtered = append(filtered, key)
+			}
+		}
+		v = filtered
 	}
 	return c.JSON(v)
 }
 func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	var b struct {
-		TenantID    string   `json:"tenant_id"`
-		Name        string   `json:"name"`
-		Models      []string `json:"models"`
-		Scopes      []string `json:"scopes"`
-		QuotaUSD    *float64 `json:"quota_usd"`
-		QuotaPeriod string   `json:"quota_period"`
-		RPM         *int     `json:"rpm"`
+		TenantID              string   `json:"tenant_id"`
+		Name                  string   `json:"name"`
+		Models                []string `json:"models"`
+		Scopes                []string `json:"scopes"`
+		QuotaUSD              *float64 `json:"quota_usd"`
+		QuotaPeriod           string   `json:"quota_period"`
+		RPM                   *int     `json:"rpm"`
+		OwnerType             string   `json:"owner_type"`
+		OwnerUserID           string   `json:"owner_user_id"`
+		OwnerOrganizationID   string   `json:"owner_organization_id"`
+		ContextOrganizationID string   `json:"context_organization_id"`
 	}
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
-	if b.TenantID == "" {
-		b.TenantID = "tenant_default"
-	}
 	if len(b.Scopes) == 0 {
 		b.Scopes = []string{entities.ScopeChat}
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM}
 	sess := SessionFrom(c)
-	var v *entities.ApiKey
-	var err error
-	if sess != nil && !sess.IsMaster() {
-		if !scopesAllowedBySession(sess, b.Scopes) {
-			return presenter.Forbidden(c, "cannot grant scopes not held by the current session")
+	actor := principalFromSession(sess)
+	if !sess.IsMaster() {
+		if !policy.CanGrant(actor, b.Scopes, b.Models, sess.AllowedModels) {
+			return presenter.Forbidden(c, "cannot grant scopes or models not held by the current session")
 		}
-		v, err = a.KeysSvc.CreateForTenant(c.Context(), sess.TenantID, in)
-	} else {
-		v, err = a.KeysSvc.Create(c.Context(), in)
+		switch actor.Type {
+		case entities.PrincipalUser:
+			b.OwnerType = entities.OwnerUser
+			b.OwnerUserID = actor.UserID
+			b.OwnerOrganizationID = ""
+			if b.ContextOrganizationID != "" {
+				if err := a.IdentitySvc.ValidateUserKeyContext(c.Context(), actor.UserID, b.ContextOrganizationID); err != nil {
+					return presenter.Forbidden(c, "active organization membership is required")
+				}
+			}
+		case entities.PrincipalOrganization:
+			b.OwnerType = entities.OwnerOrganization
+			b.OwnerUserID = ""
+			b.OwnerOrganizationID = actor.OrganizationID
+			b.ContextOrganizationID = actor.OrganizationID
+		}
 	}
+	if sess.IsMaster() && b.OwnerType == "" {
+		if b.TenantID == "" {
+			b.TenantID = "tenant_default"
+		}
+		b.OwnerType = entities.OwnerOrganization
+		b.OwnerOrganizationID = b.TenantID
+		b.ContextOrganizationID = b.TenantID
+	}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID}
+	v, err := a.KeysSvc.Create(c.Context(), in)
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.Status(201).JSON(createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext})
+	if err = a.appendKeyAudit(c, actor, "key.create", v, map[string]string{"name": v.Name, "owner_type": v.OwnerType}); err != nil {
+		return presenter.ServerError(c, "API key created but audit write failed")
+	}
+	return c.Status(201).JSON(keyCreatedResponse(v))
 }
 func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	var b struct {
@@ -361,38 +395,90 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	quotaValue := b.QuotaUSD
 	period := b.QuotaPeriod
 	sess := SessionFrom(c)
+	actor := principalFromSession(sess)
+	key, getErr := a.KeysSvc.GetByID(c.Context(), c.Params("id"))
+	if getErr != nil {
+		return presenter.NotFound(c, "API key not found")
+	}
+	if err := policy.ManageKey(actor, *key); err != nil {
+		return presenter.NotFound(c, "API key not found")
+	}
 	var err error
-	if sess != nil && !sess.IsMaster() {
-		if b.Scopes != nil && !scopesAllowedBySession(sess, *b.Scopes) {
+	if !sess.IsMaster() {
+		if b.Scopes != nil && !policy.CanGrant(actor, *b.Scopes, func() []string {
+			if b.Models != nil {
+				return *b.Models
+			}
+			return key.Models
+		}(), sess.AllowedModels) {
 			return presenter.Forbidden(c, "cannot grant scopes not held by the current session")
 		}
-		err = a.KeysSvc.PatchQuotaForTenant(c.Context(), sess.TenantID, c.Params("id"), b.Enabled, b.Models, b.Scopes, quotaValue, period, b.RPM)
-	} else {
-		err = a.KeysSvc.PatchQuota(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, quotaValue, period, b.RPM)
 	}
+	err = a.KeysSvc.PatchQuota(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, quotaValue, period, b.RPM)
 	if err != nil {
 		if errors.Is(err, entities.ErrNotFound) {
 			return presenter.NotFound(c, "API key not found")
 		}
 		return presenter.BadRequest(c, err.Error())
 	}
+	_ = a.appendKeyAudit(c, actor, "key.update", key, map[string]string{"changed": "configuration"})
 	return c.JSON(okResponse{OK: true})
 }
 func (a *Admin) KeysDelete(c fiber.Ctx) error {
-	sess := SessionFrom(c)
-	var err error
-	if sess != nil && !sess.IsMaster() {
-		err = a.KeysSvc.DeleteForTenant(c.Context(), sess.TenantID, c.Params("id"))
-	} else {
-		err = a.KeysSvc.Delete(c.Context(), c.Params("id"))
+	actor := principalFromSession(SessionFrom(c))
+	key, getErr := a.KeysSvc.GetByID(c.Context(), c.Params("id"))
+	if getErr != nil {
+		return presenter.NotFound(c, "API key not found")
 	}
+	if policy.ManageKey(actor, *key) != nil {
+		return presenter.NotFound(c, "API key not found")
+	}
+	err := a.KeysSvc.Delete(c.Context(), c.Params("id"))
 	if err != nil {
 		if errors.Is(err, entities.ErrNotFound) {
 			return presenter.NotFound(c, "API key not found")
 		}
 		return presenter.ServerError(c, "failed to delete API key")
 	}
+	_ = a.appendKeyAudit(c, actor, "key.delete", key, nil)
 	return c.JSON(okResponse{OK: true})
+}
+
+func (a *Admin) KeysRotate(c fiber.Ctx) error {
+	actor := principalFromSession(SessionFrom(c))
+	key, err := a.KeysSvc.GetByID(c.Context(), c.Params("id"))
+	if err != nil || policy.ManageKey(actor, *key) != nil {
+		return presenter.NotFound(c, "API key not found")
+	}
+	rotated, err := a.KeysSvc.Rotate(c.Context(), key.ID)
+	if err != nil {
+		return presenter.ServerError(c, "failed to rotate API key")
+	}
+	if err = a.appendKeyAudit(c, actor, "key.rotate", rotated, map[string]string{"key_prefix": rotated.SecretPrefix}); err != nil {
+		return presenter.ServerError(c, "API key rotated but audit write failed")
+	}
+	return c.JSON(keyCreatedResponse(rotated))
+}
+
+func (a *Admin) appendKeyAudit(c fiber.Ctx, actor entities.Principal, action string, key *entities.ApiKey, metadata map[string]string) error {
+	if a.AuditRepo == nil {
+		return nil
+	}
+	actorID, label := actor.UserID, actor.Username
+	if actor.Type == entities.PrincipalMaster {
+		actorID, label = "master", "master"
+	} else if actor.Type == entities.PrincipalOrganization {
+		actorID = actor.OrganizationID
+		if label == "" {
+			label = "org:" + actor.OrganizationName
+		}
+	}
+	organizationID := key.ContextOrganizationID
+	return a.AuditRepo.AppendAudit(c.Context(), entities.AuditEvent{ID: entities.NewID("audit"), TS: time.Now().UTC(), ActorType: actor.Type, ActorID: actorID, ActorLabel: label, OrganizationID: organizationID, Action: action, TargetType: "api_key", TargetID: key.ID, SafeMetadata: metadata})
+}
+
+func keyCreatedResponse(v *entities.ApiKey) createdAPIKeyResponse {
+	return createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext, OwnerType: v.OwnerType, OwnerUserID: v.OwnerUserID, OwnerOrganizationID: v.OwnerOrganizationID, ContextOrganizationID: v.ContextOrganizationID}
 }
 
 func (a *Admin) ModelsList(c fiber.Ctx) error {
@@ -489,32 +575,58 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	case "30d":
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	sess := SessionFrom(c)
-	var v *entities.UsageSummary
-	var err error
-	if sess != nil && !sess.IsMaster() {
-		v, err = a.UsageSvc.SummaryForTenant(c.Context(), sess.TenantID, since)
-	} else {
-		v, err = a.UsageSvc.Summary(c.Context(), since)
+	actor := principalFromSession(SessionFrom(c))
+	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
+	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
+	if policyErr != nil {
+		return presenter.Forbidden(c, "usage access is not allowed")
 	}
+	query := entities.UsageQuery{Visibility: visibility, Since: &since, OrganizationID: c.Query("organization_id"), UserID: c.Query("user_id")}
+	v, err := a.UsageSvc.SummaryQuery(c.Context(), query)
 	if err != nil {
 		return presenter.ServerError(c, "failed to load usage summary")
 	}
 	return c.JSON(v)
 }
 func (a *Admin) UsageRecent(c fiber.Ctx) error {
-	sess := SessionFrom(c)
-	var v []entities.RecentEvent
-	var err error
-	if sess != nil && !sess.IsMaster() {
-		v, err = a.UsageSvc.RecentForTenant(c.Context(), sess.TenantID, 100)
-	} else {
-		v, err = a.UsageSvc.Recent(c.Context(), 100)
+	actor := principalFromSession(SessionFrom(c))
+	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
+	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
+	if policyErr != nil {
+		return presenter.Forbidden(c, "usage access is not allowed")
 	}
+	limit, _ := strconv.Atoi(c.Query("limit", "100"))
+	query := entities.UsageQuery{Visibility: visibility, Cursor: c.Query("cursor"), Limit: limit, OrganizationID: c.Query("organization_id"), UserID: c.Query("user_id"), Model: c.Query("model"), APIKeyID: c.Query("api_key_id")}
+	if value := c.Query("status"); value != "" {
+		status, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			return presenter.BadRequest(c, "status must be an integer")
+		}
+		query.StatusCode = &status
+	}
+	if value := c.Query("since"); value != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, value)
+		if parseErr != nil {
+			return presenter.BadRequest(c, "since must be RFC3339")
+		}
+		query.Since = &parsed
+	}
+	if value := c.Query("until"); value != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, value)
+		if parseErr != nil {
+			return presenter.BadRequest(c, "until must be RFC3339")
+		}
+		query.Until = &parsed
+	}
+	page, err := a.UsageSvc.Query(c.Context(), query)
 	if err != nil {
 		return presenter.ServerError(c, "failed to load recent usage")
 	}
-	return c.JSON(v)
+	return c.JSON(struct {
+		Object     string                 `json:"object"`
+		Data       []entities.RecentEvent `json:"data"`
+		NextCursor string                 `json:"next_cursor,omitempty"`
+	}{"list", page.Data, page.NextCursor})
 }
 func (a *Admin) CacheStats(c fiber.Ctx) error {
 	if a.Cache == nil {

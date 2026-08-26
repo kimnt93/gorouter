@@ -116,6 +116,8 @@ func (r *ApiKeyRepo) List(ctx context.Context) ([]entities.ApiKey, error) {
 	for _, t := range tenants {
 		names[t.ID] = t.Name
 	}
+	organizations, _ := list[entities.Organization](ctx,r.s,"organization")
+	for _,organization:=range organizations{names[organization.ID]=organization.Name}
 	for i := range keys {
 		keys[i].TenantName = names[keys[i].TenantID]
 	}

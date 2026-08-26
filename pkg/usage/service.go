@@ -18,6 +18,10 @@ type Repository interface {
 	InsertBatch(context.Context, []entities.UsageEvent) error
 }
 
+type principalRepository interface {
+	entities.PrincipalUsageRepository
+}
+
 type Service struct {
 	repo      Repository
 	ch        chan entities.UsageEvent
@@ -186,4 +190,18 @@ func (s *Service) SummaryForTenant(ctx context.Context, id string, since time.Ti
 }
 func (s *Service) RecentForTenant(ctx context.Context, id string, limit int) ([]entities.RecentEvent, error) {
 	return s.repo.RecentForTenant(ctx, id, limit)
+}
+func (s *Service) Query(ctx context.Context, query entities.UsageQuery) (*entities.UsagePage, error) {
+	repo, ok := s.repo.(principalRepository)
+	if !ok {
+		return nil, errors.New("principal usage queries unavailable")
+	}
+	return repo.QueryUsage(ctx, query)
+}
+func (s *Service) SummaryQuery(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	repo, ok := s.repo.(principalRepository)
+	if !ok {
+		return nil, errors.New("principal usage queries unavailable")
+	}
+	return repo.SummaryUsage(ctx, query)
 }

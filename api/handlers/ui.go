@@ -16,7 +16,9 @@ import (
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/policy"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
@@ -34,12 +36,15 @@ func renderTemplate(c fiber.Ctx, name string, data any) error {
 func LoginPage(c fiber.Ctx) error { return renderTemplate(c, "login.html", nil) }
 
 type UI struct {
-	Cache       chat.PromptCache
-	Usage       *usage.Service
-	Keys        *apikey.Service
-	Tenants     *tenant.Service
-	Credentials *credential.Service
-	Models      *modelroute.Service
+	Cache        chat.PromptCache
+	Usage        *usage.Service
+	Keys         *apikey.Service
+	Tenants      *tenant.Service
+	Credentials  *credential.Service
+	Models       *modelroute.Service
+	Identity     *identity.Service
+	IdentityRepo identity.Repository
+	Audit        entities.AuditRepository
 }
 
 type pageData struct {
@@ -61,6 +66,80 @@ type pageData struct {
 	CreatedSecret   string
 	OAuthProviders  []providerCardData
 	APIKeyProviders []providerCardData
+	Users           []entities.User
+	Organizations   []entities.Organization
+	Memberships     []entities.Membership
+	AuditEvents     []entities.AuditEvent
+}
+
+func (u *UI) UsersPage(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	if sess == nil || !sess.IsMaster() {
+		return presenter.Forbidden(c, "only master may view users")
+	}
+	data := u.page(c, "Users")
+	users, _, err := u.IdentityRepo.ListUsers(c.Context(), entities.PageQuery{Limit: 100, Query: c.Query("q"), Status: c.Query("status")})
+	if err != nil {
+		return presenter.ServerError(c, "failed to load users")
+	}
+	data.Users = users
+	return renderTemplate(c, "users.html", data)
+}
+func (u *UI) UserCreate(c fiber.Ctx) error {
+	actor := principalFromSession(SessionFrom(c))
+	if _, err := u.Identity.CreateUser(c.Context(), actor, c.FormValue("username")); err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return u.redirectOrRefresh(c, "/ui/users", u.UsersPage)
+}
+func (u *UI) OrganizationsPage(c fiber.Ctx) error {
+	data := u.page(c, "Organizations")
+	actor := principalFromSession(SessionFrom(c))
+	organizations, _, err := u.IdentityRepo.ListOrganizations(c.Context(), entities.PageQuery{Limit: 100, Query: c.Query("q"), Status: c.Query("status")})
+	if err != nil {
+		return presenter.ServerError(c, "failed to load organizations")
+	}
+	if actor.Type != entities.PrincipalMaster {
+		allowed := map[string]bool{}
+		if actor.Type == entities.PrincipalOrganization {
+			allowed[actor.OrganizationID] = true
+		} else {
+			memberships, _ := u.IdentityRepo.ListMembershipsForUser(c.Context(), actor.UserID)
+			for _, m := range memberships {
+				allowed[m.OrganizationID] = true
+			}
+		}
+		filtered := organizations[:0]
+		for _, organization := range organizations {
+			if allowed[organization.ID] {
+				filtered = append(filtered, organization)
+			}
+		}
+		organizations = filtered
+	}
+	data.Organizations = organizations
+	return renderTemplate(c, "organizations.html", data)
+}
+func (u *UI) OrganizationCreate(c fiber.Ctx) error {
+	actor := principalFromSession(SessionFrom(c))
+	if _, err := u.Identity.CreateOrganization(c.Context(), actor, c.FormValue("name")); err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return u.redirectOrRefresh(c, "/ui/organizations", u.OrganizationsPage)
+}
+func (u *UI) AuditPage(c fiber.Ctx) error {
+	data := u.page(c, "Audit")
+	actor := principalFromSession(SessionFrom(c))
+	visibility, err := policy.AuditVisibility(actor)
+	if err != nil {
+		return presenter.Forbidden(c, "audit access is not allowed")
+	}
+	page, err := u.Audit.QueryAudit(c.Context(), entities.AuditQuery{Visibility: visibility, Limit: 100})
+	if err != nil {
+		return presenter.ServerError(c, "failed to load audit")
+	}
+	data.AuditEvents = page.Data
+	return renderTemplate(c, "audit.html", data)
 }
 
 type providerCardData struct {
@@ -463,20 +542,22 @@ func (u *UI) UsagePage(c fiber.Ctx) error {
 	data := u.page(c, "Usage")
 	var err error
 	since := time.Now().Add(-30 * 24 * time.Hour)
-	sess := SessionFrom(c)
-	if sess != nil && !sess.IsMaster() {
-		data.Summary, err = u.Usage.SummaryForTenant(c.Context(), sess.TenantID, since)
-	} else {
-		data.Summary, err = u.Usage.Summary(c.Context(), since)
+	actor := principalFromSession(SessionFrom(c))
+	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
+	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
+	if policyErr != nil {
+		return presenter.Forbidden(c, "usage access is not allowed")
 	}
+	query := entities.UsageQuery{Visibility: visibility, Since: &since, Limit: 100}
+	data.Summary, err = u.Usage.SummaryQuery(c.Context(), query)
 	if err != nil {
 		return presenter.ServerError(c, "failed to load usage summary")
 	}
-	if sess != nil && !sess.IsMaster() {
-		data.Recent, err = u.Usage.RecentForTenant(c.Context(), sess.TenantID, 100)
-	} else {
-		data.Recent, err = u.Usage.Recent(c.Context(), 100)
+	page, queryErr := u.Usage.Query(c.Context(), query)
+	if queryErr == nil {
+		data.Recent = page.Data
 	}
+	err = queryErr
 	if err != nil {
 		return presenter.ServerError(c, "failed to load recent usage")
 	}

@@ -35,11 +35,12 @@ type Session struct {
 	TenantID       string
 	Scopes         []string
 	Expires        int64
-	PrincipalType  string `json:"principal_type,omitempty"`
-	UserID         string `json:"user_id,omitempty"`
-	Username       string `json:"username,omitempty"`
-	OrganizationID string `json:"organization_id,omitempty"`
-	MembershipRole string `json:"membership_role,omitempty"`
+	PrincipalType  string   `json:"principal_type,omitempty"`
+	UserID         string   `json:"user_id,omitempty"`
+	Username       string   `json:"username,omitempty"`
+	OrganizationID string   `json:"organization_id,omitempty"`
+	MembershipRole string   `json:"membership_role,omitempty"`
+	AllowedModels  []string `json:"-"`
 }
 
 const (

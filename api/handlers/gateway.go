@@ -40,6 +40,15 @@ type Gateway struct {
 	Pricing   PriceResolver
 }
 
+// GatewayAccessContext separates a stored API key (absent for master) from
+// request policy, cache isolation, credential visibility, and actor snapshot.
+type GatewayAccessContext struct {
+	*entities.ApiKey
+	StoredKey *entities.ApiKey
+	Actor     entities.UsageActor
+	Master    bool
+}
+
 type PriceResolver interface {
 	Resolve(model, upstreamModel string) (entities.Price, bool)
 	Estimates(model, upstreamModel string, promptTokens, completionTokens int64) entities.PriceEstimates
@@ -62,11 +71,11 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if err != nil || req.Model == "" || len(req.Messages) == 0 {
 		return presenter.BadRequest(c, "model and messages are required")
 	}
-	key, err := g.keyForSession(c, sess)
+	key, err := g.accessForSession(c, sess)
 	if err != nil {
 		return presenter.Unauthorized(c, "API key required")
 	}
-	if !contains(key.Models, req.Model) {
+	if !key.Master && !contains(key.Models, req.Model) {
 		return presenter.Forbidden(c, "model is not allowed for this API key")
 	}
 	models, err := g.Models.List(c.Context())
@@ -173,7 +182,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	candidates := make([]chat.Candidate, 0, len(routes))
 	for _, route := range routes {
-		if route.OwnerTenant != nil && *route.OwnerTenant != key.TenantID {
+		if !key.Master && route.OwnerTenant != nil && *route.OwnerTenant != key.TenantID {
 			continue
 		}
 		if g.Health.Available(route.CredentialID) {
@@ -271,7 +280,7 @@ func drainAndClose(body io.ReadCloser) {
 
 func (g *Gateway) ListModels(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	key, err := g.keyForSession(c, sess)
+	key, err := g.accessForSession(c, sess)
 	if err != nil {
 		return presenter.Unauthorized(c, "API key required")
 	}
@@ -281,21 +290,37 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	}
 	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}}
 	for _, model := range models {
-		if model.Enabled && contains(key.Models, model.Name) {
+		if model.Enabled && (key.Master || contains(key.Models, model.Name)) {
 			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter"})
 		}
 	}
 	return c.JSON(out)
 }
 
-func (g *Gateway) keyForSession(c fiber.Ctx, sess *entities.Session) (*entities.ApiKey, error) {
-	if sess == nil || sess.IsMaster() {
-		return nil, fmt.Errorf("master session is not a client key")
+func (g *Gateway) accessForSession(c fiber.Ctx, sess *entities.Session) (*GatewayAccessContext, error) {
+	if sess == nil {
+		return nil, fmt.Errorf("session required")
 	}
-	return g.Keys.GetByID(c.Context(), sess.KeyID)
+	if sess.IsMaster() {
+		return &GatewayAccessContext{ApiKey: &entities.ApiKey{ID: "master", Scopes: entities.AllScopes, Enabled: true}, Actor: entities.UsageActor{Type: entities.ActorMaster, Username: "master"}, Master: true}, nil
+	}
+	key, err := g.Keys.GetByID(c.Context(), sess.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	actor := entities.UsageActor{UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID}
+	if sess.PrincipalType == entities.PrincipalUser {
+		actor.Type = entities.ActorUser
+	} else {
+		actor.Type = entities.ActorOrganization
+		if actor.Username == "" {
+			actor.Username = "org:" + key.TenantName
+		}
+	}
+	return &GatewayAccessContext{ApiKey: key, StoredKey: key, Actor: actor}, nil
 }
 
-func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
+func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
 	defer result.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(result.Body, 32<<20))
 	if err != nil {
@@ -335,7 +360,7 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 	return c.Send(body)
 }
 
-func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
+func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
@@ -447,7 +472,7 @@ func (g *Gateway) replayStream(c fiber.Ctx, e *chat.CacheEntry) error {
 	})
 }
 
-func (g *Gateway) record(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time) {
+func (g *Gateway) record(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time) {
 	if g.Usage == nil {
 		return
 	}
@@ -476,19 +501,23 @@ func (g *Gateway) resolvePrice(ctx context.Context, model *entities.ModelDef) (e
 	return price, ok, nil
 }
 
-func (g *Gateway) recordCost(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost) {
+func (g *Gateway) recordCost(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost) {
 	g.recordCostError(key, model, cred, u, hit, status, started, cost, "")
 }
 
-func (g *Gateway) recordError(key *entities.ApiKey, model *entities.ModelDef, cred string, status int, started time.Time, summary string) {
+func (g *Gateway) recordError(key *GatewayAccessContext, model *entities.ModelDef, cred string, status int, started time.Time, summary string) {
 	g.recordCostError(key, model, cred, llm.Usage{}, false, status, started, entities.Cost{}, summary)
 }
 
-func (g *Gateway) recordCostError(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
+func (g *Gateway) recordCostError(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
 	if g.Usage == nil {
 		return
 	}
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: key.ID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary})
+	apiKeyID := ""
+	if key.StoredKey != nil {
+		apiKeyID = key.StoredKey.ID
+	}
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

@@ -312,7 +312,7 @@ func GenerateSecret() string {
 	return "nr-" + hex.EncodeToString(b)
 }
 
-const keyColumns = `k.id,k.tenant_id,k.name,k.key_hash,k.key_prefix,k.models,k.scopes,k.quota_usd,k.quota_period,k.rpm,k.enabled,k.created_at,k.owner_type,coalesce(k.owner_user_id,''),coalesce(k.owner_organization_id,''),coalesce(k.context_organization_id,'')`
+const keyColumns = `k.id,coalesce(k.tenant_id,''),k.name,k.key_hash,k.key_prefix,k.models,k.scopes,k.quota_usd,k.quota_period,k.rpm,k.enabled,k.created_at,k.owner_type,coalesce(k.owner_user_id,''),coalesce(k.owner_organization_id,''),coalesce(k.context_organization_id,'')`
 
 func scanApiKey(row pgx.Row) (*entities.ApiKey, error) {
 	var k entities.ApiKey
@@ -428,7 +428,7 @@ func (r *ApiKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]entit
 }
 
 func (r *ApiKeyRepo) list(ctx context.Context, tenantID string, scoped bool) ([]entities.ApiKey, error) {
-	query := `SELECT ` + keyColumns + `,t.name FROM api_keys k JOIN tenants t ON t.id=k.tenant_id`
+	query := `SELECT ` + keyColumns + `,coalesce(o.name,'') FROM api_keys k LEFT JOIN organizations o ON o.id=k.context_organization_id`
 	var args []any
 	if scoped {
 		query += ` WHERE k.tenant_id=$1`
