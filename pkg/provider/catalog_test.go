@@ -31,3 +31,9 @@ func TestPublicModelIDUsesAliasWithoutReasoningSuffixes(t *testing.T) {
 		t.Fatalf("OpenCode Zen model = %q", got)
 	}
 }
+
+func TestKimiUsesAnthropicWireTranslation(t *testing.T) {
+	if !UsesAnthropicWire("kimi-code") || !UsesAnthropicWire("claude") || UsesAnthropicWire("codex") {
+		t.Fatal("Anthropic wire protocol classification is incorrect")
+	}
+}

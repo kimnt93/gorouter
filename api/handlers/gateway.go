@@ -307,7 +307,7 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 		return presenter.Err(c, 502, "upstream read failed", "upstream_error", "")
 	}
 	usage := llm.ExtractUsage(body)
-	if providerpkg.ProtocolFor(runtime.Provider) == providerpkg.ProtocolAnthropic {
+	if providerpkg.UsesAnthropicWire(runtime.Provider) {
 		resp, err := llm.FromAnthropic(body, model.Name)
 		if err != nil {
 			g.recordError(key, model, runtime.ID, fiber.StatusBadGateway, started, "response translation failed")
@@ -355,7 +355,7 @@ func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.Mode
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		defer result.Body.Close()
 		streamStatus := fiber.StatusOK
-		if providerpkg.ProtocolFor(runtime.Provider) == providerpkg.ProtocolAnthropic {
+		if providerpkg.UsesAnthropicWire(runtime.Provider) {
 			conv := llm.NewAnthropicStreamConverter(model.Name)
 			err := llm.ScanSSE(result.Body, func(ev llm.SSEEvent) error {
 				chunks, _, err := conv.Feed(ev.Event, ev.Data)

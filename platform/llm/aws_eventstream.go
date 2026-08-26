@@ -10,7 +10,7 @@ import (
 
 type awsEvent struct {
 	Type    string
-	Payload map[string]any
+	Payload any
 }
 
 func readAWSEvents(reader io.Reader, visit func(awsEvent) error) error {
@@ -35,7 +35,7 @@ func readAWSEvents(reader io.Reader, visit func(awsEvent) error) error {
 		headers := remaining[:headersLength]
 		payload := remaining[headersLength : len(remaining)-4]
 		eventType := awsHeader(headers, ":event-type")
-		var value map[string]any
+		var value any
 		if len(payload) > 0 && json.Unmarshal(payload, &value) != nil {
 			continue
 		}

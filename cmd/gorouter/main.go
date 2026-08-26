@@ -121,6 +121,7 @@ func main() {
 	anthropic := &llm.AnthropicAdapter{HTTP: client, OAuthClientID: cfg.OAuthClientID}
 	refresher := &llm.AnthropicOAuthRefresher{HTTP: client, TokenURL: cfg.OAuthTokenURL, ClientID: cfg.OAuthClientID, Persister: credSvc}
 	anthropic.Refresh = refresher.Refresh
+	claudeCode := &llm.ClaudeCodeAdapter{AnthropicAdapter: anthropic}
 	codex := &llm.CodexAdapter{HTTP: client}
 	codexRefresher := &llm.CodexOAuthRefresher{HTTP: client, TokenURL: cfg.CodexOAuthTokenURL, ClientID: cfg.CodexOAuthClientID, Persister: credSvc}
 	codex.Refresh = codexRefresher.Refresh
@@ -137,6 +138,7 @@ func main() {
 	antigravity := &llm.AntigravityAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.AntigravityOAuthClientID, ClientSecret: cfg.AntigravityOAuthClientSecret}
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
 	providerProbes := map[string]credential.ConnectivityProber{
+		"claude":         claudeCode,
 		"github-copilot": copilot,
 		"grok-build":     grokBuild, "xai-oauth": xaiOAuth, "cline": cline, "clinepass": clinePass, "kilo-code": kiloCode,
 		"kimi-code": kimiCode, "cursor": cursor, "kiro": kiro, "amazon-q": amazonQ, "antigravity": antigravity,

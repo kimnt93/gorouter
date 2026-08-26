@@ -116,6 +116,31 @@ func TestCodexModelDiscoveryNormalizesOpenAIStyleCatalog(t *testing.T) {
 	}
 }
 
+func TestCodexModelDiscoveryNormalizesCamelCaseAndEnrichesCapabilities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-5.6-sol","contextWindow":272000,"maxInputTokens":872000,"maxOutputTokens":128000,"displayName":"GPT 5.6 Sol"},{"slug":"gpt-5.6-sol-medium","contextWindow":272000}]}`)
+	}))
+	defer server.Close()
+
+	models, err := (&CodexAdapter{HTTP: server.Client()}).DiscoverModels(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("models = %+v", models)
+	}
+	model := models[0]
+	if model.Created != 1787701071 || model.ContextLength != 272000 || model.MaxInputTokens != 872000 || model.APIFormat != "responses" || model.Root != model.ID || len(model.Permission) != 0 {
+		t.Fatalf("normalized model = %+v", model)
+	}
+	if model.Capabilities["supportsThinking"] != true || model.Capabilities["tool_calling"] != true {
+		t.Fatalf("capabilities = %+v", model.Capabilities)
+	}
+	if got := model.Capabilities["effort_tiers"].([]string); len(got) != 6 || got[5] != "ultra" {
+		t.Fatalf("effort tiers = %#v", got)
+	}
+}
+
 func TestToCodexRequestTranslatesToolHistoryAndChoice(t *testing.T) {
 	choice := json.RawMessage(`{"type":"function","function":{"name":"lookup"}}`)
 	request := ChatRequest{

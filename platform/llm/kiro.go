@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -55,13 +56,20 @@ func sendKiroNative(ctx context.Context, client *http.Client, cr *entities.Crede
 	}
 	base := strings.TrimRight(cr.BaseURL, "/")
 	if base == "" {
-		base = "https://codewhisperer.us-east-1.amazonaws.com"
+		base = kiroRuntimeHost(kiroRuntimeRegion(cr.OAuthMeta.ProfileARN, cr.OAuthMeta.Region))
 	}
 	if !strings.HasSuffix(base, "/generateAssistantResponse") {
 		base += "/generateAssistantResponse"
 	}
 	invocation, _ := randomUUID()
-	result, err := postJSON(ctx, client, base, map[string]string{"Authorization": "Bearer " + cr.OAuthAccess, "Accept": "application/vnd.amazon.eventstream", "Amz-Sdk-Request": "attempt=1; max=3", "Amz-Sdk-Invocation-Id": invocation, "User-Agent": "aws-sdk-js/3.709.0 ua/2.1 os/linux lang/js md/nodejs#22.0 api/codewhispererruntime#3.0"}, payload)
+	headers := map[string]string{"Authorization": "Bearer " + cr.OAuthAccess, "Accept": "application/vnd.amazon.eventstream", "Amz-Sdk-Request": "attempt=1; max=3", "Amz-Sdk-Invocation-Id": invocation, "User-Agent": "aws-sdk-js/3.709.0 ua/2.1 os/linux lang/js md/nodejs#22.0 api/codewhispererruntime#3.0", "x-amzn-bedrock-cache-control": "enable", "anthropic-beta": "prompt-caching-2024-07-31"}
+	if cr.OAuthMeta.AuthMethod == "api_key" {
+		headers["tokentype"] = "API_KEY"
+	}
+	if cr.OAuthMeta.AuthMethod == "external_idp" || cr.OAuthMeta.AuthMethod == "enterprise" {
+		headers["TokenType"] = "EXTERNAL_IDP"
+	}
+	result, err := postJSON(ctx, client, base, headers, payload)
 	if err != nil || result.StatusCode < 200 || result.StatusCode >= 300 {
 		return result, err
 	}
@@ -86,6 +94,27 @@ func sendKiroNative(ctx context.Context, client *http.Client, cr *entities.Crede
 	result.Body = io.NopCloser(bytes.NewReader(encoded))
 	result.Header["Content-Type"] = []string{"application/json"}
 	return result, nil
+}
+
+var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d{1,2}$`)
+
+func kiroRuntimeRegion(profileARN, storedRegion string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(profileARN)), ":")
+	if len(parts) > 4 && parts[0] == "arn" && parts[2] == "codewhisperer" && awsRegionPattern.MatchString(parts[3]) {
+		return parts[3]
+	}
+	storedRegion = strings.ToLower(strings.TrimSpace(storedRegion))
+	if storedRegion == "us-east-1" || storedRegion == "eu-central-1" {
+		return storedRegion
+	}
+	return "us-east-1"
+}
+
+func kiroRuntimeHost(region string) string {
+	if region == "us-east-1" {
+		return "https://codewhisperer.us-east-1.amazonaws.com"
+	}
+	return "https://q." + region + ".amazonaws.com"
 }
 
 func kiroRequest(input ChatRequest, model, profileARN string) ([]byte, error) {
@@ -201,16 +230,16 @@ func kiroRequest(input ChatRequest, model, profileARN string) ([]byte, error) {
 }
 
 func applyKiroEvent(event awsEvent, message *ResponseMessage, usage *Usage) {
+	payload, _ := event.Payload.(map[string]any)
 	switch event.Type {
 	case "assistantResponseEvent", "codeEvent":
-		if content, ok := event.Payload["content"].(string); ok {
+		if content, ok := payload["content"].(string); ok {
 			message.Content += content
 		}
+	case "reasoningContentEvent":
+		message.ReasoningContent += kiroReasoningText(payload)
 	case "toolUseEvent":
-		items := []any{event.Payload}
-		if values, ok := any(event.Payload).([]any); ok {
-			items = values
-		}
+		items := kiroToolItems(event.Payload)
 		for _, value := range items {
 			item, ok := value.(map[string]any)
 			if !ok {
@@ -225,14 +254,58 @@ func applyKiroEvent(event awsEvent, message *ResponseMessage, usage *Usage) {
 				encoded, _ := json.Marshal(input)
 				args = string(encoded)
 			}
-			message.ToolCalls = append(message.ToolCalls, ToolCall{ID: id, Type: "function", Function: ToolFunction{Name: name, Arguments: args}})
+			updated := false
+			for index := range message.ToolCalls {
+				if message.ToolCalls[index].ID == id && id != "" {
+					message.ToolCalls[index].Function.Name = name
+					if _, objectForm := item["input"].(map[string]any); objectForm {
+						message.ToolCalls[index].Function.Arguments = args
+					} else {
+						message.ToolCalls[index].Function.Arguments += args
+					}
+					updated = true
+					break
+				}
+			}
+			if !updated {
+				message.ToolCalls = append(message.ToolCalls, ToolCall{ID: id, Type: "function", Function: ToolFunction{Name: name, Arguments: args}})
+			}
 		}
-	case "metadataEvent":
-		if value, ok := event.Payload["usage"].(map[string]any); ok {
-			usage.PromptTokens = int64Value(value, "inputTokens")
-			usage.CompletionTokens = int64Value(value, "outputTokens")
+	case "metadataEvent", "metricsEvent":
+		value := payload
+		for _, key := range []string{"metricsEvent", "usage", "metadataEvent"} {
+			if nested, ok := value[key].(map[string]any); ok {
+				value = nested
+			}
 		}
+		usage.PromptTokens = firstInt64Value(value, "inputTokens", "prompt_tokens")
+		usage.CompletionTokens = firstInt64Value(value, "outputTokens", "completion_tokens")
+		usage.CacheReadTokens = firstInt64Value(value, "cacheReadInputTokens", "cache_read_input_tokens")
+		usage.CacheWriteTokens = firstInt64Value(value, "cacheWriteInputTokens", "cache_creation_input_tokens")
 	}
+}
+
+func kiroToolItems(payload any) []any {
+	if values, ok := payload.([]any); ok {
+		return values
+	}
+	if value, ok := payload.(map[string]any); ok {
+		return []any{value}
+	}
+	return nil
+}
+
+func kiroReasoningText(payload map[string]any) string {
+	if text := stringValueAny(payload, "text"); text != "" {
+		return text
+	}
+	if value, ok := payload["reasoningText"].(string); ok {
+		return value
+	}
+	if value, ok := payload["reasoningText"].(map[string]any); ok {
+		return stringValueAny(value, "text", "Text")
+	}
+	return ""
 }
 func stringValueAny(m map[string]any, keys ...string) string {
 	for _, key := range keys {
@@ -249,6 +322,15 @@ func int64Value(m map[string]any, key string) int64 {
 	return 0
 }
 
+func firstInt64Value(m map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		if value := int64Value(m, key); value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 func kiroStream(upstream io.ReadCloser, model string) io.ReadCloser {
 	reader, writer := io.Pipe()
 	go func() {
@@ -257,44 +339,78 @@ func kiroStream(upstream io.ReadCloser, model string) io.ReadCloser {
 		id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 		created := time.Now().Unix()
 		toolIndex := 0
+		toolIndexes := map[string]int{}
+		bufferedArgs := map[string]string{}
+		hasTools := false
+		usage := Usage{}
+		writeChunk := func(delta Delta, finish string, includeUsage bool) {
+			chunk := Chunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: model, Choices: []ChunkChoice{{Index: 0, Delta: delta, FinishReason: finish}}}
+			if includeUsage {
+				chunk.Usage = &usage
+			}
+			encoded, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(writer, "data: %s\n\n", encoded)
+		}
+		flushArgs := func() {
+			for callID, args := range bufferedArgs {
+				idx := toolIndexes[callID]
+				writeChunk(Delta{ToolCalls: []ToolCall{{Index: &idx, Function: ToolFunction{Arguments: args}}}}, "", false)
+			}
+			clear(bufferedArgs)
+		}
 		_ = readAWSEvents(upstream, func(event awsEvent) error {
+			payload, _ := event.Payload.(map[string]any)
 			delta := Delta{}
-			finish := ""
 			switch event.Type {
 			case "assistantResponseEvent", "codeEvent":
-				delta.Content = stringValueAny(event.Payload, "content")
+				delta.Content = stringValueAny(payload, "content")
 			case "reasoningContentEvent":
-				delta.Content = stringValueAny(event.Payload, "text")
+				delta.ReasoningContent = kiroReasoningText(payload)
 			case "toolUseEvent":
-				name := stringValueAny(event.Payload, "name", "toolName")
-				callID := stringValueAny(event.Payload, "toolUseId", "id")
-				args := "{}"
-				if value := event.Payload["input"]; value != nil {
-					if text, ok := value.(string); ok {
-						args = text
-					} else {
-						encoded, _ := json.Marshal(value)
-						args = string(encoded)
+				for _, rawItem := range kiroToolItems(event.Payload) {
+					item, _ := rawItem.(map[string]any)
+					name := stringValueAny(item, "name", "toolName")
+					callID := stringValueAny(item, "toolUseId", "id")
+					idx, known := toolIndexes[callID]
+					if !known {
+						idx = toolIndex
+						toolIndexes[callID] = idx
+						toolIndex++
+						hasTools = true
+						writeChunk(Delta{ToolCalls: []ToolCall{{Index: &idx, ID: callID, Type: "function", Function: ToolFunction{Name: name}}}}, "", false)
+					}
+					if value := item["input"]; value != nil {
+						if text, ok := value.(string); ok {
+							writeChunk(Delta{ToolCalls: []ToolCall{{Index: &idx, Function: ToolFunction{Arguments: text}}}}, "", false)
+						} else {
+							encoded, _ := json.Marshal(value)
+							bufferedArgs[callID] = string(encoded)
+						}
 					}
 				}
-				idx := toolIndex
-				toolIndex++
-				delta.ToolCalls = []ToolCall{{Index: &idx, ID: callID, Type: "function", Function: ToolFunction{Name: name, Arguments: args}}}
-				finish = "tool_calls"
+				return nil
+			case "messageStopEvent":
+				flushArgs()
+				return nil
+			case "metadataEvent", "metricsEvent":
+				applyKiroEvent(event, &ResponseMessage{}, &usage)
+				return nil
 			default:
 				return nil
 			}
-			if delta.Content == "" && len(delta.ToolCalls) == 0 {
+			if delta.Content == "" && delta.ReasoningContent == "" {
 				return nil
 			}
-			chunk := Chunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: model, Choices: []ChunkChoice{{Index: 0, Delta: delta, FinishReason: finish}}}
-			encoded, _ := json.Marshal(chunk)
-			_, _ = fmt.Fprintf(writer, "data: %s\n\n", encoded)
+			writeChunk(delta, "", false)
 			return nil
 		})
-		final := Chunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: model, Choices: []ChunkChoice{{Index: 0, Delta: Delta{}, FinishReason: "stop"}}}
-		encoded, _ := json.Marshal(final)
-		_, _ = fmt.Fprintf(writer, "data: %s\n\ndata: [DONE]\n\n", encoded)
+		flushArgs()
+		finish := "stop"
+		if hasTools {
+			finish = "tool_calls"
+		}
+		writeChunk(Delta{}, finish, true)
+		_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
 	}()
 	return reader
 }

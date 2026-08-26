@@ -7,6 +7,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -22,7 +23,7 @@ func (a *CopilotAdapter) refreshToken(ctx context.Context, cr *entities.Credenti
 	if cr.OAuthAccess == "" {
 		return
 	}
-	if expiry, err := time.Parse(time.RFC3339, cr.OAuthMeta.TokenExpiresAt); err == nil && expiry.After(time.Now().Add(time.Minute)) && cr.OAuthMeta.CopilotToken != "" {
+	if copilotTokenExpiry(cr.OAuthMeta.TokenExpiresAt).After(time.Now().Add(time.Minute)) && cr.OAuthMeta.CopilotToken != "" {
 		return
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/v2/token", nil)
@@ -46,6 +47,16 @@ func (a *CopilotAdapter) refreshToken(ctx context.Context, cr *entities.Credenti
 	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p) == nil && p.Token != "" {
 		cr.OAuthMeta.CopilotToken = p.Token
 	}
+}
+
+func copilotTokenExpiry(value string) time.Time {
+	if expiry, err := time.Parse(time.RFC3339, value); err == nil {
+		return expiry
+	}
+	if unix, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return time.Unix(unix, 0)
+	}
+	return time.Time{}
 }
 func (a *CopilotAdapter) headers(cr *entities.CredentialRuntime, stream bool) map[string]string {
 	token := cr.OAuthMeta.CopilotToken

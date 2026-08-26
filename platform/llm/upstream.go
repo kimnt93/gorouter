@@ -24,6 +24,7 @@ func NewHTTPClient() *http.Client {
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 300 * time.Second,
 			IdleConnTimeout:       90 * time.Second,
@@ -248,7 +249,9 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 		return nil, err
 	}
 	url := anthropicBase(cr.BaseURL) + "/v1/messages"
-	if cr.Provider=="kimi-code" { url += "?beta=true" }
+	if cr.Provider == "kimi-code" {
+		url += "?beta=true"
+	}
 
 	send := func() (*entities.UpstreamResult, error) {
 		headers, headerErr := anthropicHeaders(cr)

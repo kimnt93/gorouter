@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -63,6 +64,17 @@ type oauthRouteBox struct{}
 
 func (oauthRouteBox) Seal(value []byte) ([]byte, error) { return value, nil }
 func (oauthRouteBox) Open(value []byte) ([]byte, error) { return value, nil }
+
+type oauthRouteRewriteTransport struct {
+	target *url.URL
+}
+
+func (r oauthRouteRewriteTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.URL.Scheme = r.target.Scheme
+	clone.URL.Host = r.target.Host
+	return http.DefaultTransport.RoundTrip(clone)
+}
 
 func TestOAuthRoutesRequireAuthenticationAndCredentialScope(t *testing.T) {
 	keys := oauthRouteKeyLookup{
@@ -150,6 +162,59 @@ func TestOAuthCompleteBindsFlowAndCredentialOwnershipToSession(t *testing.T) {
 	}
 	if len(repo.created) != 2 || repo.created[1].OwnerTenant == nil || *repo.created[1].OwnerTenant != "managed-tenant" {
 		t.Fatalf("master-selected credential owner = %+v, want managed-tenant", repo.created)
+	}
+}
+
+func TestOAuthDeviceRouteReturnsUserCodeAndAcceptedWhilePending(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth/device_authorization":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_code": "device", "user_code": "ABCD-EFGH",
+				"verification_uri": "https://auth.kimi.com/device", "expires_in": 600, "interval": 1,
+			})
+		case "/api/oauth/token":
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "authorization_pending"})
+		default:
+			t.Fatalf("unexpected OAuth endpoint %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	client := &http.Client{Transport: oauthRouteRewriteTransport{target: target}}
+	service := oauthpkg.New(client, credential.NewService(&oauthRouteCredentialRepo{}, oauthRouteBox{}), oauthpkg.Config{})
+	app := routes.New(routes.Dependencies{
+		Auth:  auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}),
+		OAuth: service,
+	})
+
+	startResponse := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/kimi-code/start", "master-secret", nil)
+	defer startResponse.Body.Close()
+	var start struct {
+		FlowID       string `json:"flow_id"`
+		FlowType     string `json:"flow_type"`
+		UserCode     string `json:"user_code"`
+		AuthorizeURL string `json:"authorize_url"`
+	}
+	if err := json.NewDecoder(startResponse.Body).Decode(&start); err != nil {
+		t.Fatal(err)
+	}
+	if startResponse.StatusCode != http.StatusOK || start.FlowType != "device_code" || start.UserCode != "ABCD-EFGH" || start.AuthorizeURL == "" {
+		t.Fatalf("device start status=%d payload=%+v", startResponse.StatusCode, start)
+	}
+
+	completeResponse := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/kimi-code/complete", "master-secret", map[string]any{"flow_id": start.FlowID})
+	defer completeResponse.Body.Close()
+	if completeResponse.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(completeResponse.Body)
+		t.Fatalf("pending status=%d body=%s", completeResponse.StatusCode, body)
+	}
+	var pending map[string]string
+	if err := json.NewDecoder(completeResponse.Body).Decode(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending["status"] != "authorization_pending" {
+		t.Fatalf("pending payload=%v", pending)
 	}
 }
 

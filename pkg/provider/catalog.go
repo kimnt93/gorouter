@@ -93,6 +93,11 @@ func ProtocolFor(id string) string {
 	return ""
 }
 
+func UsesAnthropicWire(id string) bool {
+	protocol := ProtocolFor(id)
+	return protocol == ProtocolAnthropic || protocol == ProtocolKimi
+}
+
 func PublicModelID(providerID, upstream string) string {
 	definition, ok := Lookup(providerID)
 	if !ok || definition.ModelPrefix == "" {

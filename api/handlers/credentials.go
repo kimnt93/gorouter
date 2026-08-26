@@ -95,9 +95,9 @@ type providerModelResponse struct {
 	Default            bool           `json:"default,omitempty"`
 	Created            int64          `json:"created,omitempty"`
 	OwnedBy            string         `json:"owned_by,omitempty"`
-	Permission         []any          `json:"permission,omitempty"`
+	Permission         []any          `json:"permission"`
 	Root               string         `json:"root,omitempty"`
-	Parent             *string        `json:"parent,omitempty"`
+	Parent             *string        `json:"parent"`
 	APIFormat          string         `json:"api_format,omitempty"`
 	ContextLength      int64          `json:"context_length,omitempty"`
 	MaxOutputTokens    int64          `json:"max_output_tokens,omitempty"`
@@ -268,7 +268,7 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	c.Set("X-Accel-Buffering", "no")
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		defer result.Body.Close()
-		if providerpkg.ProtocolFor(runtime.Provider) == providerpkg.ProtocolAnthropic {
+		if providerpkg.UsesAnthropicWire(runtime.Provider) {
 			converter := llm.NewAnthropicStreamConverter(providerpkg.PublicModelID(runtime.Provider, input.Model))
 			_ = llm.ScanSSE(result.Body, func(event llm.SSEEvent) error {
 				chunks, _, feedErr := converter.Feed(event.Event, event.Data)

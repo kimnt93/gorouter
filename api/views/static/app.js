@@ -260,7 +260,7 @@
     try {
       const payload = await fetchJSON(`/admin/oauth/${encodeURIComponent(oauthProvider)}/start`, { method: "POST" });
       oauthFlowID = payload.flow_id || "";
-	  oauthFlowType = payload.flow_type || "authorization_code_pkce";
+      oauthFlowType = payload.flow_type || "authorization_code_pkce";
       if (!oauthFlowID || !payload.authorize_url) throw new Error("OAuth start response was incomplete.");
       link.href = payload.authorize_url;
       link.hidden = false;

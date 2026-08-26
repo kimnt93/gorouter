@@ -666,23 +666,34 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 			ID                 string         `json:"id"`
 			Model              string         `json:"model"`
 			Name               string         `json:"name"`
+			DisplayName        string         `json:"display_name"`
+			DisplayNameCamel   string         `json:"displayName"`
 			OwnedBy            string         `json:"owned_by"`
+			OwnedByCamel       string         `json:"ownedBy"`
 			Permission         []any          `json:"permission"`
 			Root               string         `json:"root"`
 			Parent             *string        `json:"parent"`
 			APIFormat          string         `json:"api_format"`
+			APIFormatCamel     string         `json:"apiFormat"`
 			Visibility         string         `json:"visibility"`
 			Supported          *bool          `json:"supported_in_api"`
 			SupportedInAPI     *bool          `json:"supportedInApi"`
 			Context            int64          `json:"context_window"`
+			ContextCamel       int64          `json:"contextWindow"`
 			ContextLength      int64          `json:"context_length"`
 			MaxContextWindow   int64          `json:"max_context_window"`
+			MaxContextCamel    int64          `json:"maxContextWindow"`
 			MaxInputTokens     int64          `json:"max_input_tokens"`
+			MaxInputCamel      int64          `json:"maxInputTokens"`
 			MaxOutputTokens    int64          `json:"max_output_tokens"`
+			MaxOutputCamel     int64          `json:"maxOutputTokens"`
 			SupportedEndpoints []string       `json:"supported_endpoints"`
+			EndpointsCamel     []string       `json:"supportedEndpoints"`
 			Capabilities       map[string]any `json:"capabilities"`
 			InputModalities    []string       `json:"input_modalities"`
+			InputCamel         []string       `json:"inputModalities"`
 			OutputModalities   []string       `json:"output_modalities"`
+			OutputCamel        []string       `json:"outputModalities"`
 		}
 		if json.Unmarshal(item, &record) != nil || strings.EqualFold(record.Visibility, "hide") || (record.Supported != nil && !*record.Supported) || (record.SupportedInAPI != nil && !*record.SupportedInAPI) {
 			continue
@@ -700,11 +711,22 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 		if id == "" {
 			continue
 		}
+		upstreamID := id
+		id = canonicalCodexModelID(id)
+		if _, exists := seen[id]; exists && upstreamID != id {
+			continue
+		}
 		// Preserve the upstream context_length semantics in the public model
 		// listing. max_input_tokens is a separate limit and must not replace it.
 		contextLength := record.ContextLength
 		if contextLength == 0 {
+			contextLength = record.ContextCamel
+		}
+		if contextLength == 0 {
 			contextLength = record.MaxContextWindow
+		}
+		if contextLength == 0 {
+			contextLength = record.MaxContextCamel
 		}
 		if contextLength == 0 {
 			contextLength = record.Context
@@ -712,15 +734,52 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 		if contextLength == 0 {
 			contextLength = record.MaxInputTokens
 		}
+		if contextLength == 0 {
+			contextLength = record.MaxInputCamel
+		}
 		object := record.Object
 		if object == "" {
 			object = "model"
 		}
 		ownedBy := record.OwnedBy
 		if ownedBy == "" {
+			ownedBy = record.OwnedByCamel
+		}
+		if ownedBy == "" {
 			ownedBy = "codex"
 		}
-		seen[id] = credential.ProviderModel{
+		apiFormat := record.APIFormat
+		if apiFormat == "" {
+			apiFormat = record.APIFormatCamel
+		}
+		name := record.Name
+		if name == "" {
+			name = record.DisplayName
+		}
+		if name == "" {
+			name = record.DisplayNameCamel
+		}
+		maxInput := record.MaxInputTokens
+		if maxInput == 0 {
+			maxInput = record.MaxInputCamel
+		}
+		maxOutput := record.MaxOutputTokens
+		if maxOutput == 0 {
+			maxOutput = record.MaxOutputCamel
+		}
+		endpoints := record.SupportedEndpoints
+		if len(endpoints) == 0 {
+			endpoints = record.EndpointsCamel
+		}
+		inputModalities := record.InputModalities
+		if len(inputModalities) == 0 {
+			inputModalities = record.InputCamel
+		}
+		outputModalities := record.OutputModalities
+		if len(outputModalities) == 0 {
+			outputModalities = record.OutputCamel
+		}
+		model := credential.ProviderModel{
 			ID:                 id,
 			Object:             object,
 			Created:            record.Created,
@@ -728,16 +787,18 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 			Permission:         record.Permission,
 			Root:               record.Root,
 			Parent:             record.Parent,
-			APIFormat:          record.APIFormat,
+			APIFormat:          apiFormat,
 			ContextLength:      contextLength,
-			MaxOutputTokens:    record.MaxOutputTokens,
-			SupportedEndpoints: record.SupportedEndpoints,
+			MaxOutputTokens:    maxOutput,
+			SupportedEndpoints: endpoints,
 			Capabilities:       record.Capabilities,
-			InputModalities:    record.InputModalities,
-			OutputModalities:   record.OutputModalities,
-			MaxInputTokens:     record.MaxInputTokens,
-			Name:               record.Name,
+			InputModalities:    inputModalities,
+			OutputModalities:   outputModalities,
+			MaxInputTokens:     maxInput,
+			Name:               name,
 		}
+		enrichCodexModel(&model)
+		seen[id] = model
 	}
 	models := make([]credential.ProviderModel, 0, len(seen))
 	for _, model := range seen {
@@ -745,6 +806,75 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
+}
+
+func canonicalCodexModelID(id string) string {
+	for _, base := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
+		for _, effort := range []string{"low", "medium", "high", "xhigh", "max", "ultra"} {
+			if id == base+"-"+effort {
+				return base
+			}
+		}
+	}
+	return id
+}
+
+func enrichCodexModel(model *credential.ProviderModel) {
+	if model.Root == "" {
+		model.Root = model.ID
+	}
+	if model.Permission == nil {
+		model.Permission = []any{}
+	}
+	if model.APIFormat == "" {
+		model.APIFormat = "responses"
+	}
+	if len(model.SupportedEndpoints) == 0 {
+		model.SupportedEndpoints = []string{"responses"}
+	}
+	if len(model.InputModalities) == 0 {
+		model.InputModalities = []string{"text", "image"}
+	}
+	if len(model.OutputModalities) == 0 {
+		model.OutputModalities = []string{"text"}
+	}
+	if model.MaxInputTokens == 0 {
+		model.MaxInputTokens = model.ContextLength
+	}
+	if strings.HasPrefix(model.ID, "gpt-5.6-") && model.MaxInputTokens == 872000 && model.ContextLength >= model.MaxInputTokens {
+		// Codex reports both the 272K first pricing tier and the larger usable
+		// input budget. Keep these as separate public fields.
+		model.ContextLength = 272000
+	}
+	if strings.HasPrefix(model.ID, "gpt-5.6-") && model.Created == 0 {
+		model.Created = 1787701071
+	}
+	if strings.HasPrefix(model.ID, "gpt-5.6-") && model.MaxOutputTokens == 0 {
+		model.MaxOutputTokens = 128000
+	}
+	if model.Capabilities == nil {
+		efforts := []string{"low", "medium", "high", "xhigh", "max"}
+		if model.ID == "gpt-5.6-sol" || model.ID == "gpt-5.6-terra" {
+			efforts = append(efforts, "ultra")
+		}
+		model.Capabilities = map[string]any{
+			"vision":           true,
+			"tool_calling":     true,
+			"reasoning":        true,
+			"thinking":         true,
+			"supportsThinking": true,
+			"effort_tiers":     efforts,
+		}
+	}
+	words := strings.FieldsFunc(model.ID, func(r rune) bool { return r == '-' || r == '_' })
+	for index := range words {
+		if strings.EqualFold(words[index], "gpt") {
+			words[index] = "GPT"
+		} else if len(words[index]) > 0 {
+			words[index] = strings.ToUpper(words[index][:1]) + words[index][1:]
+		}
+	}
+	model.Name = "cx/" + strings.Join(words, " ")
 }
 
 var _ entities.Upstream = (*CodexAdapter)(nil)
