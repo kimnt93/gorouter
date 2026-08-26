@@ -4624,11 +4624,26 @@
         "internal_api_handlers.UserDetailResponse": {
             "type": "object",
             "properties": {
+                "keys": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ApiKey"
+                    }
+                },
                 "memberships": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Membership"
                     }
+                },
+                "recent": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.RecentEvent"
+                    }
+                },
+                "usage": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"
                 },
                 "user": {
                     "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.User"

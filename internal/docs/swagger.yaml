@@ -988,10 +988,20 @@ definitions:
     type: object
   internal_api_handlers.UserDetailResponse:
     properties:
+      keys:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.ApiKey'
+        type: array
       memberships:
         items:
           $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Membership'
         type: array
+      recent:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.RecentEvent'
+        type: array
+      usage:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary'
       user:
         $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.User'
     type: object

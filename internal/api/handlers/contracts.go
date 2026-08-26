@@ -150,8 +150,8 @@ type UserCreateResponse struct {
 	InitialKey *CreatedAPIKeyResponse `json:"initial_key,omitempty"`
 }
 type UserDetailResponse struct {
-	User        *entities.User        `json:"user"`
-	Memberships []entities.Membership `json:"memberships"`
+	User        *entities.User         `json:"user"`
+	Memberships []entities.Membership  `json:"memberships"`
 	Keys        []entities.ApiKey      `json:"keys"`
 	Usage       *entities.UsageSummary `json:"usage"`
 	Recent      []entities.RecentEvent `json:"recent"`

@@ -173,7 +173,7 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 	if err := backend.Usage.InsertBatch(ctx, []entities.UsageEvent{legacy}); err != nil {
 		t.Fatal(err)
 	}
-	legacyPage, err := backend.Usage.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, Model: "legacy", Limit: 20})
+	legacyPage, err := backend.Usage.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, OrganizationID: organization1.ID, Model: "legacy", Limit: 20})
 	if err != nil || len(legacyPage.Data) != 1 || legacyPage.Data[0].ActorType != entities.ActorLegacy || legacyPage.Data[0].Username != "legacy" || legacyPage.Data[0].UserID != "" {
 		t.Fatalf("legacy attribution=%+v err=%v", legacyPage, err)
 	}
