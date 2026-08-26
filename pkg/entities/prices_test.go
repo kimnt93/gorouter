@@ -22,3 +22,15 @@ func TestZeroPriceIsStillPriced(t *testing.T) {
 		t.Fatalf("zero-priced model must not be reported as unpriced: %+v", got)
 	}
 }
+
+func TestEstimateCostsDerivesCachedAndUncachedTotals(t *testing.T) {
+	p := &Price{InputPerM: 2, OutputPerM: 4, CachedInputPerM: 0.2}
+	estimates := EstimateCosts(p, 1_000_000, 500_000, true)
+	if estimates.WithoutCache.USD != 4 || estimates.WithCache.USD != 2.2 {
+		t.Fatalf("estimates = %+v", estimates)
+	}
+	unsupported := EstimateCosts(p, 1_000_000, 500_000, false)
+	if unsupported.WithCache.USD != unsupported.WithoutCache.USD {
+		t.Fatalf("unsupported cache estimate = %+v", unsupported)
+	}
+}

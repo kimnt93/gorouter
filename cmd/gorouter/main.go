@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,12 +20,15 @@ import (
 	"github.com/kimnt93/gorouter/pkg/config"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
+	"github.com/kimnt93/gorouter/pkg/pricing"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
 	"github.com/kimnt93/gorouter/platform/database"
 	"github.com/kimnt93/gorouter/platform/llm"
+	platformpricing "github.com/kimnt93/gorouter/platform/pricing"
 	"github.com/kimnt93/gorouter/platform/promptcache"
 	"github.com/kimnt93/gorouter/repositories/postgres"
 )
@@ -57,7 +61,21 @@ func main() {
 	credSvc := credential.NewService(postgres.NewCredentialRepo(repoDB), box)
 	keyRepo := postgres.NewApiKeyRepo(repoDB)
 	keySvc := apikey.NewService(keyRepo, postgres.HashSecret, postgres.GenerateSecret)
-	modelSvc := modelroute.NewService(postgres.NewModelRouteRepo(repoDB))
+	modelRepo := postgres.NewModelRouteRepo(repoDB)
+	modelSvc := modelroute.NewService(modelRepo)
+	priceResolver := pricing.NewResolver(modelRepo)
+	if err := priceResolver.Refresh(ctx); err != nil {
+		log.Printf("load cached model prices: %v", err)
+	}
+	modelSvc.SetPriceCache(priceResolver)
+	if cfg.Pricing.Enabled {
+		priceImporter := &platformpricing.HTTPImporter{
+			Client: &http.Client{Timeout: cfg.Pricing.HTTPTimeout},
+			URL:    cfg.Pricing.CatalogURL, Source: platformpricing.SourceOpenRouter,
+		}
+		priceSync := pricing.NewCatalogService(modelRepo, priceImporter, platformpricing.SourceOpenRouter, priceResolver)
+		priceSync.Start(ctx, cfg.Pricing.SyncInterval, func(err error) { log.Printf("sync OpenRouter catalog: %v", err) })
+	}
 	pending := usage.NewPending()
 	usageSvc := usage.NewService(postgres.NewUsageRepo(repoDB), 2048, pending)
 	defer usageSvc.Close()
@@ -102,15 +120,25 @@ func main() {
 	anthropic := &llm.AnthropicAdapter{HTTP: client, OAuthClientID: cfg.OAuthClientID}
 	refresher := &llm.AnthropicOAuthRefresher{HTTP: client, TokenURL: cfg.OAuthTokenURL, ClientID: cfg.OAuthClientID, Persister: credSvc}
 	anthropic.Refresh = refresher.Refresh
+	codex := &llm.CodexAdapter{HTTP: client}
+	codexRefresher := &llm.CodexOAuthRefresher{HTTP: client, TokenURL: cfg.CodexOAuthTokenURL, ClientID: cfg.CodexOAuthClientID, Persister: credSvc}
+	codex.Refresh = codexRefresher.Refresh
+	oauthSvc := oauthpkg.New(client, credSvc, oauthpkg.Config{
+		ClaudeClientID: cfg.OAuthClientID, ClaudeTokenURL: cfg.OAuthTokenURL,
+		CodexClientID: cfg.CodexOAuthClientID, CodexTokenURL: cfg.CodexOAuthTokenURL,
+	})
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
-		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic,
+		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex,
 		Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc,
+		Pricing: priceResolver,
 	}
 	app := routes.New(routes.Dependencies{
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
-		OpenAI: openai, Anthropic: anthropic, BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
+		OpenAI: openai, Anthropic: anthropic, Codex: codex, OAuth: oauthSvc,
+		Pricing:   priceResolver,
+		BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
 	})
 
 	go func() {

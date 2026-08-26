@@ -10,6 +10,14 @@ POST /v1/chat/completions
 
 The API uses OpenAI-compatible JSON and Bearer API-key authentication.
 
+For Codex subscription routes, public model IDs use `cx/<model>`. Optional reasoning controls are supplied separately:
+
+```json
+"reasoning": {"effort": "high", "summary": "auto"}
+```
+
+Reasoning settings must not be encoded into the model name.
+
 ## Model List
 
 Return only enabled models included in the caller's API-key allowlist. Never expose unauthorized models.

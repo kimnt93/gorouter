@@ -55,16 +55,26 @@ func NewRedis(rdb redis.UniversalClient, policy Policy) (*Redis, error) {
 }
 
 func (r *Redis) Reserve(ctx context.Context, keyID string, limit, durableSpent, estimated float64, now time.Time) (*Reservation, error) {
+	return r.ReserveForPeriod(ctx, keyID, limit, durableSpent, estimated, "month", now)
+}
+
+func (r *Redis) ReserveForPeriod(ctx context.Context, keyID string, limit, durableSpent, estimated float64, period string, now time.Time) (*Reservation, error) {
 	if keyID == "" || limit < 0 || durableSpent < 0 || estimated < 0 {
 		return nil, errors.New("invalid quota reservation")
+	}
+	_, end, window, err := Window(period, now)
+	if err != nil {
+		return nil, err
+	}
+	if period == "none" {
+		return &Reservation{KeyID: keyID, Window: window, Period: period, Bypassed: true}, nil
 	}
 	id, err := reservationID()
 	if err != nil {
 		return nil, err
 	}
-	month := now.UTC().Format("2006-01")
-	res := &Reservation{ID: id, KeyID: keyID, Month: month, Estimated: estimated}
-	ok, err := reserveScript.Run(ctx, r.rdb, []string{quotaKey(keyID, month)}, decimal(estimated), decimal(limit), id, monthEnd(now).Unix(), decimal(durableSpent)).Int()
+	res := &Reservation{ID: id, KeyID: keyID, Month: window, Window: window, Period: period, Estimated: estimated}
+	ok, err := reserveScript.Run(ctx, r.rdb, []string{quotaKey(keyID, window)}, decimal(estimated), decimal(limit), id, end.Unix(), decimal(durableSpent)).Int()
 	if err != nil {
 		if r.policy == PolicyOpen {
 			res.Bypassed = true
@@ -85,7 +95,7 @@ func (r *Redis) Settle(ctx context.Context, res *Reservation, actual float64) er
 	if actual < 0 {
 		return errors.New("actual cost cannot be negative")
 	}
-	ok, err := settleScript.Run(ctx, r.rdb, []string{quotaKey(res.KeyID, res.Month)}, res.ID, decimal(actual)).Int()
+	ok, err := settleScript.Run(ctx, r.rdb, []string{quotaKey(res.KeyID, reservationWindow(res))}, res.ID, decimal(actual)).Int()
 	return r.mutationResult(ok, err)
 }
 
@@ -93,7 +103,7 @@ func (r *Redis) Release(ctx context.Context, res *Reservation) error {
 	if res == nil || res.Bypassed {
 		return nil
 	}
-	ok, err := releaseScript.Run(ctx, r.rdb, []string{quotaKey(res.KeyID, res.Month)}, res.ID).Int()
+	ok, err := releaseScript.Run(ctx, r.rdb, []string{quotaKey(res.KeyID, reservationWindow(res))}, res.ID).Int()
 	return r.mutationResult(ok, err)
 }
 
@@ -127,7 +137,13 @@ func (r *Redis) mutationResult(ok int, err error) error {
 }
 
 func quotaKey(keyID, month string) string { return quotaPrefix + keyID + ":" + month }
-func decimal(v float64) string            { return strconv.FormatFloat(v, 'f', -1, 64) }
+func reservationWindow(res *Reservation) string {
+	if res.Window != "" {
+		return res.Window
+	}
+	return res.Month
+}
+func decimal(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 
 func reservationID() (string, error) {
 	var b [16]byte
@@ -137,9 +153,5 @@ func reservationID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-func monthEnd(now time.Time) time.Time {
-	u := now.UTC()
-	return time.Date(u.Year(), u.Month()+1, 1, 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
-}
-
 var _ Coordinator = (*Redis)(nil)
+var _ PeriodCoordinator = (*Redis)(nil)

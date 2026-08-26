@@ -14,7 +14,9 @@ var (
 	ErrNameRequired   = errors.New("API key name is required")
 	ErrInvalidModel   = errors.New("model names must not be empty")
 	ErrInvalidScope   = errors.New("invalid API key scope")
-	ErrInvalidQuota   = errors.New("monthly quota must be non-negative")
+	ErrInvalidQuota   = errors.New("quota must be non-negative")
+	ErrInvalidPeriod  = errors.New("quota period must be none, day, week, or month")
+	ErrQuotaRequired  = errors.New("quota is required for day, week, or month periods")
 	ErrInvalidRPM     = errors.New("RPM limit must be greater than zero")
 )
 
@@ -29,6 +31,15 @@ type Repository interface {
 	PatchForTenant(ctx context.Context, tenantID, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, rpm **int) error
 	Delete(ctx context.Context, id string) error
 	DeleteForTenant(ctx context.Context, tenantID, id string) error
+}
+
+// quotaRepository is implemented by stores supporting configurable quota
+// windows. Keeping it separate lets older repository implementations continue
+// to work with the legacy monthly quota methods.
+type quotaRepository interface {
+	CreateWithQuota(ctx context.Context, tenantID, name string, models, scopes []string, quota *float64, period string, rpm *int) (*entities.ApiKey, error)
+	PatchQuota(ctx context.Context, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error
+	PatchQuotaForTenant(ctx context.Context, tenantID, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error
 }
 
 type Service struct {
@@ -49,6 +60,8 @@ type CreateInput struct {
 	Models          []string
 	Scopes          []string
 	MonthlyQuotaUSD *float64
+	QuotaUSD        *float64
+	QuotaPeriod     string
 	RPM             *int
 }
 
@@ -68,10 +81,17 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	if in.Scopes, err = normalizeScopes(in.Scopes); err != nil {
 		return nil, err
 	}
-	if err := validateLimits(in.MonthlyQuotaUSD, in.RPM); err != nil {
+	quota, period, err := normalizeQuota(in.QuotaUSD, in.MonthlyQuotaUSD, in.QuotaPeriod)
+	if err != nil {
 		return nil, err
 	}
-	return s.repo.Create(ctx, in.TenantID, in.Name, in.Models, in.Scopes, in.MonthlyQuotaUSD, in.RPM)
+	if err := validateLimits(quota, in.RPM); err != nil {
+		return nil, err
+	}
+	if repo, ok := s.repo.(quotaRepository); ok {
+		return repo.CreateWithQuota(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, period, in.RPM)
+	}
+	return s.repo.Create(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, in.RPM)
 }
 
 func (s *Service) CreateForTenant(ctx context.Context, tenantID string, in CreateInput) (*entities.ApiKey, error) {
@@ -123,6 +143,30 @@ func (s *Service) PatchForTenant(ctx context.Context, tenantID, id string, enabl
 	return s.repo.PatchForTenant(ctx, tenantID, id, enabled, models, scopes, quota, rpm)
 }
 
+func (s *Service) PatchQuota(ctx context.Context, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error {
+	if err := validateQuotaPatch(models, scopes, quota, period, rpm); err != nil {
+		return err
+	}
+	if repo, ok := s.repo.(quotaRepository); ok {
+		return repo.PatchQuota(ctx, id, enabled, models, scopes, quota, period, rpm)
+	}
+	return s.repo.Patch(ctx, id, enabled, models, scopes, quota, rpm)
+}
+
+func (s *Service) PatchQuotaForTenant(ctx context.Context, tenantID, id string, enabled *bool, models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return ErrTenantRequired
+	}
+	if err := validateQuotaPatch(models, scopes, quota, period, rpm); err != nil {
+		return err
+	}
+	if repo, ok := s.repo.(quotaRepository); ok {
+		return repo.PatchQuotaForTenant(ctx, tenantID, id, enabled, models, scopes, quota, period, rpm)
+	}
+	return s.repo.PatchForTenant(ctx, tenantID, id, enabled, models, scopes, quota, rpm)
+}
+
 func (s *Service) Delete(ctx context.Context, id string) error { return s.repo.Delete(ctx, id) }
 
 func (s *Service) DeleteForTenant(ctx context.Context, tenantID, id string) error {
@@ -134,6 +178,10 @@ func (s *Service) DeleteForTenant(ctx context.Context, tenantID, id string) erro
 }
 
 func validatePatch(models *[]string, scopes *[]string, quota **float64, rpm **int) error {
+	return validateQuotaPatch(models, scopes, quota, nil, rpm)
+}
+
+func validateQuotaPatch(models *[]string, scopes *[]string, quota **float64, period *string, rpm **int) error {
 	var err error
 	if models != nil {
 		if *models, err = normalizeModels(*models); err != nil {
@@ -153,7 +201,49 @@ func validatePatch(models *[]string, scopes *[]string, quota **float64, rpm **in
 	if rpm != nil {
 		rpmValue = *rpm
 	}
+	if period != nil {
+		normalized, err := normalizePeriod(*period, quotaValue != nil)
+		if err != nil {
+			return err
+		}
+		*period = normalized
+	}
 	return validateLimits(quotaValue, rpmValue)
+}
+
+func normalizeQuota(quota, legacyMonthly *float64, period string) (*float64, string, error) {
+	if quota == nil {
+		quota = legacyMonthly
+		if quota != nil && strings.TrimSpace(period) == "" {
+			period = entities.QuotaPeriodMonth
+		}
+	}
+	normalized, err := normalizePeriod(period, quota != nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if normalized == entities.QuotaPeriodNone {
+		quota = nil
+	} else if quota == nil {
+		return nil, "", ErrQuotaRequired
+	}
+	return quota, normalized, nil
+}
+
+func normalizePeriod(period string, hasQuota bool) (string, error) {
+	period = strings.ToLower(strings.TrimSpace(period))
+	if period == "" {
+		if hasQuota {
+			return entities.QuotaPeriodMonth, nil
+		}
+		return entities.QuotaPeriodNone, nil
+	}
+	switch period {
+	case entities.QuotaPeriodNone, entities.QuotaPeriodDay, entities.QuotaPeriodWeek, entities.QuotaPeriodMonth:
+		return period, nil
+	default:
+		return "", ErrInvalidPeriod
+	}
 }
 
 func normalizeModels(values []string) ([]string, error) {

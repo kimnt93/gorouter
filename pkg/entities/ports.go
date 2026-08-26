@@ -18,13 +18,16 @@ type UpstreamResult struct {
 }
 
 type CredentialRuntime struct {
-	ID          string
-	Provider    string
-	Kind        string
-	BaseURL     string
-	APIKey      string
-	OAuthAccess string
-	OAuthRefreh string
+	ID           string
+	Provider     string
+	Kind         string
+	BaseURL      string
+	APIKey       string
+	OAuthAccess  string
+	OAuthRefreh  string
+	OAuthIDToken string
+	OAuthAccount string
+	OAuthMeta    OAuthMetadata
 }
 
 type Upstream interface {
@@ -71,8 +74,16 @@ type ModelRepository interface {
 	ListPrices(ctx context.Context) (map[string]Price, error)
 }
 
+// CatalogPriceRepository is separate from ModelRepository because imported
+// prices are fallback data; manually configured model prices take priority.
+type CatalogPriceRepository interface {
+	ReplaceCatalogPrices(ctx context.Context, source string, prices []CatalogPrice) error
+	ListCatalogPrices(ctx context.Context) ([]CatalogPrice, error)
+}
+
 type UsageRepository interface {
 	MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error)
+	SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error)
 	Summary(ctx context.Context, since time.Time) (*UsageSummary, error)
 	Recent(ctx context.Context, limit int) ([]RecentEvent, error)
 	SummaryForTenant(ctx context.Context, tenantID string, since time.Time) (*UsageSummary, error)

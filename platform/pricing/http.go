@@ -10,18 +10,19 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
 const (
-	SourceOpenRouter = "openrouter"
-	SourceLiteLLM    = "litellm"
+	SourceOpenRouter         = "openrouter"
+	SourceLiteLLM            = "litellm"
+	DefaultOpenRouterCatalog = "https://openrouter.ai/api/frontend/v1/catalog/models"
 )
 
-// HTTPImporter reads public model-price documents without coupling request
-// serving to an external catalog. It implements entities.PriceImporter and is
-// intended to be invoked by pkg/pricing.Service on a background schedule.
+// HTTPImporter fetches a public catalog. OpenRouter's frontend endpoint does
+// not require an API key and no application credential is sent to it.
 type HTTPImporter struct {
 	Client *http.Client
 	URL    string
@@ -56,8 +57,20 @@ type openRouterDocument struct {
 }
 
 type openRouterModel struct {
-	ID      string            `json:"id"`
-	Pricing openRouterPricing `json:"pricing"`
+	Slug          string             `json:"slug"`
+	Name          string             `json:"name"`
+	ContextLength int                `json:"context_length"`
+	Endpoint      openRouterEndpoint `json:"endpoint"`
+	ID            string             `json:"id"`      // /api/v1/models compatibility
+	Pricing       openRouterPricing  `json:"pricing"` // /api/v1/models compatibility
+}
+
+type openRouterEndpoint struct {
+	Variant          string            `json:"variant"`
+	ModelVariantSlug string            `json:"model_variant_slug"`
+	ProviderName     string            `json:"provider_name"`
+	ContextLength    int               `json:"context_length"`
+	Pricing          openRouterPricing `json:"pricing"`
 }
 
 type openRouterPricing struct {
@@ -76,7 +89,98 @@ type liteLLMPrice struct {
 	CacheCreate decimal `json:"cache_creation_input_token_cost"`
 }
 
+// ImportCatalog returns one compact record per canonical model. When the
+// frontend response contains several variants, standard always wins. If no
+// standard row exists, the first usable variant is retained.
+func (i *HTTPImporter) ImportCatalog(ctx context.Context) ([]entities.CatalogPrice, error) {
+	document, err := i.fetch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	switch strings.ToLower(i.Source) {
+	case SourceOpenRouter:
+		var parsed openRouterDocument
+		if err := json.Unmarshal(document, &parsed); err != nil {
+			return nil, fmt.Errorf("decode OpenRouter prices: %w", err)
+		}
+		type selected struct {
+			priority int
+			entry    entities.CatalogPrice
+		}
+		byModel := make(map[string]selected, len(parsed.Data))
+		for _, model := range parsed.Data {
+			slug := strings.TrimSpace(model.Slug)
+			pricing := model.Endpoint.Pricing
+			provider := model.Endpoint.ProviderName
+			contextLength := model.Endpoint.ContextLength
+			variant := model.Endpoint.Variant
+			if slug == "" {
+				slug, pricing = strings.TrimSpace(model.ID), model.Pricing
+			}
+			if slug == "" {
+				continue
+			}
+			priority := 1
+			if variant == "standard" || model.Endpoint.ModelVariantSlug == slug {
+				priority = 2
+			}
+			if old, exists := byModel[slug]; exists && old.priority >= priority {
+				continue
+			}
+			read, write := pricing.CacheRead, pricing.CacheWrite
+			if read == 0 {
+				read = pricing.LegacyRead
+			}
+			if write == 0 {
+				write = pricing.LegacyWrite
+			}
+			if contextLength == 0 {
+				contextLength = model.ContextLength
+			}
+			byModel[slug] = selected{priority: priority, entry: entities.CatalogPrice{
+				Model: slug, Name: model.Name, Provider: provider, ContextLength: contextLength,
+				CacheSupported: read > 0 || write > 0,
+				Price:          perMillion(pricing.Prompt, pricing.Completion, read, write),
+				Source:         SourceOpenRouter, UpdatedAt: now,
+			}}
+		}
+		out := make([]entities.CatalogPrice, 0, len(byModel))
+		for _, item := range byModel {
+			out = append(out, item.entry)
+		}
+		return out, nil
+	case SourceLiteLLM:
+		var parsed map[string]liteLLMPrice
+		if err := json.Unmarshal(document, &parsed); err != nil {
+			return nil, fmt.Errorf("decode LiteLLM prices: %w", err)
+		}
+		out := make([]entities.CatalogPrice, 0, len(parsed))
+		for model, price := range parsed {
+			if model != "" {
+				out = append(out, entities.CatalogPrice{Model: model, Price: perMillion(price.Input, price.Output, price.CacheRead, price.CacheCreate), CacheSupported: price.CacheRead > 0 || price.CacheCreate > 0, Source: SourceLiteLLM, UpdatedAt: now})
+			}
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("unsupported price source %q", i.Source)
+	}
+}
+
+// Import keeps the original rate-only interface available for existing users.
 func (i *HTTPImporter) Import(ctx context.Context) (map[string]entities.Price, error) {
+	entries, err := i.ImportCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prices := make(map[string]entities.Price, len(entries))
+	for _, entry := range entries {
+		prices[entry.Model] = entry.Price
+	}
+	return prices, nil
+}
+
+func (i *HTTPImporter) fetch(ctx context.Context) ([]byte, error) {
 	if strings.TrimSpace(i.URL) == "" {
 		return nil, errors.New("price import URL is required")
 	}
@@ -84,6 +188,7 @@ func (i *HTTPImporter) Import(ctx context.Context) (map[string]entities.Price, e
 	if err != nil {
 		return nil, err
 	}
+	request.Header.Set("Accept", "application/json")
 	client := i.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -97,44 +202,11 @@ func (i *HTTPImporter) Import(ctx context.Context) (map[string]entities.Price, e
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		return nil, fmt.Errorf("price catalog returned HTTP %d", response.StatusCode)
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 32<<20))
-	switch strings.ToLower(i.Source) {
-	case SourceOpenRouter:
-		var document openRouterDocument
-		if err := decoder.Decode(&document); err != nil {
-			return nil, fmt.Errorf("decode OpenRouter prices: %w", err)
-		}
-		prices := make(map[string]entities.Price, len(document.Data))
-		for _, model := range document.Data {
-			if model.ID == "" {
-				continue
-			}
-			read := model.Pricing.CacheRead
-			if read == 0 {
-				read = model.Pricing.LegacyRead
-			}
-			write := model.Pricing.CacheWrite
-			if write == 0 {
-				write = model.Pricing.LegacyWrite
-			}
-			prices[model.ID] = perMillion(model.Pricing.Prompt, model.Pricing.Completion, read, write)
-		}
-		return prices, nil
-	case SourceLiteLLM:
-		var document map[string]liteLLMPrice
-		if err := decoder.Decode(&document); err != nil {
-			return nil, fmt.Errorf("decode LiteLLM prices: %w", err)
-		}
-		prices := make(map[string]entities.Price, len(document))
-		for model, price := range document {
-			if model != "" {
-				prices[model] = perMillion(price.Input, price.Output, price.CacheRead, price.CacheCreate)
-			}
-		}
-		return prices, nil
-	default:
-		return nil, fmt.Errorf("unsupported price source %q", i.Source)
+	body, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read price catalog: %w", err)
 	}
+	return body, nil
 }
 
 func perMillion(input, output, cacheRead, cacheWrite decimal) entities.Price {
@@ -142,4 +214,7 @@ func perMillion(input, output, cacheRead, cacheWrite decimal) entities.Price {
 		CachedInputPerM: float64(cacheRead) * 1e6, CacheWritePerM: float64(cacheWrite) * 1e6}
 }
 
-var _ entities.PriceImporter = (*HTTPImporter)(nil)
+var (
+	_ entities.PriceImporter   = (*HTTPImporter)(nil)
+	_ entities.CatalogImporter = (*HTTPImporter)(nil)
+)

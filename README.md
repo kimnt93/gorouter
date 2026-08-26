@@ -2,7 +2,7 @@
 
 A small, fast multi-tenant LLM gateway in Go. Connect provider credentials (API keys or
 OAuth), define models routed across those credentials (priority failover or round robin),
-issue per-tenant API keys with model allowlists and monthly USD quotas, and get cost
+issue per-tenant API keys with model allowlists and configurable USD quota periods, and get cost
 tracking plus a multi-tenant prompt cache — all exposed through an OpenAI-compatible API.
 
 Built for the "only important features" case: no agents, combos, or CLI translation.
@@ -21,14 +21,27 @@ for response models when a struct can represent the response shape.
 
 - **Multi-tenant**: tenants → API keys → model allowlists (fail-closed: a key with no models can call nothing).
 - **Scoped login**: the setup master key has every permission; API keys can log into the console with explicit scopes such as `usage:read`, `keys:manage`, `credentials:manage`, `models:manage`, and `cache:purge`.
-- **Credentials**: `api_key` or `oauth` kind; providers `openai-compatible` and `anthropic`.
-  Secrets are sealed with AES-256-GCM before they touch Postgres.
-  Anthropic OAuth credentials auto-refresh on 401 and persist rotated tokens.
+- **Provider dashboard**: expandable cards at `/ui/providers`, separated into OAuth
+  subscriptions and API-key providers. Connect multiple accounts, test health, discover and
+  import models, or run a direct streaming chat test without navigating to another page.
+- **OAuth subscriptions**: guided copy/paste PKCE flows for Claude Code and OpenAI Codex.
+  Flows are session-bound, single-use, and expire after 10 minutes. Access, refresh, ID,
+  account, and provider metadata are encrypted before they touch PostgreSQL; refresh-token
+  rotation is persisted.
+- **API-key providers**: presets for OpenAI, Anthropic, Gemini, Groq, OpenRouter,
+  OpenCode Zen, xAI, DeepSeek, Moonshot, Qwen, and custom OpenAI-compatible endpoints.
+- **Provider model IDs**: discovered models are imported with a provider prefix. Claude Code
+  uses `cc/<model>` and Codex uses `cx/<model>`.
 - **Routing**: per-model strategy — `priority` (failover, higher priority first) or
   `round_robin`. Automatic retry across candidates on 429/5xx/transport errors with a
   simple health cooldown (3 consecutive failures → 60s cooldown).
-- **Quota & cost**: monthly USD quota per key enforced pre-flight (estimate reserved,
-  actuals settled after each request). Prices are per-model (input/output/cache-read/cache-write per 1M tokens).
+- **Quota & cost**: each derived key selects imported models and can use a UTC daily,
+  ISO-weekly, UTC monthly, or no-limit USD quota. Estimates are reserved in Redis before a
+  request and settled against actual usage afterward. Prices are per-model
+  (input/output/cache-read/cache-write per 1M tokens).
+- **OpenRouter pricing**: a background job fetches the public catalog immediately and hourly,
+  stores one compact row per canonical model, and atomically refreshes an in-memory resolver.
+  Cached and non-cached estimates are derived from the stored rates.
 - **Prompt cache** (multi-tenant): exact-match cache of deterministic requests
   (temperature 0 / top_p 1 / no tools), scoped per API key by default (`CACHE_SCOPE=key|tenant|global`).
   Cache hits cost $0 and are tagged in usage logs. Streaming responses are cached as
@@ -80,6 +93,7 @@ curl http://localhost:8090/v1/chat/completions \
 | `DB_USER` | required | Database user. |
 | `DB_PASSWORD` | required | Database password. |
 | `DB_NAME` | required | Database name. |
+| `DB_SSLMODE` | `disable` | PostgreSQL TLS mode. Use `require` or a verification mode for a TLS-enabled remote database. |
 | `REDIS_HOST` | empty | Redis host; Compose uses the internal service name. Empty enables the development memory fallback. |
 | `REDIS_PORT` | `6379` | Redis port. |
 | `REDIS_USER` | empty | Redis ACL user. |
@@ -97,7 +111,25 @@ curl http://localhost:8090/v1/chat/completions \
 | `REQUEST_LIMIT_MB` | `20` | max request body |
 | `ANTHROPIC_OAUTH_CLIENT_ID` | built-in client ID | OAuth refresh client ID. |
 | `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint | Optional compatible/test override. |
+| `CODEX_OAUTH_CLIENT_ID` | built-in client ID | Codex browser OAuth and refresh client ID. |
+| `CODEX_OAUTH_TOKEN_URL` | OpenAI token endpoint | Optional compatible/test override. |
+| `OPENROUTER_CATALOG_ENABLED` | `true` | Enables startup and periodic OpenRouter catalog synchronization. |
+| `OPENROUTER_CATALOG_URL` | OpenRouter frontend catalog | Optional HTTP(S) catalog override. |
+| `OPENROUTER_SYNC_INTERVAL` | `1h` | Positive synchronization interval. |
+| `OPENROUTER_HTTP_TIMEOUT` | `30s` | Positive catalog request timeout. |
 | `ROUTER_PORT` | `8090` | Public application port, bound on all host interfaces. |
+
+If PostgreSQL reports `password authentication failed` after `DB_PASSWORD` was changed,
+the existing `postgres_data` volume still contains the password used when it was first
+initialized. Either restore that password in `.env`, or, if the local database can be
+discarded, recreate the stack and its volumes:
+
+```bash
+docker compose --env-file .env -f docker-compose.postgres.yml down -v
+make compose-postgres
+```
+
+The `down -v` command permanently removes the local PostgreSQL and Redis data volumes.
 
 ## PostgreSQL vs ClickHouse
 
@@ -143,6 +175,36 @@ The administration API supports tenant, credential, API-key, model/route, price,
 cache, and credential-connectivity operations under `/admin`. Credential secrets are
 accepted only on create/update and never returned. The embedded HTMX console exposes the
 same scope-aware management flows without placing management secrets in JavaScript.
+
+Provider connection endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /admin/providers` | Safe static provider catalog. |
+| `POST /admin/oauth/:provider/start` | Start a Claude Code or Codex browser flow. |
+| `POST /admin/oauth/:provider/complete` | Exchange a pasted callback and create the encrypted credential. |
+| `POST /admin/credentials/:id/test` | Probe credential health. |
+| `GET /admin/credentials/:id/models` | Discover live upstream models. |
+| `POST /admin/credentials/:id/models/import` | Import selected models and merge the credential route. |
+| `POST /admin/credentials/:id/chat-tests` | Stream a direct provider chat test as SSE. |
+| `GET /admin/pricing/catalog` | Search/paginate synchronized catalog prices. |
+| `GET /admin/pricing/estimate` | Derive cached and non-cached estimates for token counts. |
+
+The Codex gateway accepts reasoning separately from the model name:
+
+```json
+{
+  "model": "cx/gpt-5.5",
+  "reasoning": {"effort": "high", "summary": "auto"},
+  "messages": [{"role": "user", "content": "hello"}]
+}
+```
+
+Do not add reasoning suffixes to `cx/` model IDs. The Codex adapter translates ordinary
+OpenAI function declarations, tool-call history/results, named tool choice, streamed argument
+events, and non-streaming function-call output. Provider-native web/search/computer/custom/MCP
+tool items, image/file input translation, and reasoning-summary events are outside the current
+compatibility contract. A real subscription OAuth smoke test remains deferred.
 
 ## Security notes
 

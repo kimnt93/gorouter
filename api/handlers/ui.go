@@ -17,6 +17,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
@@ -58,6 +59,15 @@ type pageData struct {
 	Summary         *entities.UsageSummary
 	Recent          []entities.RecentEvent
 	CreatedSecret   string
+	OAuthProviders  []providerCardData
+	APIKeyProviders []providerCardData
+}
+
+type providerCardData struct {
+	Definition      providerpkg.Definition
+	Credentials     []entities.Credential
+	Tenants         []entities.Tenant
+	CanManageGlobal bool
 }
 
 func (u *UI) page(c fiber.Ctx, title string) pageData {
@@ -102,11 +112,19 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, "quota must be a non-negative number")
 	}
+	quotaPeriod := strings.ToLower(strings.TrimSpace(c.FormValue("quota_period")))
+	if quotaPeriod == "" {
+		quotaPeriod = entities.QuotaPeriodNone
+	}
 	rpm, err := optionalInt(c.FormValue("rpm"))
 	if err != nil {
 		return presenter.BadRequest(c, "RPM must be a positive integer")
 	}
-	in := apikey.CreateInput{TenantID: c.FormValue("tenant_id"), Name: c.FormValue("name"), Models: splitCSV(c.FormValue("models")), Scopes: splitCSV(c.FormValue("scopes")), MonthlyQuotaUSD: quota, RPM: rpm}
+	models := formValues(c, "models")
+	if len(models) == 0 {
+		return presenter.BadRequest(c, "select at least one model")
+	}
+	in := apikey.CreateInput{TenantID: c.FormValue("tenant_id"), Name: c.FormValue("name"), Models: models, Scopes: splitCSV(c.FormValue("scopes")), QuotaUSD: quota, QuotaPeriod: quotaPeriod, RPM: rpm}
 	var key *entities.ApiKey
 	if sess != nil && !sess.IsMaster() {
 		if !scopesAllowedBySession(sess, in.Scopes) {
@@ -171,9 +189,41 @@ func (u *UI) loadKeys(c fiber.Ctx, created string) (pageData, error) {
 		return data, err
 	}
 	data.Tenants, err = u.Tenants.List(c.Context())
+	if err != nil {
+		return data, err
+	}
+	data.Models, err = u.Models.List(c.Context())
+	if err != nil {
+		return data, err
+	}
 	if sess != nil && !sess.IsMaster() {
 		data.Tenants = filterTenants(data.Tenants, sess.TenantID)
+		credentials, credentialsErr := u.Credentials.List(c.Context())
+		if credentialsErr != nil {
+			return data, credentialsErr
+		}
+		allowedCredentials := map[string]bool{}
+		for _, item := range filterCredentials(credentials, sess.TenantID) {
+			allowedCredentials[item.ID] = true
+		}
+		models := data.Models[:0]
+		for _, model := range data.Models {
+			for _, route := range model.Routes {
+				if route.Enabled && allowedCredentials[route.CredentialID] {
+					models = append(models, model)
+					break
+				}
+			}
+		}
+		data.Models = models
 	}
+	enabledModels := data.Models[:0]
+	for _, model := range data.Models {
+		if model.Enabled {
+			enabledModels = append(enabledModels, model)
+		}
+	}
+	data.Models = enabledModels
 	data.CreatedSecret = created
 	return data, err
 }
@@ -186,6 +236,51 @@ func (u *UI) CredentialsPage(c fiber.Ctx) error {
 	return renderTemplate(c, "credentials.html", data)
 }
 
+func (u *UI) ProvidersPage(c fiber.Ctx) error {
+	data, err := u.loadCredentials(c)
+	if err != nil {
+		return presenter.ServerError(c, "failed to load providers")
+	}
+	data.Title = "Providers"
+	byProvider := make(map[string][]entities.Credential)
+	for _, item := range data.Credentials {
+		byProvider[item.Provider] = append(byProvider[item.Provider], item)
+	}
+	for _, definition := range providerpkg.Catalog() {
+		card := providerCardData{Definition: definition, Credentials: byProvider[definition.ID], Tenants: data.Tenants, CanManageGlobal: data.CanManageGlobal}
+		if definition.Auth == providerpkg.AuthOAuth {
+			data.OAuthProviders = append(data.OAuthProviders, card)
+		} else {
+			data.APIKeyProviders = append(data.APIKeyProviders, card)
+		}
+	}
+	return renderTemplate(c, "providers.html", data)
+}
+
+func (u *UI) ProviderConnect(c fiber.Ctx) error {
+	definition, ok := providerpkg.Lookup(c.Params("provider"))
+	if !ok || definition.Auth != providerpkg.AuthAPIKey {
+		return presenter.BadRequest(c, "unknown API-key provider")
+	}
+	sess := SessionFrom(c)
+	owner := optionalString(c.FormValue("owner_tenant_id"))
+	if sess != nil && !sess.IsMaster() {
+		owner = &sess.TenantID
+	}
+	name := strings.TrimSpace(c.FormValue("name"))
+	if name == "" {
+		name = definition.Name
+	}
+	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{
+		Name: name, Provider: definition.ID, Kind: entities.KindAPIKey,
+		BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OwnerTenant: owner,
+	})
+	if err != nil {
+		return presenter.BadRequest(c, err.Error())
+	}
+	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
+}
+
 func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	owner := optionalString(c.FormValue("owner_tenant_id"))
@@ -196,7 +291,7 @@ func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
+	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
 
 func (u *UI) CredentialDelete(c fiber.Ctx) error {
@@ -210,7 +305,7 @@ func (u *UI) CredentialDelete(c fiber.Ctx) error {
 		}
 		return presenter.ServerError(c, "failed to delete credential")
 	}
-	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
+	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
 
 func (u *UI) CredentialToggle(c fiber.Ctx) error {
@@ -242,7 +337,7 @@ func (u *UI) CredentialToggle(c fiber.Ctx) error {
 	}); err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return u.redirectOrRefresh(c, "/ui/credentials", u.CredentialsPage)
+	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
 
 func (u *UI) loadCredentials(c fiber.Ctx) (pageData, error) {
@@ -318,7 +413,7 @@ func (u *UI) ModelDelete(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can change global model routes")
 	}
-	if err := u.Models.Delete(c.Context(), c.Params("name")); err != nil {
+	if err := u.Models.Delete(c.Context(), decodedPathParam(c, "name")); err != nil {
 		if errors.Is(err, entities.ErrNotFound) {
 			return presenter.NotFound(c, "model not found")
 		}
@@ -358,7 +453,7 @@ func (u *UI) ModelPriceSet(c fiber.Ctx) error {
 		return presenter.BadRequest(c, "cache-write price must be non-negative")
 	}
 	price := entities.Price{InputPerM: input, OutputPerM: output, CachedInputPerM: cacheRead, CacheWritePerM: cacheWrite}
-	if err := u.Models.SetPrice(c.Context(), c.Params("name"), price); err != nil {
+	if err := u.Models.SetPrice(c.Context(), decodedPathParam(c, "name"), price); err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
 	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
@@ -448,6 +543,21 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func formValues(c fiber.Ctx, key string) []string {
+	raw := c.Request().PostArgs().PeekMulti(key)
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		value := strings.TrimSpace(string(item))
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	if len(values) == 1 && strings.Contains(values[0], ",") {
+		return splitCSV(values[0])
+	}
+	return values
 }
 
 func optionalString(value string) *string {

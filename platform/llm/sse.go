@@ -33,7 +33,7 @@ func ScanSSE(r io.Reader, fn func(SSEEvent) error) error {
 		return fn(SSEEvent{Event: ev, Data: payloadCopy})
 	}
 	for sc.Scan() {
-		line := sc.Text()
+		line := strings.TrimSuffix(sc.Text(), "\r")
 		switch {
 		case line == "":
 			if err := flush(); err != nil {

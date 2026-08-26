@@ -117,3 +117,33 @@ func TestRedisOutagePolicies(t *testing.T) {
 		t.Fatalf("open mode must explicitly bypass: reservation=%+v err=%v", r, err)
 	}
 }
+
+func TestWindowUTCBoundaries(t *testing.T) {
+	now := time.Date(2026, time.August, 26, 16, 30, 0, 0, time.FixedZone("ICT", 7*60*60))
+	tests := []struct {
+		period, start, end, suffix string
+	}{
+		{"day", "2026-08-26T00:00:00Z", "2026-08-27T00:00:00Z", "2026-08-26"},
+		{"week", "2026-08-24T00:00:00Z", "2026-08-31T00:00:00Z", "2026-W35"},
+		{"month", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z", "2026-08"},
+	}
+	for _, tt := range tests {
+		start, end, suffix, err := Window(tt.period, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if start.Format(time.RFC3339) != tt.start || end.Format(time.RFC3339) != tt.end || suffix != tt.suffix {
+			t.Fatalf("%s window = %s %s %s", tt.period, start, end, suffix)
+		}
+	}
+}
+
+func TestNoLimitBypassesRedis(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 10 * time.Millisecond})
+	defer client.Close()
+	q, _ := NewRedis(client, PolicyStrict)
+	res, err := q.ReserveForPeriod(context.Background(), "key", 0, 0, 10, "none", time.Now())
+	if err != nil || !res.Bypassed {
+		t.Fatalf("no-limit reservation = %+v, %v", res, err)
+	}
+}

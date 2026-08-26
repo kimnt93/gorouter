@@ -1,0 +1,52 @@
+{{define "providerCard"}}
+<details class="provider-card" data-provider="{{.Definition.ID}}">
+  <summary>
+    <span class="provider-logo">{{printf "%.2s" .Definition.Name}}</span>
+    <span class="provider-title"><strong>{{.Definition.Name}}</strong><small>{{.Definition.Description}}</small></span>
+    <span class="provider-status {{if .Credentials}}connected{{end}}">{{if .Credentials}}{{len .Credentials}} connected{{else}}Connect{{end}}</span>
+  </summary>
+  <div class="provider-body">
+    {{range .Credentials}}
+    <div class="provider-account" data-credential-account="{{.ID}}">
+      <span class="status-dot {{if eq .Status "active"}}ok{{end}}"></span>
+      <div class="provider-account-name"><strong>{{.Name}}</strong><small><code>{{.KeyPreview}}</code> · {{.BaseURL}}</small></div>
+      <span class="badge">{{.Kind}}</span>
+      <button type="button" data-credential-test="{{.ID}}">Test health</button>
+      <button type="button" data-credential-models="{{.ID}}" data-provider-name="{{.Provider}}">Discover models</button>
+      <button type="button" data-credential-chat="{{.ID}}" data-provider-name="{{.Provider}}">Test chat</button>
+      <form hx-post="/ui/credentials/{{.ID}}/toggle" hx-target="body" hx-swap="outerHTML"><button>{{if eq .Status "active"}}Disable{{else}}Enable{{end}}</button></form>
+      <button class="danger" hx-delete="/ui/credentials/{{.ID}}" hx-confirm="Delete this connection and its routes?" hx-target="body" hx-swap="outerHTML">Delete</button>
+      <div class="provider-result" id="credential-result-{{.ID}}" role="status" aria-live="polite"></div>
+    </div>
+    {{end}}
+    {{if eq .Definition.Auth "api_key"}}
+    <form class="provider-connect-form" method="post" action="/ui/providers/{{.Definition.ID}}/connect" hx-post="/ui/providers/{{.Definition.ID}}/connect" hx-target="body" hx-swap="outerHTML">
+      <div class="fields">
+        <label>Connection name<input name="name" placeholder="{{.Definition.Name}} account"></label>
+        {{if .Definition.CustomBaseURL}}<label>Base URL<input name="base_url" type="url" required placeholder="https://api.example.com/v1"></label>{{else}}<label>Endpoint<input name="base_url" type="url" value="{{.Definition.DefaultBaseURL}}"></label>{{end}}
+      </div>
+      <label>API key<input name="api_key" type="password" autocomplete="new-password" required placeholder="Paste API key"></label>
+      {{if .CanManageGlobal}}<label>Owner tenant<select name="owner_tenant_id"><option value="">Shared</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>{{end}}
+      <button class="primary">Save connection</button>
+    </form>
+    {{else}}
+    <div class="oauth-connect-box">
+      <p>Open the provider authorization page, finish sign-in, then paste the callback URL or returned <code>code#state</code> here.</p>
+      <button type="button" class="primary" data-oauth-start="{{.Definition.ID}}" {{if not .Definition.OAuthSupported}}disabled{{end}}>Connect {{.Definition.Name}}</button>
+      <div class="provider-result" id="oauth-result-{{.Definition.ID}}" role="status" aria-live="polite"></div>
+    </div>
+    {{end}}
+  </div>
+</details>
+{{end}}
+<!doctype html>
+<html>{{template "head" .}}
+<body>{{template "nav" .}}<main>
+  <div class="toolbar"><div><h1>Providers</h1><p class="muted">Connect subscriptions or API keys without leaving this page. Secrets are encrypted before storage.</p></div></div>
+  <section class="provider-section"><div class="provider-section-head"><div><h2>OAuth subscriptions</h2><p class="muted">Use an existing coding subscription through a guided browser flow.</p></div><span class="badge">{{len .OAuthProviders}}</span></div><div class="provider-grid">{{range .OAuthProviders}}{{template "providerCard" .}}{{end}}</div></section>
+  <section class="provider-section"><div class="provider-section-head"><div><h2>API keys</h2><p class="muted">Popular providers with safe endpoint presets and live model discovery.</p></div><span class="badge">{{len .APIKeyProviders}}</span></div><div class="provider-grid">{{range .APIKeyProviders}}{{template "providerCard" .}}{{end}}</div></section>
+
+  <dialog id="models-dialog" class="console-dialog" data-can-import="{{.CanManageGlobal}}"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2>Provider models</h2><p class="muted" id="models-dialog-provider"></p><div class="dialog-scroll model-picker" id="models-dialog-list" aria-busy="false"></div><div class="dialog-actions"><button type="button" id="models-select-all">Select all</button>{{if .CanManageGlobal}}<button type="button" class="primary" id="models-import">Import selected</button>{{end}}</div>{{if not .CanManageGlobal}}<p class="muted dialog-note">Only the master session can import models into global routes.</p>{{end}}<div class="provider-result" id="models-dialog-result" role="status" aria-live="polite"></div></dialog>
+  <dialog id="chat-dialog" class="console-dialog"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2>Streaming chat test</h2><p class="muted" id="chat-dialog-provider">This sends a real request and may incur provider cost.</p><label>Model<select id="chat-model"></select></label><label>Prompt<textarea id="chat-prompt" rows="4">Reply with exactly: connection healthy</textarea></label><div class="dialog-actions"><button type="button" class="primary" id="chat-send">Send streaming test</button><button type="button" id="chat-stop" hidden>Stop</button></div><pre id="chat-output" class="chat-output" role="log" aria-live="polite">Choose a model and send a prompt.</pre></dialog>
+  <dialog id="oauth-dialog" class="console-dialog"><form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form><h2 id="oauth-dialog-title">Connect subscription</h2><p class="muted">Authorization secrets are held only for this short-lived, single-use flow. Open the provider page, then paste its complete callback URL or returned <code>code#state</code>.</p><a id="oauth-authorize-link" class="button primary oauth-authorize-link" target="_blank" rel="noopener noreferrer" hidden>Open authorization page ↗</a><label>Connection name<input id="oauth-name" autocomplete="off" placeholder="Subscription account"></label>{{if .CanManageGlobal}}<label>Owner tenant<select id="oauth-owner"><option value="">Shared</option>{{range .Tenants}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>{{end}}<label>Callback URL or code<textarea id="oauth-callback" rows="4" spellcheck="false" placeholder="http://localhost:1455/auth/callback?code=...&amp;state=..."></textarea></label><div class="dialog-actions"><button type="button" class="primary" id="oauth-complete">Complete connection</button></div><div class="provider-result" id="oauth-dialog-result" role="status" aria-live="polite"></div></dialog>
+</main></body></html>

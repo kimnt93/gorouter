@@ -14,19 +14,22 @@ import (
 )
 
 type Config struct {
-	Listen          string
-	DatabaseBackend string
-	DatabaseURL     string
-	RedisURL        string
-	MasterKey       string
-	EncryptionKey   string
-	SessionSecret   string
-	RequestLimit    int64
-	RequestTimeout  time.Duration
-	Cache           CacheConfig
-	Quota           QuotaConfig
-	OAuthClientID   string
-	OAuthTokenURL   string
+	Listen             string
+	DatabaseBackend    string
+	DatabaseURL        string
+	RedisURL           string
+	MasterKey          string
+	EncryptionKey      string
+	SessionSecret      string
+	RequestLimit       int64
+	RequestTimeout     time.Duration
+	Cache              CacheConfig
+	Quota              QuotaConfig
+	Pricing            PricingConfig
+	OAuthClientID      string
+	OAuthTokenURL      string
+	CodexOAuthClientID string
+	CodexOAuthTokenURL string
 }
 
 type CacheConfig struct {
@@ -42,14 +45,23 @@ type QuotaConfig struct {
 	RedisPolicy string
 }
 
+type PricingConfig struct {
+	Enabled      bool
+	CatalogURL   string
+	SyncInterval time.Duration
+	HTTPTimeout  time.Duration
+}
+
 func Load() (*Config, error) {
 	cfg := &Config{
-		Listen:         env("LISTEN", ":8090"),
-		MasterKey:      os.Getenv("MASTER_KEY"),
-		RequestLimit:   20 << 20,
-		RequestTimeout: 5 * time.Minute,
-		OAuthClientID:  env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
-		OAuthTokenURL:  os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
+		Listen:             env("LISTEN", ":8090"),
+		MasterKey:          os.Getenv("MASTER_KEY"),
+		RequestLimit:       20 << 20,
+		RequestTimeout:     5 * time.Minute,
+		OAuthClientID:      env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+		OAuthTokenURL:      os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
+		CodexOAuthClientID: env("CODEX_OAUTH_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
+		CodexOAuthTokenURL: os.Getenv("CODEX_OAUTH_TOKEN_URL"),
 		Cache: CacheConfig{
 			Enabled:       true,
 			TTL:           24 * time.Hour,
@@ -59,6 +71,12 @@ func Load() (*Config, error) {
 			AllowMemory:   !strings.EqualFold(env("APP_ENV", "development"), "production"),
 		},
 		Quota: QuotaConfig{RedisPolicy: "strict"},
+		Pricing: PricingConfig{
+			Enabled:      true,
+			CatalogURL:   "https://openrouter.ai/api/frontend/v1/catalog/models",
+			SyncInterval: time.Hour,
+			HTTPTimeout:  30 * time.Second,
+		},
 	}
 	if cfg.MasterKey == "" {
 		return nil, errors.New("MASTER_KEY is required; set it during setup")
@@ -73,7 +91,7 @@ func Load() (*Config, error) {
 	cfg.DatabaseBackend = backend
 	switch backend {
 	case "postgresql":
-		cfg.DatabaseURL = connectionURL("postgres", env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"))
+		cfg.DatabaseURL = postgresConnectionURL(env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"), env("DB_SSLMODE", "disable"))
 	case "clickhouse":
 		return nil, errors.New("DB_BACKEND=clickhouse is not supported as the primary store; ClickHouse is currently an analytics sink and PostgreSQL is required for transactional configuration")
 	default:
@@ -147,6 +165,30 @@ func Load() (*Config, error) {
 	default:
 		return nil, errors.New("CACHE_SCOPE must be key, tenant, or global")
 	}
+	if v := os.Getenv("OPENROUTER_CATALOG_ENABLED"); v != "" {
+		cfg.Pricing.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := strings.TrimSpace(os.Getenv("OPENROUTER_CATALOG_URL")); v != "" {
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, errors.New("OPENROUTER_CATALOG_URL must be an HTTP(S) URL")
+		}
+		cfg.Pricing.CatalogURL = v
+	}
+	if v := os.Getenv("OPENROUTER_SYNC_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.New("OPENROUTER_SYNC_INTERVAL must be a positive duration")
+		}
+		cfg.Pricing.SyncInterval = d
+	}
+	if v := os.Getenv("OPENROUTER_HTTP_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.New("OPENROUTER_HTTP_TIMEOUT must be a positive duration")
+		}
+		cfg.Pricing.HTTPTimeout = d
+	}
 	return cfg, nil
 }
 
@@ -155,6 +197,14 @@ func connectionURL(scheme, host, port, user, password, name string) string {
 	if user != "" || password != "" {
 		u.User = url.UserPassword(user, password)
 	}
+	return u.String()
+}
+
+func postgresConnectionURL(host, port, user, password, name, sslMode string) string {
+	u, _ := url.Parse(connectionURL("postgres", host, port, user, password, name))
+	query := u.Query()
+	query.Set("sslmode", sslMode)
+	u.RawQuery = query.Encode()
 	return u.String()
 }
 

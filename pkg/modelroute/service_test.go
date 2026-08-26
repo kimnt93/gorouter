@@ -12,6 +12,17 @@ import (
 
 type modelRepositoryStub struct{ model entities.ModelDef }
 
+type priceCacheStub struct {
+	setModel     string
+	setPrice     entities.Price
+	deletedModel string
+}
+
+func (c *priceCacheStub) SetManual(model string, price entities.Price) {
+	c.setModel, c.setPrice = model, price
+}
+func (c *priceCacheStub) DeleteManual(model string) { c.deletedModel = model }
+
 func (r *modelRepositoryStub) Upsert(_ context.Context, model entities.ModelDef) error {
 	r.model = model
 	return nil
@@ -49,5 +60,24 @@ func TestSetPriceRejectsInvalidNumbers(t *testing.T) {
 		if err := service.SetPrice(context.Background(), "model", price); !errors.Is(err, ErrInvalidPrice) {
 			t.Fatalf("price %+v error=%v", price, err)
 		}
+	}
+}
+
+func TestPriceWritesUpdateConfiguredCache(t *testing.T) {
+	service := NewService(&modelRepositoryStub{})
+	cache := &priceCacheStub{}
+	service.SetPriceCache(cache)
+	price := entities.Price{InputPerM: 2}
+	if err := service.SetPrice(context.Background(), "model", price); err != nil {
+		t.Fatal(err)
+	}
+	if cache.setModel != "model" || cache.setPrice != price {
+		t.Fatalf("cache set = %q %+v", cache.setModel, cache.setPrice)
+	}
+	if err := service.DeletePrice(context.Background(), "model"); err != nil {
+		t.Fatal(err)
+	}
+	if cache.deletedModel != "model" {
+		t.Fatalf("cache delete = %q", cache.deletedModel)
 	}
 }

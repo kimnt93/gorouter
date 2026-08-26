@@ -54,7 +54,16 @@ type CredentialInput struct {
 	APIKey       string
 	OAuthAccess  string
 	OAuthRefresh string
+	OAuthIDToken string
+	OAuthAccount string
+	OAuthMeta    OAuthMetadata
 	OwnerTenant  *string
+}
+
+type OAuthMetadata struct {
+	AccountID      string `json:"account_id,omitempty"`
+	OrganizationID string `json:"organization_id,omitempty"`
+	DeviceID       string `json:"device_id,omitempty"`
 }
 
 // CredentialUpdate replaces safe credential metadata and optionally rotates
@@ -71,21 +80,31 @@ type CredentialUpdate struct {
 }
 
 type ApiKey struct {
-	ID              string    `json:"id"`
-	TenantID        string    `json:"tenant_id"`
-	TenantName      string    `json:"tenant_name,omitempty"`
-	Name            string    `json:"name"`
-	SecretHash      string    `json:"-"`
-	SecretPrefix    string    `json:"key_prefix"`
-	Models          []string  `json:"models"`
-	Scopes          []string  `json:"scopes"`
-	MonthlyQuotaUSD *float64  `json:"monthly_quota_usd"`
+	ID           string   `json:"id"`
+	TenantID     string   `json:"tenant_id"`
+	TenantName   string   `json:"tenant_name,omitempty"`
+	Name         string   `json:"name"`
+	SecretHash   string   `json:"-"`
+	SecretPrefix string   `json:"key_prefix"`
+	Models       []string `json:"models"`
+	Scopes       []string `json:"scopes"`
+	QuotaUSD     *float64 `json:"quota_usd"`
+	QuotaPeriod  string   `json:"quota_period"`
+	// MonthlyQuotaUSD is retained as a response alias for older clients.
+	MonthlyQuotaUSD *float64  `json:"monthly_quota_usd,omitempty"`
 	RPM             *int      `json:"rpm"`
 	Enabled         bool      `json:"enabled"`
 	CreatedAt       time.Time `json:"created_at"`
 
 	Plaintext string `json:"-"`
 }
+
+const (
+	QuotaPeriodNone  = "none"
+	QuotaPeriodDay   = "day"
+	QuotaPeriodWeek  = "week"
+	QuotaPeriodMonth = "month"
+)
 
 type ModelRoute struct {
 	CredentialID string `json:"credential_id"`

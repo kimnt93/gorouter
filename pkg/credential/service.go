@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/provider"
 )
 
 var (
@@ -24,6 +25,16 @@ type ConnectivityResult struct {
 
 type ConnectivityProber interface {
 	Probe(ctx context.Context, runtime *entities.CredentialRuntime) (status int, err error)
+}
+
+type ProviderModel struct {
+	ID            string `json:"id"`
+	OwnedBy       string `json:"owned_by,omitempty"`
+	ContextLength int64  `json:"context_length,omitempty"`
+}
+
+type ModelDiscoverer interface {
+	DiscoverModels(ctx context.Context, runtime *entities.CredentialRuntime) ([]ProviderModel, error)
 }
 
 type Repository interface {
@@ -52,6 +63,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.Credent
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
 	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
 	in.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
+	if resolved, ok := provider.ResolveBaseURL(in.Provider, in.BaseURL); ok {
+		in.BaseURL = resolved
+	}
 	if err := validate(in); err != nil {
 		return nil, err
 	}
@@ -62,9 +76,8 @@ func validate(in CreateInput) error {
 	if strings.TrimSpace(in.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidCredential)
 	}
-	switch in.Provider {
-	case entities.ProviderOpenAICompatible, entities.ProviderAnthropic:
-	default:
+	definition, ok := provider.Lookup(in.Provider)
+	if !ok {
 		return fmt.Errorf("%w: %q", ErrUnsupportedProvider, in.Provider)
 	}
 	switch in.Kind {
@@ -73,8 +86,8 @@ func validate(in CreateInput) error {
 			return fmt.Errorf("%w: api_key is required for kind api_key", ErrInvalidCredential)
 		}
 	case entities.KindOAuth:
-		if in.Provider != entities.ProviderAnthropic {
-			return fmt.Errorf("%w: oauth is only supported for anthropic", ErrInvalidCredential)
+		if !definition.OAuthSupported && in.Provider != entities.ProviderAnthropic {
+			return fmt.Errorf("%w: oauth is not supported for %s", ErrInvalidCredential, in.Provider)
 		}
 		if strings.TrimSpace(in.OAuthRefresh) == "" {
 			return fmt.Errorf("%w: oauth_refresh is required for kind oauth", ErrInvalidCredential)
@@ -144,4 +157,19 @@ func (s *Service) TestConnectivity(ctx context.Context, id string, probes map[st
 	status, probeErr := probe.Probe(ctx, runtime)
 	result := &ConnectivityResult{OK: probeErr == nil && status >= 200 && status < 300, Status: status, LatencyMS: time.Since(started).Milliseconds()}
 	return result, nil
+}
+
+func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer ModelDiscoverer) ([]ProviderModel, error) {
+	if discoverer == nil {
+		return nil, ErrUnsupportedProvider
+	}
+	runtime, err := s.Runtime(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	models, err := discoverer.DiscoverModels(ctx, runtime)
+	if err != nil {
+		return nil, err
+	}
+	return models, nil
 }

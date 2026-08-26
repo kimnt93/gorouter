@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"errors"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,12 +16,19 @@ import (
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
 type okResponse struct {
 	OK bool `json:"ok"`
+}
+
+func (a *Admin) Providers(c fiber.Ctx) error {
+	return c.JSON(struct {
+		Data []provider.Definition `json:"data"`
+	}{Data: provider.Catalog()})
 }
 
 type loginResponse struct {
@@ -36,6 +45,8 @@ type createdAPIKeyResponse struct {
 	Models          []string `json:"models"`
 	Scopes          []string `json:"scopes"`
 	MonthlyQuotaUSD *float64 `json:"monthly_quota_usd"`
+	QuotaUSD        *float64 `json:"quota_usd"`
+	QuotaPeriod     string   `json:"quota_period"`
 	RPM             *int     `json:"rpm"`
 	Enabled         bool     `json:"enabled"`
 	Plaintext       string   `json:"plaintext"`
@@ -49,6 +60,91 @@ type Admin struct {
 	ModelsSvc *modelroute.Service
 	UsageSvc  *usage.Service
 	Cache     chat.PromptCache
+	Pricing   PriceCatalog
+}
+
+type priceEstimateResponse struct {
+	Model          string                  `json:"model"`
+	UpstreamModel  string                  `json:"upstream_model,omitempty"`
+	Price          *entities.Price         `json:"price,omitempty"`
+	CacheSupported bool                    `json:"cache_supported"`
+	Estimates      entities.PriceEstimates `json:"estimates"`
+}
+
+func (a *Admin) PricingEstimate(c fiber.Ctx) error {
+	if a.Pricing == nil {
+		return presenter.Err(c, fiber.StatusServiceUnavailable, "pricing catalog is unavailable", "service_unavailable", "pricing_unavailable")
+	}
+	model := strings.TrimSpace(c.Query("model"))
+	upstream := strings.TrimSpace(c.Query("upstream_model"))
+	if model == "" && upstream == "" {
+		return presenter.BadRequest(c, "model or upstream_model is required")
+	}
+	prompt, err := nonNegativeInt64(c.Query("prompt_tokens", "0"))
+	if err != nil {
+		return presenter.BadRequest(c, "prompt_tokens must be a non-negative integer")
+	}
+	completion, err := nonNegativeInt64(c.Query("completion_tokens", "0"))
+	if err != nil {
+		return presenter.BadRequest(c, "completion_tokens must be a non-negative integer")
+	}
+	response := priceEstimateResponse{Model: model, UpstreamModel: upstream, Estimates: a.Pricing.Estimates(model, upstream, prompt, completion)}
+	if price, ok := a.Pricing.Resolve(model, upstream); ok {
+		response.Price = &price
+	}
+	if catalog, ok := a.Pricing.Catalog(model, upstream); ok {
+		response.CacheSupported = catalog.CacheSupported
+	} else if response.Price != nil {
+		response.CacheSupported = response.Price.CachedInputPerM > 0 || response.Price.CacheWritePerM > 0
+	}
+	return c.JSON(response)
+}
+
+func (a *Admin) PricingCatalog(c fiber.Ctx) error {
+	if a.Pricing == nil {
+		return presenter.Err(c, fiber.StatusServiceUnavailable, "pricing catalog is unavailable", "service_unavailable", "pricing_unavailable")
+	}
+	items := a.Pricing.CatalogPrices()
+	query := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	if query != "" {
+		filtered := make([]entities.CatalogPrice, 0)
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item.Model+" "+item.Name+" "+item.Provider), query) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	total := len(items)
+	limit := 100
+	if value, err := strconv.Atoi(c.Query("limit", "100")); err == nil && value > 0 && value <= 500 {
+		limit = value
+	}
+	offset := 0
+	if value, err := strconv.Atoi(c.Query("offset", "0")); err == nil && value > 0 {
+		offset = value
+	}
+	if offset > len(items) {
+		offset = len(items)
+	}
+	end := offset + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	return c.JSON(struct {
+		Data   []entities.CatalogPrice `json:"data"`
+		Total  int                     `json:"total"`
+		Offset int                     `json:"offset"`
+		Limit  int                     `json:"limit"`
+	}{Data: items[offset:end], Total: total, Offset: offset, Limit: limit})
+}
+
+func nonNegativeInt64(value string) (int64, error) {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0, errors.New("invalid non-negative integer")
+	}
+	return parsed, nil
 }
 
 func (a *Admin) Verify(c fiber.Ctx) error {
@@ -213,6 +309,8 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 		Models          []string `json:"models"`
 		Scopes          []string `json:"scopes"`
 		MonthlyQuotaUSD *float64 `json:"monthly_quota_usd"`
+		QuotaUSD        *float64 `json:"quota_usd"`
+		QuotaPeriod     string   `json:"quota_period"`
 		RPM             *int     `json:"rpm"`
 	}
 	if err := c.Bind().Body(&b); err != nil {
@@ -224,7 +322,7 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if len(b.Scopes) == 0 {
 		b.Scopes = []string{entities.ScopeChat}
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, MonthlyQuotaUSD: b.MonthlyQuotaUSD, RPM: b.RPM}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, MonthlyQuotaUSD: b.MonthlyQuotaUSD, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM}
 	sess := SessionFrom(c)
 	var v *entities.ApiKey
 	var err error
@@ -239,18 +337,30 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.Status(201).JSON(createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, MonthlyQuotaUSD: v.MonthlyQuotaUSD, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext})
+	return c.Status(201).JSON(createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, MonthlyQuotaUSD: v.MonthlyQuotaUSD, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext})
 }
 func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	var b struct {
-		Enabled *bool     `json:"enabled"`
-		Models  *[]string `json:"models"`
-		Scopes  *[]string `json:"scopes"`
-		Quota   **float64 `json:"monthly_quota_usd"`
-		RPM     **int     `json:"rpm"`
+		Enabled     *bool     `json:"enabled"`
+		Models      *[]string `json:"models"`
+		Scopes      *[]string `json:"scopes"`
+		Quota       **float64 `json:"monthly_quota_usd"`
+		QuotaUSD    **float64 `json:"quota_usd"`
+		QuotaPeriod *string   `json:"quota_period"`
+		RPM         **int     `json:"rpm"`
 	}
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
+	}
+	quotaValue := b.QuotaUSD
+	period := b.QuotaPeriod
+	if quotaValue == nil && b.Quota != nil {
+		quotaValue = b.Quota
+		legacyPeriod := entities.QuotaPeriodNone
+		if *b.Quota != nil {
+			legacyPeriod = entities.QuotaPeriodMonth
+		}
+		period = &legacyPeriod
 	}
 	sess := SessionFrom(c)
 	var err error
@@ -258,9 +368,9 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 		if b.Scopes != nil && !scopesAllowedBySession(sess, *b.Scopes) {
 			return presenter.Forbidden(c, "cannot grant scopes not held by the current session")
 		}
-		err = a.KeysSvc.PatchForTenant(c.Context(), sess.TenantID, c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM)
+		err = a.KeysSvc.PatchQuotaForTenant(c.Context(), sess.TenantID, c.Params("id"), b.Enabled, b.Models, b.Scopes, quotaValue, period, b.RPM)
 	} else {
-		err = a.KeysSvc.Patch(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, b.Quota, b.RPM)
+		err = a.KeysSvc.PatchQuota(c.Context(), c.Params("id"), b.Enabled, b.Models, b.Scopes, quotaValue, period, b.RPM)
 	}
 	if err != nil {
 		if errors.Is(err, entities.ErrNotFound) {
@@ -321,7 +431,7 @@ func (a *Admin) ModelUpsert(c fiber.Ctx) error {
 	if err := c.Bind().Body(&m); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
-	m.Name = c.Params("name")
+	m.Name = decodedPathParam(c, "name")
 	if err := a.ModelsSvc.Upsert(c.Context(), m); err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
@@ -331,7 +441,7 @@ func (a *Admin) ModelDelete(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
 		return presenter.Forbidden(c, "only the master session can change global model routes")
 	}
-	if err := a.ModelsSvc.Delete(c.Context(), c.Params("name")); err != nil {
+	if err := a.ModelsSvc.Delete(c.Context(), decodedPathParam(c, "name")); err != nil {
 		return presenter.ServerError(c, "failed to delete model")
 	}
 	return c.JSON(okResponse{OK: true})
@@ -341,7 +451,7 @@ func (a *Admin) Price(c fiber.Ctx) error {
 		return presenter.Forbidden(c, "only the master session can change global prices")
 	}
 	if c.Method() == fiber.MethodDelete {
-		if err := a.ModelsSvc.DeletePrice(c.Context(), c.Params("model")); err != nil {
+		if err := a.ModelsSvc.DeletePrice(c.Context(), decodedPathParam(c, "model")); err != nil {
 			if errors.Is(err, entities.ErrNotFound) {
 				return presenter.NotFound(c, "price not found")
 			}
@@ -353,10 +463,18 @@ func (a *Admin) Price(c fiber.Ctx) error {
 	if err := c.Bind().Body(&p); err != nil {
 		return presenter.BadRequest(c, "invalid body")
 	}
-	if err := a.ModelsSvc.SetPrice(c.Context(), c.Params("model"), p); err != nil {
+	if err := a.ModelsSvc.SetPrice(c.Context(), decodedPathParam(c, "model"), p); err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
 	return c.JSON(okResponse{OK: true})
+}
+
+func decodedPathParam(c fiber.Ctx, name string) string {
+	value := c.Params(name)
+	if decoded, err := url.PathUnescape(value); err == nil {
+		return decoded
+	}
+	return value
 }
 func (a *Admin) Prices(c fiber.Ctx) error {
 	v, err := a.ModelsSvc.Prices(c.Context())

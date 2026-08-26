@@ -11,6 +11,7 @@ import (
 
 type Repository interface {
 	MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error)
+	SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error)
 	Summary(ctx context.Context, since time.Time) (*entities.UsageSummary, error)
 	Recent(ctx context.Context, limit int) ([]entities.RecentEvent, error)
 	SummaryForTenant(ctx context.Context, tenantID string, since time.Time) (*entities.UsageSummary, error)
@@ -140,6 +141,20 @@ func (s *Service) run() {
 
 func (s *Service) MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error) {
 	dbSpent, err := s.repo.MonthSpendForKey(ctx, apiKeyID)
+	if err != nil {
+		return 0, err
+	}
+	if s.pending != nil {
+		return dbSpent + s.pending.Load(apiKeyID), nil
+	}
+	return dbSpent, nil
+}
+
+// SpendForKeySince returns durable and not-yet-flushed usage for a quota
+// window. Pending usage is deliberately included so rapid concurrent requests
+// cannot exceed a limit while the asynchronous writer is still flushing.
+func (s *Service) SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error) {
+	dbSpent, err := s.repo.SpendForKeySince(ctx, apiKeyID, since.UTC())
 	if err != nil {
 		return 0, err
 	}

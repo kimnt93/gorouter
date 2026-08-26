@@ -26,9 +26,19 @@ type Repository interface {
 	ListPrices(ctx context.Context) (map[string]entities.Price, error)
 }
 
-type Service struct{ repo Repository }
+type PriceCache interface {
+	SetManual(model string, price entities.Price)
+	DeleteManual(model string)
+}
+
+type Service struct {
+	repo       Repository
+	priceCache PriceCache
+}
 
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
+
+func (s *Service) SetPriceCache(cache PriceCache) { s.priceCache = cache }
 
 func (s *Service) Upsert(ctx context.Context, m entities.ModelDef) error {
 	m.Name = strings.TrimSpace(m.Name)
@@ -70,11 +80,23 @@ func (s *Service) SetPrice(ctx context.Context, model string, p entities.Price) 
 			return ErrInvalidPrice
 		}
 	}
-	return s.repo.SetPrice(ctx, model, p)
+	if err := s.repo.SetPrice(ctx, model, p); err != nil {
+		return err
+	}
+	if s.priceCache != nil {
+		s.priceCache.SetManual(model, p)
+	}
+	return nil
 }
 
 func (s *Service) DeletePrice(ctx context.Context, model string) error {
-	return s.repo.DeletePrice(ctx, model)
+	if err := s.repo.DeletePrice(ctx, model); err != nil {
+		return err
+	}
+	if s.priceCache != nil {
+		s.priceCache.DeleteManual(model)
+	}
+	return nil
 }
 
 func (s *Service) Prices(ctx context.Context) (map[string]entities.Price, error) {

@@ -142,15 +142,77 @@ func (r *ModelRouteRepo) ListPrices(ctx context.Context) (map[string]entities.Pr
 	return out, rows.Err()
 }
 
+func (r *ModelRouteRepo) ReplaceCatalogPrices(ctx context.Context, source string, prices []entities.CatalogPrice) error {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, item := range prices {
+		_, err = tx.Exec(ctx, `INSERT INTO catalog_prices
+			(model,name,provider,context_length,cache_supported,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m,source,updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT (model) DO UPDATE SET name=EXCLUDED.name, provider=EXCLUDED.provider,
+			context_length=EXCLUDED.context_length, cache_supported=EXCLUDED.cache_supported,
+			input_per_m=EXCLUDED.input_per_m, output_per_m=EXCLUDED.output_per_m,
+			cached_input_per_m=EXCLUDED.cached_input_per_m, cache_write_per_m=EXCLUDED.cache_write_per_m,
+			source=EXCLUDED.source, updated_at=EXCLUDED.updated_at`, item.Model, item.Name, item.Provider,
+			item.ContextLength, item.CacheSupported, item.Price.InputPerM, item.Price.OutputPerM,
+			item.Price.CachedInputPerM, item.Price.CacheWritePerM, source, item.UpdatedAt)
+		if err != nil {
+			return err
+		}
+	}
+	models := make([]string, 0, len(prices))
+	for _, item := range prices {
+		models = append(models, item.Model)
+	}
+	if len(models) == 0 {
+		_, err = tx.Exec(ctx, `DELETE FROM catalog_prices WHERE source=$1`, source)
+	} else {
+		_, err = tx.Exec(ctx, `DELETE FROM catalog_prices WHERE source=$1 AND NOT (model = ANY($2))`, source, models)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *ModelRouteRepo) ListCatalogPrices(ctx context.Context) ([]entities.CatalogPrice, error) {
+	rows, err := r.db.Pool.Query(ctx, `SELECT model,name,provider,context_length,cache_supported,
+		input_per_m,output_per_m,cached_input_per_m,cache_write_per_m,source,updated_at
+		FROM catalog_prices ORDER BY model`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []entities.CatalogPrice
+	for rows.Next() {
+		var item entities.CatalogPrice
+		if err := rows.Scan(&item.Model, &item.Name, &item.Provider, &item.ContextLength, &item.CacheSupported,
+			&item.Price.InputPerM, &item.Price.OutputPerM, &item.Price.CachedInputPerM,
+			&item.Price.CacheWritePerM, &item.Source, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 type UsageRepo struct{ db *DB }
 
 func NewUsageRepo(db *DB) *UsageRepo { return &UsageRepo{db: db} }
 
 func (r *UsageRepo) MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error) {
+	u := time.Now().UTC()
+	return r.SpendForKeySince(ctx, apiKeyID, time.Date(u.Year(), u.Month(), 1, 0, 0, 0, 0, time.UTC))
+}
+
+func (r *UsageRepo) SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error) {
 	var spent float64
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(cost_usd),0) FROM usage_events
-		WHERE api_key_id=$1 AND ts >= date_trunc('month', now())`, apiKeyID).Scan(&spent)
+		WHERE api_key_id=$1 AND ts >= $2`, apiKeyID, since.UTC()).Scan(&spent)
 	return spent, err
 }
 

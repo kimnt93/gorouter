@@ -15,7 +15,7 @@
                 </div>
                 <div class="flex items-center gap-2"><span class="badge {{if .Enabled}}ok{{end}}">{{if
                         .Enabled}}enabled{{else}}disabled{{end}}</span>{{if $.CanManageGlobal}}<button class="danger"
-                        hx-delete="/ui/models/{{.Name}}" hx-confirm="Delete this model and its routes?" hx-target="body"
+                        hx-delete="/ui/models/{{.Name | urlquery}}" hx-confirm="Delete this model and its routes?" hx-target="body"
                         hx-swap="outerHTML">Delete</button>{{end}}</div>
             </div>
             <div class="table">
@@ -38,7 +38,7 @@
                         </tr>{{end}}</tbody>
                 </table>
             </div>
-            {{if $.CanManageGlobal}}<form class="stack" style="margin-top:14px" hx-post="/ui/models/{{.Name}}/price"
+            {{if $.CanManageGlobal}}<form class="stack" style="margin-top:14px" hx-post="/ui/models/{{.Name | urlquery}}/price"
                 hx-target="body" hx-swap="outerHTML">
                 <div class="fields"><label>Input / 1M<input name="input_per_m" type="number" min="0" step="any"
                             value="{{if .Price}}{{.Price.InputPerM}}{{else}}0{{end}}"></label><label>Output / 1M<input

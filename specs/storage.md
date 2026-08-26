@@ -10,6 +10,7 @@ PostgreSQL is the source of truth for transactional configuration:
 - Models
 - Model routes
 - Prices
+- Compact synchronized catalog prices
 - Usage events in the PostgreSQL deployment profile
 
 Migrations must be versioned, idempotent, transactional where practical, and run at startup before serving traffic.
@@ -26,7 +27,7 @@ Migrations must be versioned, idempotent, transactional where practical, and run
 
 ### `api_keys`
 
-`id`, tenant, name, hash, prefix, JSON model list, JSON scope list, monthly quota, RPM, enabled, timestamp.
+`id`, tenant, name, hash, prefix, JSON model list, JSON scope list, quota USD, quota period (`none`, `day`, `week`, or `month`), legacy monthly quota compatibility, RPM, enabled, timestamp.
 
 ### `models`
 
@@ -40,11 +41,15 @@ Model, credential, priority, weight, enabled. Unique model/credential pair.
 
 Model, input/output/cache-read/cache-write prices, updated timestamp.
 
+### `catalog_prices`
+
+Canonical model, display name, provider, context length, cache support, input/output/cache-read/cache-write prices, source, updated timestamp. Store only fields required for selection and estimation, not the complete upstream catalog payload or derived estimate totals.
+
 ### `usage_events`
 
 Timestamp, tenant, key, credential, model fields, token fields, cost, cache hit, status, duration, safe error.
 
-Indexes must support API-key/month quota sums, time-range summaries, model summaries, and recent events.
+Indexes must support API-key quota-window sums, time-range summaries, model summaries, recent events, and catalog source replacement.
 
 ## Redis
 

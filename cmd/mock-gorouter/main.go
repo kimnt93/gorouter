@@ -15,6 +15,7 @@ import (
 )
 
 var (
+	host     = flag.String("host", "127.0.0.1", "listen host")
 	port     = flag.Int("port", 9099, "listen port")
 	failN    = flag.Int("fail-first", 0, "fail the first N requests with HTTP 500 (then succeed)")
 	stream   = flag.Bool("stream", true, "support stream=true requests")
@@ -87,7 +88,7 @@ type oauthTokenResponse struct {
 
 func main() {
 	flag.Parse()
-	addr := fmt.Sprintf("127.0.0.1:%d", *port)
+	addr := fmt.Sprintf("%s:%d", *host, *port)
 	log.Printf("mock upstream on http://%s (openai /v1/chat/completions + /v1/models, anthropic /v1/messages)", addr)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, _ *http.Request) {

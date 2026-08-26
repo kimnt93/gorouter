@@ -3,11 +3,13 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -67,34 +69,87 @@ type OpenAIAdapter struct {
 // Send forwards an OpenAI Chat Completions body to the upstream, rewriting the
 // model name and forcing usage reporting on streams.
 func (a *OpenAIAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, upstreamModel string, rawBody []byte) (*entities.UpstreamResult, error) {
-	var parsed ChatRequest
-	if err := json.Unmarshal(rawBody, &parsed); err != nil {
-		return nil, fmt.Errorf("re-encode request: %w", err)
-	}
-	parsed.Model = upstreamModel
-	if parsed.Stream {
-		parsed.StreamOptions = &StreamOptions{IncludeUsage: true}
-	}
-	body, err := json.Marshal(&parsed)
+	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel)
 	if err != nil {
 		return nil, err
 	}
-	base := openAIBase(cr.BaseURL)
-	url := base + "/chat/completions"
-	headers := map[string]string{"Authorization": "Bearer " + cr.APIKey}
-	return postJSON(ctx, a.HTTP, url, headers, body)
+	headers := map[string]string{
+		"Accept":        "application/json",
+		"Authorization": "Bearer " + cr.APIKey,
+	}
+	if stream {
+		headers["Accept"] = "text/event-stream"
+	}
+	return postJSON(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "chat/completions"), headers, body)
 }
 
 func openAIBase(baseURL string) string {
-	base := strings.TrimSuffix(baseURL, "/")
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
 		return "https://api.openai.com/v1"
+	}
+	for _, suffix := range []string{"/chat/completions", "/responses", "/models"} {
+		if strings.HasSuffix(base, suffix) {
+			base = strings.TrimRight(strings.TrimSuffix(base, suffix), "/")
+			break
+		}
 	}
 	return base
 }
 
+func openAIEndpoint(baseURL, endpoint string) string {
+	base := openAIBase(baseURL)
+	if parsed, err := url.Parse(base); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + strings.TrimLeft(endpoint, "/")
+		parsed.RawPath = ""
+		return parsed.String()
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(endpoint, "/")
+}
+
+func prepareOpenAIRequest(rawBody []byte, upstreamModel string) ([]byte, bool, error) {
+	var request ChatRequest
+	if err := json.Unmarshal(rawBody, &request); err != nil {
+		return nil, false, fmt.Errorf("parse OpenAI request: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &fields); err != nil {
+		return nil, false, fmt.Errorf("parse OpenAI request object: %w", err)
+	}
+	model, _ := json.Marshal(upstreamModel)
+	fields["model"] = model
+	if request.Stream {
+		var options map[string]json.RawMessage
+		if rawOptions, ok := fields["stream_options"]; ok {
+			_ = json.Unmarshal(rawOptions, &options)
+		}
+		if options == nil {
+			options = make(map[string]json.RawMessage)
+		}
+		includeUsage, _ := json.Marshal(true)
+		options["include_usage"] = includeUsage
+		encodedOptions, _ := json.Marshal(options)
+		fields["stream_options"] = encodedOptions
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode OpenAI request: %w", err)
+	}
+	return encoded, request.Stream, nil
+}
+
+func (a *OpenAIAdapter) httpClient() *http.Client {
+	if a.HTTP != nil {
+		return a.HTTP
+	}
+	return NewHTTPClient()
+}
+
 func (a *OpenAIAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime) (int, error) {
-	res, err := get(ctx, a.HTTP, openAIBase(cr.BaseURL)+"/models", map[string]string{"Authorization": "Bearer " + cr.APIKey})
+	res, err := get(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "models"), map[string]string{
+		"Accept":        "application/json",
+		"Authorization": "Bearer " + cr.APIKey,
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -118,26 +173,28 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 	}
 	translated := ToAnthropic(&req)
 	translated.Model = upstreamModel
+	if cr.Kind == entities.KindOAuth && cr.OAuthMeta.AccountID != "" && cr.OAuthMeta.DeviceID != "" {
+		sessionID, sessionErr := randomUUID()
+		if sessionErr != nil {
+			return nil, sessionErr
+		}
+		identity, _ := json.Marshal(struct {
+			DeviceID    string `json:"device_id"`
+			AccountUUID string `json:"account_uuid"`
+			SessionID   string `json:"session_id"`
+		}{DeviceID: cr.OAuthMeta.DeviceID, AccountUUID: cr.OAuthMeta.AccountID, SessionID: sessionID})
+		translated.Metadata = &AnthropicMetadata{UserID: string(identity)}
+	}
 	body, err := json.Marshal(translated)
 	if err != nil {
 		return nil, err
 	}
-	base := strings.TrimSuffix(cr.BaseURL, "/")
-	if base == "" {
-		base = "https://api.anthropic.com"
-	}
-	url := base + "/v1/messages"
+	url := anthropicBase(cr.BaseURL) + "/v1/messages"
 
 	send := func() (*entities.UpstreamResult, error) {
-		headers := map[string]string{"anthropic-version": anthropicVersion}
-		switch cr.Kind {
-		case entities.KindAPIKey:
-			headers["x-api-key"] = cr.APIKey
-		case entities.KindOAuth:
-			headers["Authorization"] = "Bearer " + cr.OAuthAccess
-			headers["anthropic-beta"] = anthropicOAuthBeta
-		default:
-			return nil, fmt.Errorf("unsupported credential kind %q", cr.Kind)
+		headers, headerErr := anthropicHeaders(cr)
+		if headerErr != nil {
+			return nil, headerErr
 		}
 		return postJSON(ctx, a.HTTP, url, headers, body)
 	}
@@ -166,19 +223,10 @@ func (a *AnthropicAdapter) Probe(ctx context.Context, cr *entities.CredentialRun
 	if err != nil {
 		return 0, err
 	}
-	base := strings.TrimSuffix(cr.BaseURL, "/")
-	if base == "" {
-		base = "https://api.anthropic.com"
-	}
-	headers := map[string]string{"anthropic-version": anthropicVersion}
-	switch cr.Kind {
-	case entities.KindAPIKey:
-		headers["x-api-key"] = cr.APIKey
-	case entities.KindOAuth:
-		headers["Authorization"] = "Bearer " + cr.OAuthAccess
-		headers["anthropic-beta"] = anthropicOAuthBeta
-	default:
-		return 0, fmt.Errorf("unsupported credential kind %q", cr.Kind)
+	base := anthropicBase(cr.BaseURL)
+	headers, err := anthropicHeaders(cr)
+	if err != nil {
+		return 0, err
 	}
 	res, err := postJSON(ctx, a.HTTP, base+"/v1/messages", headers, body)
 	if err != nil {
@@ -189,7 +237,48 @@ func (a *AnthropicAdapter) Probe(ctx context.Context, cr *entities.CredentialRun
 	return res.StatusCode, nil
 }
 
+func anthropicBase(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return "https://api.anthropic.com"
+	}
+	for _, suffix := range []string{"/v1/messages", "/v1/models"} {
+		if strings.HasSuffix(base, suffix) {
+			base = strings.TrimRight(strings.TrimSuffix(base, suffix), "/")
+			break
+		}
+	}
+	return base
+}
+
 func int64Ptr(v int64) *int64 { return &v }
+
+func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error) {
+	headers := map[string]string{"anthropic-version": anthropicVersion}
+	switch cr.Kind {
+	case entities.KindAPIKey:
+		headers["x-api-key"] = cr.APIKey
+	case entities.KindOAuth:
+		headers["Authorization"] = "Bearer " + cr.OAuthAccess
+		headers["anthropic-beta"] = anthropicOAuthBeta
+		headers["anthropic-dangerous-direct-browser-access"] = "true"
+		headers["x-app"] = "cli"
+		headers["User-Agent"] = "claude-cli/2.1.219 (external, cli)"
+	default:
+		return nil, fmt.Errorf("unsupported credential kind %q", cr.Kind)
+	}
+	return headers, nil
+}
+
+func randomUUID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
+}
 
 // ParseRequest decodes an OpenAI-format chat body for policy checks.
 func ParseRequest(rawBody []byte) (*ChatRequest, error) {

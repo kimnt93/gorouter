@@ -104,6 +104,61 @@ type gatewayUpstream struct {
 	calls    []string
 }
 
+type gatewayStreamUpstream struct{}
+
+func (gatewayStreamUpstream) Send(context.Context, *entities.CredentialRuntime, string, []byte) (*entities.UpstreamResult, error) {
+	body := "data: {\"id\":\"stream-1\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-a\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"stream works\"},\"finish_reason\":\"\"}]}\n\n" +
+		"data: {\"id\":\"stream-1\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-a\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2}}\n\n" +
+		"data: [DONE]\n\n"
+	return &entities.UpstreamResult{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func TestGatewayDoesNotCloseStreamingBodyBeforeWriterRuns(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	runtime := &entities.CredentialRuntime{ID: "cred-a", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: []entities.RouteCandidate{{CredentialID: "cred-a"}}, runtimes: map[string]*entities.CredentialRuntime{"cred-a": runtime}}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		OpenAI: gatewayStreamUpstream{}, Selector: &chat.Selector{}, Health: chat.NewHealth(),
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"stream":true,"temperature":0.7}`))
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if !strings.Contains(string(body), "stream works") || !strings.Contains(string(body), "data: [DONE]") {
+		t.Fatalf("stream body = %s", body)
+	}
+}
+
+type gatewayPriceResolver struct {
+	price entities.Price
+}
+
+func (r gatewayPriceResolver) Resolve(_, _ string) (entities.Price, bool) { return r.price, true }
+func (r gatewayPriceResolver) Estimates(_, _ string, prompt, completion int64) entities.PriceEstimates {
+	return entities.EstimateCosts(&r.price, prompt, completion, r.price.CachedInputPerM > 0)
+}
+
+func TestGatewayUsesPriceResolverFallback(t *testing.T) {
+	gateway := &Gateway{
+		Models:  modelroute.NewService(gatewayModelRepo{}),
+		Pricing: gatewayPriceResolver{price: entities.Price{InputPerM: 3}},
+	}
+	price, ok, err := gateway.resolvePrice(context.Background(), &entities.ModelDef{Name: "alias", UpstreamModel: "provider/model"})
+	if err != nil || !ok || price.InputPerM != 3 {
+		t.Fatalf("resolved price=%+v ok=%v err=%v", price, ok, err)
+	}
+}
+
 func (u *gatewayUpstream) Send(_ context.Context, runtime *entities.CredentialRuntime, _ string, _ []byte) (*entities.UpstreamResult, error) {
 	u.calls = append(u.calls, runtime.ID)
 	status := u.statuses[runtime.ID]

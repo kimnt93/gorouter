@@ -7,10 +7,24 @@ Supported kinds:
 - `api_key`
 - `oauth`
 
-Initial providers:
+OAuth subscription providers:
 
-- `openai-compatible`
+- `claude` (Claude Code, `cc/` public model prefix)
+- `codex` (OpenAI Codex, `cx/` public model prefix)
+
+API-key providers:
+
+- `openai`
 - `anthropic`
+- `gemini`
+- `groq`
+- `openrouter`
+- `opencode-zen`
+- `xai`
+- `deepseek`
+- `moonshot`
+- `qwen`
+- `openai-compatible` for custom endpoints
 
 Provider adapters must implement a common runtime interface and be selectable without changing gateway logic.
 
@@ -20,7 +34,7 @@ Provider adapters must implement a common runtime interface and be selectable wi
 - Use a unique random nonce per encryption operation.
 - Store only ciphertext in PostgreSQL.
 - Never log or return raw secrets.
-- OAuth refresh updates the encrypted blob.
+- OAuth refresh updates the encrypted blob while preserving ID-token, account, device, organization, and session metadata.
 
 ## Model Routes
 
@@ -47,3 +61,11 @@ After three consecutive failures, place a credential into a short cooldown. A su
 ## OAuth
 
 OAuth adapters must support access-token use, refresh-token use, refresh-on-401, and encrypted persistence of rotated tokens. Provider-specific OAuth behavior must remain isolated in its adapter.
+
+Browser connection flows use PKCE S256, cryptographic state, a ten-minute in-memory lifetime, session binding, and single-use consumption. Completion accepts a full callback URL or `code#state`; token endpoint bodies must never be returned to clients or logs.
+
+Codex uses the subscription Responses endpoint and `chatgpt-account-id` account binding. The OpenAI-compatible request field `reasoning` is forwarded as a distinct object; reasoning effort must never be appended to a `cx/<model>` name.
+
+Codex compatibility includes ordinary function declarations, assistant tool-call history, function outputs, named function choice, streamed function-call arguments, and non-streaming function-call collection. Provider-native web/search/computer/custom/MCP tool items, image/file inputs, and reasoning-summary events are not part of this contract.
+
+Connected credentials expose health probing, live model discovery, selected-model route import, and a direct streaming chat test through scoped administration endpoints.

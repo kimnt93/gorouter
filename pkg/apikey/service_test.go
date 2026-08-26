@@ -17,6 +17,20 @@ type repositoryStub struct {
 	deleted      struct{ tenant, id string }
 }
 
+func (r *repositoryStub) CreateWithQuota(_ context.Context, tenantID, name string, models, scopes []string, quota *float64, period string, rpm *int) (*entities.ApiKey, error) {
+	r.created = CreateInput{TenantID: tenantID, Name: name, Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm}
+	return &entities.ApiKey{ID: "key_1", TenantID: tenantID, Name: name, Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period}, nil
+}
+
+func (*repositoryStub) PatchQuota(context.Context, string, *bool, *[]string, *[]string, **float64, *string, **int) error {
+	return nil
+}
+
+func (r *repositoryStub) PatchQuotaForTenant(_ context.Context, tenantID, id string, _ *bool, _ *[]string, _ *[]string, _ **float64, _ *string, _ **int) error {
+	r.patched.tenant, r.patched.id = tenantID, id
+	return nil
+}
+
 func (r *repositoryStub) Create(_ context.Context, tenantID, name string, models, scopes []string, quota *float64, rpm *int) (*entities.ApiKey, error) {
 	r.created = CreateInput{TenantID: tenantID, Name: name, Models: models, Scopes: scopes, MonthlyQuotaUSD: quota, RPM: rpm}
 	return &entities.ApiKey{ID: "key_1", TenantID: tenantID, Name: name, Models: models, Scopes: scopes}, nil
@@ -78,6 +92,32 @@ func TestCreateAllowsEmptyModelAllowlist(t *testing.T) {
 	}
 }
 
+func TestCreateNormalizesQuotaPeriods(t *testing.T) {
+	quota := 2.5
+	tests := []struct {
+		name       string
+		in         CreateInput
+		wantQuota  *float64
+		wantPeriod string
+	}{
+		{"no limit", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: "none"}, nil, entities.QuotaPeriodNone},
+		{"daily", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: " DAY "}, &quota, entities.QuotaPeriodDay},
+		{"generic default", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota}, &quota, entities.QuotaPeriodMonth},
+		{"legacy monthly", CreateInput{TenantID: "t", Name: "k", MonthlyQuotaUSD: &quota}, &quota, entities.QuotaPeriodMonth},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &repositoryStub{}
+			if _, err := newTestService(repo).Create(context.Background(), tt.in); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(repo.created.QuotaUSD, tt.wantQuota) || repo.created.QuotaPeriod != tt.wantPeriod {
+				t.Fatalf("quota = %v/%q, want %v/%q", repo.created.QuotaUSD, repo.created.QuotaPeriod, tt.wantQuota, tt.wantPeriod)
+			}
+		})
+	}
+}
+
 func TestCreateRejectsInvalidInput(t *testing.T) {
 	quota := math.NaN()
 	rpm := 0
@@ -91,6 +131,8 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 		{"model", CreateInput{TenantID: "t", Name: "x", Models: []string{" "}}, ErrInvalidModel},
 		{"scope", CreateInput{TenantID: "t", Name: "x", Scopes: []string{"admin"}}, ErrInvalidScope},
 		{"quota", CreateInput{TenantID: "t", Name: "x", MonthlyQuotaUSD: &quota}, ErrInvalidQuota},
+		{"period", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "year"}, ErrInvalidPeriod},
+		{"missing quota", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "day"}, ErrQuotaRequired},
 		{"rpm", CreateInput{TenantID: "t", Name: "x", RPM: &rpm}, ErrInvalidRPM},
 	}
 	for _, tt := range tests {

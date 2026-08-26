@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func requiredEnv(t *testing.T) {
 	t.Helper()
@@ -11,6 +14,7 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("DB_USER", "gorouter")
 	t.Setenv("DB_PASSWORD", "secret")
 	t.Setenv("DB_NAME", "gorouter")
+	t.Setenv("DB_SSLMODE", "")
 	t.Setenv("REDIS_HOST", "redis.internal")
 	t.Setenv("REDIS_PORT", "6379")
 	t.Setenv("REDIS_USER", "gorouter")
@@ -23,6 +27,46 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("CACHE_ENABLED", "")
 	t.Setenv("REQUEST_LIMIT_MB", "")
 	t.Setenv("REQUEST_TIMEOUT", "")
+	t.Setenv("OPENROUTER_CATALOG_ENABLED", "")
+	t.Setenv("OPENROUTER_CATALOG_URL", "")
+	t.Setenv("OPENROUTER_SYNC_INTERVAL", "")
+	t.Setenv("OPENROUTER_HTTP_TIMEOUT", "")
+}
+
+func TestPricingCatalogDefaultsAndOverrides(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Pricing.Enabled || cfg.Pricing.SyncInterval != time.Hour || cfg.Pricing.HTTPTimeout != 30*time.Second {
+		t.Fatalf("pricing defaults = %+v", cfg.Pricing)
+	}
+	requiredEnv(t)
+	t.Setenv("OPENROUTER_CATALOG_ENABLED", "false")
+	t.Setenv("OPENROUTER_CATALOG_URL", "https://catalog.example/models")
+	t.Setenv("OPENROUTER_SYNC_INTERVAL", "15m")
+	t.Setenv("OPENROUTER_HTTP_TIMEOUT", "5s")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Pricing.Enabled || cfg.Pricing.CatalogURL != "https://catalog.example/models" || cfg.Pricing.SyncInterval != 15*time.Minute || cfg.Pricing.HTTPTimeout != 5*time.Second {
+		t.Fatalf("pricing overrides = %+v", cfg.Pricing)
+	}
+}
+
+func TestRejectsInvalidPricingConfig(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("OPENROUTER_SYNC_INTERVAL", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("zero catalog interval accepted")
+	}
+	requiredEnv(t)
+	t.Setenv("OPENROUTER_CATALOG_URL", "file:///tmp/models")
+	if _, err := Load(); err == nil {
+		t.Fatal("non-HTTP catalog URL accepted")
+	}
 }
 
 func TestRequiredEnvironment(t *testing.T) {
@@ -52,7 +96,7 @@ func TestBuildsConnectionURLsAndDerivesSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DatabaseURL != "postgres://gorouter:secret@database.internal:5432/gorouter" {
+	if cfg.DatabaseURL != "postgres://gorouter:secret@database.internal:5432/gorouter?sslmode=disable" {
 		t.Fatalf("database URL = %q", cfg.DatabaseURL)
 	}
 	if cfg.RedisURL != "redis://gorouter:redis-secret@redis.internal:6379/0" {
@@ -60,6 +104,18 @@ func TestBuildsConnectionURLsAndDerivesSecrets(t *testing.T) {
 	}
 	if cfg.EncryptionKey == "" || cfg.SessionSecret == "" || cfg.EncryptionKey == cfg.SessionSecret {
 		t.Fatal("master key did not produce distinct internal keys")
+	}
+}
+
+func TestDatabaseSSLModeOverride(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("DB_SSLMODE", "require")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL != "postgres://gorouter:secret@database.internal:5432/gorouter?sslmode=require" {
+		t.Fatalf("database URL = %q", cfg.DatabaseURL)
 	}
 }
 

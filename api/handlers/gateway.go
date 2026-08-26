@@ -18,6 +18,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/usage"
 	"github.com/kimnt93/gorouter/platform/llm"
@@ -31,9 +32,22 @@ type Gateway struct {
 	Cache     chat.PromptCache
 	OpenAI    entities.Upstream
 	Anthropic entities.Upstream
+	Codex     entities.Upstream
 	Selector  *chat.Selector
 	Health    *chat.Health
 	Quota     quota.Coordinator
+	Pricing   PriceResolver
+}
+
+type PriceResolver interface {
+	Resolve(model, upstreamModel string) (entities.Price, bool)
+	Estimates(model, upstreamModel string, promptTokens, completionTokens int64) entities.PriceEstimates
+}
+
+type PriceCatalog interface {
+	PriceResolver
+	Catalog(model, upstreamModel string) (entities.CatalogPrice, bool)
+	CatalogPrices() []entities.CatalogPrice
 }
 
 func (g *Gateway) Chat(c fiber.Ctx) error {
@@ -97,11 +111,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			return c.Send(cached.Body)
 		}
 	}
-	prices, priceErr := g.Models.Prices(c.Context())
+	price, priced, priceErr := g.resolvePrice(c.Context(), model)
 	if priceErr != nil {
 		return presenter.ServerError(c, "failed to load model price")
 	}
-	price, priced := prices[model.Name]
 	var pricePtr *entities.Price
 	if priced {
 		pricePtr = &price
@@ -115,18 +128,40 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			_ = g.Quota.Release(ctx, reservation)
 		}
 	}()
-	if key.MonthlyQuotaUSD != nil {
+	quotaLimit := key.QuotaUSD
+	quotaPeriod := key.QuotaPeriod
+	if quotaLimit == nil && key.MonthlyQuotaUSD != nil {
+		quotaLimit = key.MonthlyQuotaUSD
+		quotaPeriod = entities.QuotaPeriodMonth
+	}
+	if quotaLimit != nil && quotaPeriod != entities.QuotaPeriodNone {
 		if g.Quota == nil {
 			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")
 		}
+		if g.Usage == nil {
+			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota usage is unavailable", "service_unavailable", "usage_unavailable")
+		}
+		windowStart, _, _, windowErr := quota.Window(quotaPeriod, started)
+		if windowErr != nil {
+			return presenter.ServerError(c, "invalid API-key quota period")
+		}
 		estimate := entities.CalculateCost(pricePtr, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
-		spent, spendErr := g.Usage.MonthSpendForKey(c.Context(), key.ID)
+		if g.Pricing != nil {
+			estimate = g.Pricing.Estimates(model.Name, model.UpstreamModel, req.EstimatePromptTokens(), req.EstimateOutputTokens()).WithoutCache
+		}
+		spent, spendErr := g.Usage.SpendForKeySince(c.Context(), key.ID, windowStart)
 		if spendErr != nil {
 			return presenter.ServerError(c, "failed to load quota usage")
 		}
-		reservation, err = g.Quota.Reserve(c.Context(), key.ID, *key.MonthlyQuotaUSD, spent, estimate.USD, started)
+		if periodQuota, ok := g.Quota.(quota.PeriodCoordinator); ok {
+			reservation, err = periodQuota.ReserveForPeriod(c.Context(), key.ID, *quotaLimit, spent, estimate.USD, quotaPeriod, started)
+		} else if quotaPeriod == entities.QuotaPeriodMonth || quotaPeriod == "" {
+			reservation, err = g.Quota.Reserve(c.Context(), key.ID, *quotaLimit, spent, estimate.USD, started)
+		} else {
+			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination does not support this period", "service_unavailable", "quota_period_unavailable")
+		}
 		if errors.Is(err, quota.ErrExceeded) {
-			return presenter.Err(c, fiber.StatusTooManyRequests, "monthly quota exceeded", "insufficient_quota", "quota_exceeded")
+			return presenter.Err(c, fiber.StatusTooManyRequests, "quota exceeded", "insufficient_quota", "quota_exceeded")
 		}
 		if errors.Is(err, quota.ErrUnavailable) {
 			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")
@@ -205,11 +240,13 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 }
 
 func (g *Gateway) adapter(provider string) (entities.Upstream, bool) {
-	switch provider {
-	case entities.ProviderOpenAICompatible:
+	switch providerpkg.ProtocolFor(provider) {
+	case providerpkg.ProtocolOpenAI:
 		return g.OpenAI, true
-	case entities.ProviderAnthropic:
+	case providerpkg.ProtocolAnthropic:
 		return g.Anthropic, true
+	case providerpkg.ProtocolCodex:
+		return g.Codex, true
 	default:
 		return nil, false
 	}
@@ -264,7 +301,7 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 		return presenter.Err(c, 502, "upstream read failed", "upstream_error", "")
 	}
 	usage := llm.ExtractUsage(body)
-	if runtime.Provider == entities.ProviderAnthropic {
+	if providerpkg.ProtocolFor(runtime.Provider) == providerpkg.ProtocolAnthropic {
 		resp, err := llm.FromAnthropic(body, model.Name)
 		if err != nil {
 			g.recordError(key, model, runtime.ID, fiber.StatusBadGateway, started, "response translation failed")
@@ -297,7 +334,6 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *entities.ApiKey, model *entities.M
 }
 
 func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
-	defer result.Body.Close()
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
@@ -311,8 +347,9 @@ func (g *Gateway) stream(c fiber.Ctx, key *entities.ApiKey, model *entities.Mode
 	var content strings.Builder
 	finishReason := "stop"
 	return c.SendStreamWriter(func(w *bufio.Writer) {
+		defer result.Body.Close()
 		streamStatus := fiber.StatusOK
-		if runtime.Provider == entities.ProviderAnthropic {
+		if providerpkg.ProtocolFor(runtime.Provider) == providerpkg.ProtocolAnthropic {
 			conv := llm.NewAnthropicStreamConverter(model.Name)
 			err := llm.ScanSSE(result.Body, func(ev llm.SSEEvent) error {
 				chunks, _, err := conv.Feed(ev.Event, ev.Data)
@@ -412,8 +449,7 @@ func (g *Gateway) record(key *entities.ApiKey, model *entities.ModelDef, cred st
 	if g.Usage == nil {
 		return
 	}
-	prices, _ := g.Models.Prices(context.Background())
-	p, ok := prices[model.Name]
+	p, ok, _ := g.resolvePrice(context.Background(), model)
 	var price *entities.Price
 	if ok {
 		price = &p
@@ -423,6 +459,19 @@ func (g *Gateway) record(key *entities.ApiKey, model *entities.ModelDef, cred st
 		cost = entities.Cost{USD: 0, Priced: true}
 	}
 	g.recordCost(key, model, cred, u, hit, status, started, cost)
+}
+
+func (g *Gateway) resolvePrice(ctx context.Context, model *entities.ModelDef) (entities.Price, bool, error) {
+	if g.Pricing != nil {
+		price, ok := g.Pricing.Resolve(model.Name, model.UpstreamModel)
+		return price, ok, nil
+	}
+	prices, err := g.Models.Prices(ctx)
+	if err != nil {
+		return entities.Price{}, false, err
+	}
+	price, ok := prices[model.Name]
+	return price, ok, nil
 }
 
 func (g *Gateway) recordCost(key *entities.ApiKey, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost) {

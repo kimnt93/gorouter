@@ -25,7 +25,8 @@ API keys must include:
 - Enabled state
 - Allowed model names
 - Scopes
-- Monthly USD quota, nullable
+- USD quota, nullable
+- Quota period: `none`, `day`, `week`, or `month`
 - RPM limit, nullable
 - Created timestamp
 

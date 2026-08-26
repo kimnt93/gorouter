@@ -11,13 +11,14 @@ type StreamOptions struct {
 }
 
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
+	Index    *int         `json:"index,omitempty"`
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
 	Function ToolFunction `json:"function"`
 }
 
 type ToolFunction struct {
-	Name        string          `json:"name"`
+	Name        string          `json:"name,omitempty"`
 	Description string          `json:"description,omitempty"`
 	Arguments   string          `json:"arguments,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
@@ -53,6 +54,13 @@ type ChatRequest struct {
 	Tools               []Tool          `json:"tools,omitempty"`
 	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
 	User                string          `json:"user,omitempty"`
+	Reasoning           *Reasoning      `json:"reasoning,omitempty"`
+}
+
+// Reasoning stays request-scoped. It is never encoded in a public model ID.
+type Reasoning struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 func (r *ChatRequest) OutputLimit() int64 {
@@ -149,6 +157,11 @@ type AnthropicRequest struct {
 	StopSequences []string           `json:"stop_sequences,omitempty"`
 	Stream        bool               `json:"stream"`
 	Tools         []AnthropicTool    `json:"tools,omitempty"`
+	Metadata      *AnthropicMetadata `json:"metadata,omitempty"`
+}
+
+type AnthropicMetadata struct {
+	UserID string `json:"user_id"`
 }
 
 type AnthropicMessage struct {

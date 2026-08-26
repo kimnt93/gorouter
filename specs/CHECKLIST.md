@@ -128,10 +128,36 @@ Agents may work in parallel only when their file ownership does not overlap. Eac
 - [x] Run `go test ./...`.
 - [x] Run live curl/browser smoke test.
 
+### J. Provider Connections, Catalog Pricing, and Period Quotas
+
+- [x] Add an inline provider dashboard separated into OAuth subscriptions and API-key providers.
+- [x] Add presets for OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, xAI, DeepSeek, Moonshot, Qwen, and custom OpenAI-compatible endpoints.
+- [x] Support multiple connected credentials per provider without exposing their secrets.
+- [x] Add session-bound, PKCE-protected, short-lived, single-use copy/paste OAuth flows for Claude Code and OpenAI Codex.
+- [x] Encrypt OAuth access, refresh, ID, account, and provider metadata at rest and preserve metadata when tokens rotate.
+- [x] Add credential health checks and live provider model discovery.
+- [x] Add selected-model import that merges a credential route into the existing public model definition.
+- [x] Add a direct streaming provider chat test.
+- [x] Prefix discovered public models by provider, including `cc/<model>` for Claude Code and `cx/<model>` for Codex.
+- [x] Accept Codex reasoning as the request-level `reasoning.effort` and `reasoning.summary` object without modifying the model name.
+- [x] Translate Codex function-call request history, tool choice, streamed argument events, completion events, and non-streaming function-call output.
+- [x] Synchronize the OpenRouter frontend catalog immediately at startup and hourly thereafter without blocking request serving.
+- [x] Store one compact catalog-price row per canonical model and atomically refresh the in-memory resolver.
+- [x] Prefer manually configured prices, then catalog prices for the public or upstream model.
+- [x] Derive cached and non-cached estimates from stored rates instead of persisting duplicate totals.
+- [x] Expose searchable/paginated catalog and price-estimate administration endpoints.
+- [x] Create derived keys from selected imported models with `day`, `week`, `month`, or `none` quota periods.
+- [x] Enforce UTC day, ISO-week, and UTC calendar-month quota windows through Redis reservations and durable usage totals.
+- [x] Keep legacy monthly quota input and records compatible.
+- [x] Add unit/handler tests for provider catalog prefixes, OAuth flow security, connector discovery/streaming, catalog parsing/resolution/estimates, and UTC quota boundaries.
+- [x] Add route-level ownership tests for OAuth start/completion and credential connectivity operations.
+
+Real-account Claude Code and Codex OAuth smoke tests are explicitly deferred until test subscriptions are available. They are not represented as completed automated coverage.
+
 ## Final Integration
 
 - [x] Remove dead duplicate implementations.
-- [x] Confirm README matches actual runtime behavior.
+- [x] Confirm README documents the current runtime behavior and explicitly identifies deferred external connector checks.
 - [x] Confirm `.env.example` includes all required variables.
 - [x] Confirm Docker Compose starts PostgreSQL and Redis.
 - [x] Confirm all secret values are absent from logs and list responses.

@@ -50,18 +50,21 @@ Domain and use-case packages must not import Fiber. HTTP concerns stay in `api/`
 2. Login using either the master key or a scoped API key.
 3. Multi-tenant API-key management.
 4. Per-key model allowlists and access scopes.
-5. Multiple provider credentials per model.
-6. API-key and OAuth credential kinds.
+5. Multiple provider credentials per model, including multiple accounts for the same provider.
+6. Provider catalog split into OAuth subscriptions and API-key connections.
 7. Encrypted credential storage.
 8. Priority and round-robin routing.
 9. Retry/failover and unhealthy-credential cooldown.
-10. Monthly USD quotas and optional RPM limits.
-11. Model price management and future public price synchronization.
+10. Per-key USD quotas for UTC day, ISO week, UTC calendar month, or no limit, plus optional RPM limits.
+11. Model price management and hourly OpenRouter catalog synchronization into compact database records and an in-memory resolver.
 12. Usage and cost logging.
 13. Redis-backed, multi-tenant prompt caching.
 14. OpenAI-compatible `/v1/models` and `/v1/chat/completions`.
-15. Anthropic translation and OAuth refresh support.
-16. Embedded Tailwind/HTMX administration UI.
+15. Anthropic translation plus Claude Code OAuth refresh support.
+16. Codex subscription routing under `cx/<model>` with request-scoped `reasoning` options.
+17. Provider health checks, model discovery/import, and direct streaming chat tests.
+18. Derived API keys restricted to selected imported models.
+19. Embedded Tailwind/HTMX administration UI with inline expandable provider cards.
 
 ## Specification Files
 
