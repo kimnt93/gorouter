@@ -155,13 +155,14 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 			DefaultModel string `json:"default_model"`
 			Data         []struct {
 				ID      string `json:"id"`
+				Object  string `json:"object"`
 				Default bool   `json:"default"`
 			} `json:"data"`
 		}
 		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		if response.StatusCode != http.StatusOK || payload.DefaultModel != "provider-model" || len(payload.Data) != 1 || !payload.Data[0].Default {
+		if response.StatusCode != http.StatusOK || payload.DefaultModel != "provider-model" || len(payload.Data) != 1 || payload.Data[0].Object != "model" || !payload.Data[0].Default {
 			t.Fatalf("model default payload = %+v status=%d", payload, response.StatusCode)
 		}
 	})

@@ -33,7 +33,7 @@ func (h *OAuthConnector) Start(c fiber.Ctx) error {
 	if h.Service == nil {
 		return presenter.ServerError(c, "OAuth connector is unavailable")
 	}
-	result, err := h.Service.Start(strings.ToLower(c.Params("provider")), oauthSessionBinding(SessionFrom(c)))
+	result, err := h.Service.StartContext(c.Context(), strings.ToLower(c.Params("provider")), oauthSessionBinding(SessionFrom(c)))
 	if errors.Is(err, oauthpkg.ErrInvalidFlow) {
 		return presenter.BadRequest(c, "unsupported OAuth provider")
 	}
@@ -48,8 +48,8 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return presenter.ServerError(c, "OAuth connector is unavailable")
 	}
 	var body oauthCompleteBody
-	if err := c.Bind().Body(&body); err != nil || strings.TrimSpace(body.FlowID) == "" || strings.TrimSpace(body.Callback) == "" {
-		return presenter.BadRequest(c, "flow_id and callback are required")
+	if err := c.Bind().Body(&body); err != nil || strings.TrimSpace(body.FlowID) == "" {
+		return presenter.BadRequest(c, "flow_id is required")
 	}
 	session := SessionFrom(c)
 	owner := body.OwnerTenant
@@ -63,6 +63,12 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 	})
 	if errors.Is(err, oauthpkg.ErrInvalidFlow) || errors.Is(err, oauthpkg.ErrBadCallback) {
 		return presenter.BadRequest(c, "OAuth flow expired or callback did not match")
+	}
+	if errors.Is(err, oauthpkg.ErrAuthorizationPending) {
+		return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "authorization_pending"})
+	}
+	if errors.Is(err, oauthpkg.ErrAccessDenied) {
+		return presenter.BadRequest(c, "OAuth authorization was denied")
 	}
 	if err != nil {
 		return presenter.Err(c, fiber.StatusBadGateway, "OAuth token exchange failed", "upstream_error", "oauth_exchange_failed")

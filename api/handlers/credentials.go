@@ -25,6 +25,7 @@ type CredentialConnectivity struct {
 	OpenAI      credential.ConnectivityProber
 	Anthropic   credential.ConnectivityProber
 	Codex       credential.ConnectivityProber
+	Providers   map[string]credential.ConnectivityProber
 	ModelRoutes *modelroute.Service
 }
 
@@ -88,11 +89,24 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 }
 
 type providerModelResponse struct {
-	ID            string `json:"id"`
-	PublicID      string `json:"public_id"`
-	Default       bool   `json:"default,omitempty"`
-	OwnedBy       string `json:"owned_by,omitempty"`
-	ContextLength int64  `json:"context_length,omitempty"`
+	ID                 string         `json:"id"`
+	Object             string         `json:"object"`
+	PublicID           string         `json:"public_id"`
+	Default            bool           `json:"default,omitempty"`
+	Created            int64          `json:"created,omitempty"`
+	OwnedBy            string         `json:"owned_by,omitempty"`
+	Permission         []any          `json:"permission,omitempty"`
+	Root               string         `json:"root,omitempty"`
+	Parent             *string        `json:"parent,omitempty"`
+	APIFormat          string         `json:"api_format,omitempty"`
+	ContextLength      int64          `json:"context_length,omitempty"`
+	MaxOutputTokens    int64          `json:"max_output_tokens,omitempty"`
+	SupportedEndpoints []string       `json:"supported_endpoints,omitempty"`
+	Capabilities       map[string]any `json:"capabilities,omitempty"`
+	InputModalities    []string       `json:"input_modalities,omitempty"`
+	OutputModalities   []string       `json:"output_modalities,omitempty"`
+	MaxInputTokens     int64          `json:"max_input_tokens,omitempty"`
+	Name               string         `json:"name,omitempty"`
 }
 
 type providerModelsResponse struct {
@@ -120,6 +134,14 @@ func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
 
 func (h *CredentialConnectivity) adapter(providerID string) (credential.ConnectivityProber, credential.ModelDiscoverer, entities.Upstream) {
 	var value credential.ConnectivityProber
+	if h.Providers != nil {
+		value = h.Providers[providerID]
+	}
+	if value != nil {
+		discoverer, _ := value.(credential.ModelDiscoverer)
+		upstream, _ := value.(entities.Upstream)
+		return value, discoverer, upstream
+	}
 	switch providerpkg.ProtocolFor(providerID) {
 	case providerpkg.ProtocolOpenAI:
 		value = h.OpenAI
@@ -182,7 +204,30 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 	}
 	out := providerModelsResponse{Object: "list", Provider: runtime.Provider, DefaultModel: defaultModel, Data: make([]providerModelResponse, 0, len(models))}
 	for _, model := range models {
-		out.Data = append(out.Data, providerModelResponse{ID: model.ID, PublicID: providerpkg.PublicModelID(runtime.Provider, model.ID), Default: model.ID == defaultModel, OwnedBy: model.OwnedBy, ContextLength: model.ContextLength})
+		object := model.Object
+		if object == "" {
+			object = "model"
+		}
+		out.Data = append(out.Data, providerModelResponse{
+			ID:                 model.ID,
+			Object:             object,
+			PublicID:           providerpkg.PublicModelID(runtime.Provider, model.ID),
+			Default:            model.ID == defaultModel,
+			Created:            model.Created,
+			OwnedBy:            model.OwnedBy,
+			Permission:         model.Permission,
+			Root:               model.Root,
+			Parent:             model.Parent,
+			APIFormat:          model.APIFormat,
+			ContextLength:      model.ContextLength,
+			MaxOutputTokens:    model.MaxOutputTokens,
+			SupportedEndpoints: model.SupportedEndpoints,
+			Capabilities:       model.Capabilities,
+			InputModalities:    model.InputModalities,
+			OutputModalities:   model.OutputModalities,
+			MaxInputTokens:     model.MaxInputTokens,
+			Name:               model.Name,
+		})
 	}
 	return c.JSON(out)
 }

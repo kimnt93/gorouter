@@ -22,21 +22,22 @@ import (
 )
 
 type Dependencies struct {
-	Auth        *auth.Service
-	Tenants     *tenant.Service
-	Credentials *credential.Service
-	Keys        *apikey.Service
-	Models      *modelroute.Service
-	Usage       *usage.Service
-	Cache       chat.PromptCache
-	Gateway     *handlers.Gateway
-	OpenAI      credential.ConnectivityProber
-	Anthropic   credential.ConnectivityProber
-	Codex       credential.ConnectivityProber
-	OAuth       *oauthpkg.Service
-	Pricing     handlers.PriceCatalog
-	BodyLimit   int
-	ReadTimeout time.Duration
+	Auth              *auth.Service
+	Tenants           *tenant.Service
+	Credentials       *credential.Service
+	Keys              *apikey.Service
+	Models            *modelroute.Service
+	Usage             *usage.Service
+	Cache             chat.PromptCache
+	Gateway           *handlers.Gateway
+	OpenAI            credential.ConnectivityProber
+	Anthropic         credential.ConnectivityProber
+	Codex             credential.ConnectivityProber
+	Providers         map[string]credential.ConnectivityProber
+	OAuth             *oauthpkg.Service
+	Pricing           handlers.PriceCatalog
+	BodyLimit         int
+	ReadTimeout       time.Duration
 }
 
 type healthResponse struct {
@@ -97,7 +98,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Put("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
 	mgmt.Delete("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
-	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, ModelRoutes: d.Models}
+	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models}
 	oauthConnector := &handlers.OAuthConnector{Service: d.OAuth}
 	mgmt.Get("/providers", handlers.Require(d.Auth, entities.ScopeCredentialsManage), admin.Providers)
 	mgmt.Post("/oauth/:provider/start", handlers.Require(d.Auth, entities.ScopeCredentialsManage), oauthConnector.Start)

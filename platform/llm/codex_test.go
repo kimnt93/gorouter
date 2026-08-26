@@ -111,7 +111,7 @@ func TestCodexModelDiscoveryNormalizesOpenAIStyleCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].ID != "gpt-5.6-sol" || models[0].OwnedBy != "codex" || models[0].ContextLength != 872000 {
+	if len(models) != 1 || models[0].ID != "gpt-5.6-sol" || models[0].Object != "model" || models[0].OwnedBy != "codex" || models[0].ContextLength != 272000 || models[0].MaxInputTokens != 872000 || models[0].MaxOutputTokens != 128000 || models[0].Name != "cx/GPT 5.6 Sol" {
 		t.Fatalf("models = %+v", models)
 	}
 }

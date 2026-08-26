@@ -8,6 +8,8 @@
   let activeProvider = "";
   let chatController = null;
   let oauthProvider = "";
+  let oauthFlowType = "";
+  let oauthPollTimer = null;
   let oauthFlowID = "";
 
   const byID = (id) => document.getElementById(id);
@@ -243,10 +245,13 @@
   async function startOAuth(button) {
     oauthProvider = button.dataset.oauthStart;
     oauthFlowID = "";
+    oauthFlowType = "";
+    if (oauthPollTimer) window.clearTimeout(oauthPollTimer);
     const dialog = byID("oauth-dialog");
     const link = byID("oauth-authorize-link");
     byID("oauth-dialog-title").textContent = `Connect ${button.textContent.replace(/^Connect\s+/, "")}`;
     byID("oauth-callback").value = "";
+    byID("oauth-callback").closest("label").hidden = false;
     link.hidden = true;
     link.removeAttribute("href");
     setResult(byID("oauth-dialog-result"), "Creating a secure authorization flow…", "loading");
@@ -255,10 +260,15 @@
     try {
       const payload = await fetchJSON(`/admin/oauth/${encodeURIComponent(oauthProvider)}/start`, { method: "POST" });
       oauthFlowID = payload.flow_id || "";
+	  oauthFlowType = payload.flow_type || "authorization_code_pkce";
       if (!oauthFlowID || !payload.authorize_url) throw new Error("OAuth start response was incomplete.");
       link.href = payload.authorize_url;
       link.hidden = false;
-      setResult(byID("oauth-dialog-result"), payload.instructions || "Open the authorization page, then paste the callback here.", "success");
+      const code = payload.user_code ? ` Device code: ${payload.user_code}.` : "";
+      setResult(byID("oauth-dialog-result"), (payload.instructions || "Open the authorization page, then paste the callback here.") + code, "success");
+      const callbackField = byID("oauth-callback").closest("label");
+      callbackField.hidden = oauthFlowType === "device_code" || oauthFlowType === "cursor_poll";
+      if (callbackField.hidden) oauthPollTimer = window.setTimeout(() => completeOAuth(byID("oauth-complete"), true), Math.max(1000, (payload.interval || 3) * 1000));
     } catch (error) {
       setResult(byID("oauth-dialog-result"), error.message, "error");
     } finally {
@@ -266,9 +276,10 @@
     }
   }
 
-  async function completeOAuth(button) {
+  async function completeOAuth(button, polling = false) {
     const callback = byID("oauth-callback").value.trim();
-    if (!oauthFlowID || !callback) {
+    const callbackRequired = oauthFlowType !== "device_code" && oauthFlowType !== "cursor_poll";
+    if (!oauthFlowID || (callbackRequired && !callback)) {
       setResult(byID("oauth-dialog-result"), "Start the flow and paste the callback first.", "error");
       return;
     }
@@ -276,18 +287,27 @@
     setResult(byID("oauth-dialog-result"), "Exchanging and encrypting OAuth credentials…", "loading");
     try {
       const owner = byID("oauth-owner")?.value || "";
-      await fetchJSON(`/admin/oauth/${encodeURIComponent(oauthProvider)}/complete`, {
+      const response = await fetch(`/admin/oauth/${encodeURIComponent(oauthProvider)}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flow_id: oauthFlowID, callback, name: byID("oauth-name").value.trim(), owner_tenant_id: owner || null }),
       });
+      if (response.status === 202) {
+        setResult(byID("oauth-dialog-result"), "Waiting for authorization…", "loading");
+        oauthPollTimer = window.setTimeout(() => completeOAuth(button, true), 3000);
+        return;
+      }
+      if (!response.ok) {
+        let payload = {}; try { payload = await response.json(); } catch (_) {}
+        throw new Error(payload.message || payload.error?.message || (typeof payload.error === "string" ? payload.error : "") || `Request failed (${response.status})`);
+      }
       oauthFlowID = "";
       setResult(byID("oauth-dialog-result"), "Connected. Refreshing providers…", "success");
       window.setTimeout(() => window.location.reload(), 450);
     } catch (error) {
       setResult(byID("oauth-dialog-result"), error.message, "error");
     } finally {
-      button.disabled = false;
+      if (!polling || !oauthFlowID) button.disabled = false;
     }
   }
 
@@ -307,6 +327,11 @@
     else if (button.id === "chat-send") streamChat(button);
     else if (button.id === "chat-stop" && chatController) chatController.abort();
     else if (button.id === "oauth-complete") completeOAuth(button);
+  });
+
+  byID("oauth-dialog")?.addEventListener("close", () => {
+    if (oauthPollTimer) window.clearTimeout(oauthPollTimer);
+    oauthPollTimer = null;
   });
   document.addEventListener("change", (event) => {
     if (event.target.matches('#models-dialog-list input[type="checkbox"]')) updateSelectAllLabel();

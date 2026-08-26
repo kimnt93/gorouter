@@ -660,17 +660,29 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 	seen := map[string]credential.ProviderModel{}
 	for _, item := range items {
 		var record struct {
-			Slug             string `json:"slug"`
-			ID               string `json:"id"`
-			Model            string `json:"model"`
-			Name             string `json:"name"`
-			Visibility       string `json:"visibility"`
-			Supported        *bool  `json:"supported_in_api"`
-			SupportedInAPI   *bool  `json:"supportedInApi"`
-			Context          int64  `json:"context_window"`
-			ContextLength    int64  `json:"context_length"`
-			MaxContextWindow int64  `json:"max_context_window"`
-			MaxInputTokens   int64  `json:"max_input_tokens"`
+			Object             string         `json:"object"`
+			Created            int64          `json:"created"`
+			Slug               string         `json:"slug"`
+			ID                 string         `json:"id"`
+			Model              string         `json:"model"`
+			Name               string         `json:"name"`
+			OwnedBy            string         `json:"owned_by"`
+			Permission         []any          `json:"permission"`
+			Root               string         `json:"root"`
+			Parent             *string        `json:"parent"`
+			APIFormat          string         `json:"api_format"`
+			Visibility         string         `json:"visibility"`
+			Supported          *bool          `json:"supported_in_api"`
+			SupportedInAPI     *bool          `json:"supportedInApi"`
+			Context            int64          `json:"context_window"`
+			ContextLength      int64          `json:"context_length"`
+			MaxContextWindow   int64          `json:"max_context_window"`
+			MaxInputTokens     int64          `json:"max_input_tokens"`
+			MaxOutputTokens    int64          `json:"max_output_tokens"`
+			SupportedEndpoints []string       `json:"supported_endpoints"`
+			Capabilities       map[string]any `json:"capabilities"`
+			InputModalities    []string       `json:"input_modalities"`
+			OutputModalities   []string       `json:"output_modalities"`
 		}
 		if json.Unmarshal(item, &record) != nil || strings.EqualFold(record.Visibility, "hide") || (record.Supported != nil && !*record.Supported) || (record.SupportedInAPI != nil && !*record.SupportedInAPI) {
 			continue
@@ -688,17 +700,44 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 		if id == "" {
 			continue
 		}
-		contextLength := record.MaxInputTokens
+		// Preserve the upstream context_length semantics in the public model
+		// listing. max_input_tokens is a separate limit and must not replace it.
+		contextLength := record.ContextLength
 		if contextLength == 0 {
 			contextLength = record.MaxContextWindow
 		}
 		if contextLength == 0 {
-			contextLength = record.ContextLength
-		}
-		if contextLength == 0 {
 			contextLength = record.Context
 		}
-		seen[id] = credential.ProviderModel{ID: id, OwnedBy: "codex", ContextLength: contextLength}
+		if contextLength == 0 {
+			contextLength = record.MaxInputTokens
+		}
+		object := record.Object
+		if object == "" {
+			object = "model"
+		}
+		ownedBy := record.OwnedBy
+		if ownedBy == "" {
+			ownedBy = "codex"
+		}
+		seen[id] = credential.ProviderModel{
+			ID:                 id,
+			Object:             object,
+			Created:            record.Created,
+			OwnedBy:            ownedBy,
+			Permission:         record.Permission,
+			Root:               record.Root,
+			Parent:             record.Parent,
+			APIFormat:          record.APIFormat,
+			ContextLength:      contextLength,
+			MaxOutputTokens:    record.MaxOutputTokens,
+			SupportedEndpoints: record.SupportedEndpoints,
+			Capabilities:       record.Capabilities,
+			InputModalities:    record.InputModalities,
+			OutputModalities:   record.OutputModalities,
+			MaxInputTokens:     record.MaxInputTokens,
+			Name:               record.Name,
+		}
 	}
 	models := make([]credential.ProviderModel, 0, len(seen))
 	for _, model := range seen {

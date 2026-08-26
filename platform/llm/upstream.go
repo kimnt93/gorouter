@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -63,7 +64,8 @@ func get(ctx context.Context, client *http.Client, url string, headers map[strin
 }
 
 type OpenAIAdapter struct {
-	HTTP *http.Client
+	HTTP    *http.Client
+	Refresh func(context.Context, *entities.CredentialRuntime) error
 }
 
 // Send forwards an OpenAI Chat Completions body to the upstream, rewriting the
@@ -73,14 +75,31 @@ func (a *OpenAIAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime
 	if err != nil {
 		return nil, err
 	}
+	token := cr.APIKey
+	if cr.Kind == entities.KindOAuth {
+		token = cr.OAuthAccess
+	}
 	headers := map[string]string{
 		"Accept":        "application/json",
-		"Authorization": "Bearer " + cr.APIKey,
+		"Authorization": "Bearer " + token,
 	}
+	applyOAuthProviderHeaders(headers, cr)
 	if stream {
 		headers["Accept"] = "text/event-stream"
 	}
-	return postJSON(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "chat/completions"), headers, body)
+	send := func() (*entities.UpstreamResult, error) {
+		return postJSON(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "chat/completions"), headers, body)
+	}
+	result, err := send()
+	if err == nil && result.StatusCode == http.StatusUnauthorized && cr.Kind == entities.KindOAuth && a.Refresh != nil {
+		result.Body.Close()
+		if refreshErr := a.Refresh(ctx, cr); refreshErr != nil {
+			return nil, fmt.Errorf("oauth refresh failed: %w", refreshErr)
+		}
+		headers["Authorization"] = "Bearer " + cr.OAuthAccess
+		return send()
+	}
+	return result, err
 }
 
 func openAIBase(baseURL string) string {
@@ -88,10 +107,14 @@ func openAIBase(baseURL string) string {
 	if base == "" {
 		return "https://api.openai.com/v1"
 	}
-	for _, suffix := range []string{"/chat/completions", "/responses", "/models"} {
-		if strings.HasSuffix(base, suffix) {
-			base = strings.TrimRight(strings.TrimSuffix(base, suffix), "/")
-			break
+	if parsed, err := url.Parse(base); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		path := strings.TrimRight(parsed.Path, "/")
+		for _, suffix := range []string{"/chat/completions", "/responses", "/models", "/chat", "/messages"} {
+			if strings.HasSuffix(path, suffix) {
+				parsed.Path = strings.TrimRight(strings.TrimSuffix(path, suffix), "/")
+				parsed.RawPath = ""
+				return strings.TrimRight(parsed.String(), "/")
+			}
 		}
 	}
 	return base
@@ -115,6 +138,9 @@ func prepareOpenAIRequest(rawBody []byte, upstreamModel string) ([]byte, bool, e
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(rawBody, &fields); err != nil {
 		return nil, false, fmt.Errorf("parse OpenAI request object: %w", err)
+	}
+	if fields == nil {
+		return nil, false, errors.New("parse OpenAI request object: expected JSON object")
 	}
 	model, _ := json.Marshal(upstreamModel)
 	fields["model"] = model
@@ -146,16 +172,48 @@ func (a *OpenAIAdapter) httpClient() *http.Client {
 }
 
 func (a *OpenAIAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime) (int, error) {
-	res, err := get(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "models"), map[string]string{
-		"Accept":        "application/json",
-		"Authorization": "Bearer " + cr.APIKey,
-	})
+	token := cr.APIKey
+	if cr.Kind == entities.KindOAuth {
+		token = cr.OAuthAccess
+	}
+	headers := map[string]string{"Accept": "application/json", "Authorization": "Bearer " + token}
+	applyOAuthProviderHeaders(headers, cr)
+	load := func() (*entities.UpstreamResult, error) {
+		return get(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "models"), headers)
+	}
+	res, err := load()
 	if err != nil {
 		return 0, err
+	}
+	if res.StatusCode == http.StatusUnauthorized && cr.Kind == entities.KindOAuth && a.Refresh != nil {
+		res.Body.Close()
+		if err := a.Refresh(ctx, cr); err != nil {
+			return 0, err
+		}
+		headers["Authorization"] = "Bearer " + cr.OAuthAccess
+		res, err = load()
+		if err != nil {
+			return 0, err
+		}
 	}
 	defer res.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
 	return res.StatusCode, nil
+}
+
+func applyOAuthProviderHeaders(headers map[string]string, cr *entities.CredentialRuntime) {
+	if cr == nil || cr.Kind != entities.KindOAuth {
+		return
+	}
+	switch cr.Provider {
+	case "grok-build":
+		headers["User-Agent"] = "grok-cli/1.0"
+	case "cline", "clinepass":
+		headers["X-Client-Type"] = "extension"
+	case "kilo-code":
+		headers["HTTP-Referer"] = "https://kilo.ai"
+		headers["X-Title"] = "Kilo Code"
+	}
 }
 
 type AnthropicAdapter struct {
@@ -190,13 +248,14 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 		return nil, err
 	}
 	url := anthropicBase(cr.BaseURL) + "/v1/messages"
+	if cr.Provider=="kimi-code" { url += "?beta=true" }
 
 	send := func() (*entities.UpstreamResult, error) {
 		headers, headerErr := anthropicHeaders(cr)
 		if headerErr != nil {
 			return nil, headerErr
 		}
-		return postJSON(ctx, a.HTTP, url, headers, body)
+		return postJSON(ctx, a.httpClient(), url, headers, body)
 	}
 
 	res, err := send()
@@ -228,7 +287,7 @@ func (a *AnthropicAdapter) Probe(ctx context.Context, cr *entities.CredentialRun
 	if err != nil {
 		return 0, err
 	}
-	res, err := postJSON(ctx, a.HTTP, base+"/v1/messages", headers, body)
+	res, err := postJSON(ctx, a.httpClient(), base+"/v1/messages", headers, body)
 	if err != nil {
 		return 0, err
 	}
@@ -251,10 +310,31 @@ func anthropicBase(baseURL string) string {
 	return base
 }
 
+func (a *AnthropicAdapter) httpClient() *http.Client {
+	if a.HTTP != nil {
+		return a.HTTP
+	}
+	return NewHTTPClient()
+}
+
 func int64Ptr(v int64) *int64 { return &v }
 
 func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error) {
 	headers := map[string]string{"anthropic-version": anthropicVersion}
+	if cr.Provider == "kimi-code" && cr.Kind == entities.KindOAuth {
+		headers["x-api-key"] = cr.OAuthAccess
+		headers["Authorization"] = "Bearer " + cr.OAuthAccess
+		headers["User-Agent"] = "kimi-code-cli/0.26.0"
+		headers["X-Msh-Platform"] = "kimi_code_cli"
+		headers["X-Msh-Version"] = "0.26.0"
+		headers["X-Msh-Device-Name"] = "gorouter"
+		headers["X-Msh-Device-Model"] = "server"
+		headers["X-Msh-Os-Version"] = "linux"
+		if cr.OAuthMeta.DeviceID != "" {
+			headers["X-Msh-Device-Id"] = cr.OAuthMeta.DeviceID
+		}
+		return headers, nil
+	}
 	switch cr.Kind {
 	case entities.KindAPIKey:
 		headers["x-api-key"] = cr.APIKey

@@ -14,22 +14,27 @@ import (
 )
 
 type Config struct {
-	Listen             string
-	DatabaseBackend    string
-	DatabaseURL        string
-	RedisURL           string
-	MasterKey          string
-	EncryptionKey      string
-	SessionSecret      string
-	RequestLimit       int64
-	RequestTimeout     time.Duration
-	Cache              CacheConfig
-	Quota              QuotaConfig
-	Pricing            PricingConfig
-	OAuthClientID      string
-	OAuthTokenURL      string
-	CodexOAuthClientID string
-	CodexOAuthTokenURL string
+	Listen                       string
+	DatabaseBackend              string
+	DatabaseURL                  string
+	RedisURL                     string
+	MasterKey                    string
+	EncryptionKey                string
+	SessionSecret                string
+	RequestLimit                 int64
+	RequestTimeout               time.Duration
+	Cache                        CacheConfig
+	Quota                        QuotaConfig
+	Pricing                      PricingConfig
+	OAuthClientID                string
+	OAuthTokenURL                string
+	CodexOAuthClientID           string
+	CodexOAuthTokenURL           string
+	GitHubOAuthClientID          string
+	GrokOAuthClientID            string
+	KimiOAuthClientID            string
+	AntigravityOAuthClientID     string
+	AntigravityOAuthClientSecret string
 }
 
 type CacheConfig struct {
@@ -54,14 +59,19 @@ type PricingConfig struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		Listen:             env("LISTEN", ":8090"),
-		MasterKey:          os.Getenv("MASTER_KEY"),
-		RequestLimit:       20 << 20,
-		RequestTimeout:     5 * time.Minute,
-		OAuthClientID:      env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
-		OAuthTokenURL:      os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
-		CodexOAuthClientID: env("CODEX_OAUTH_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
-		CodexOAuthTokenURL: os.Getenv("CODEX_OAUTH_TOKEN_URL"),
+		Listen:                       env("LISTEN", ":8090"),
+		MasterKey:                    os.Getenv("MASTER_KEY"),
+		RequestLimit:                 20 << 20,
+		RequestTimeout:               5 * time.Minute,
+		OAuthClientID:                env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+		OAuthTokenURL:                os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
+		CodexOAuthClientID:           env("CODEX_OAUTH_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
+		CodexOAuthTokenURL:           os.Getenv("CODEX_OAUTH_TOKEN_URL"),
+		GitHubOAuthClientID:          env("GITHUB_OAUTH_CLIENT_ID", "Iv1.b507a08c87ecfe98"),
+		GrokOAuthClientID:            env("GROK_OAUTH_CLIENT_ID", "b1a00492-073a-47ea-816f-4c329264a828"),
+		KimiOAuthClientID:            env("KIMI_CODING_OAUTH_CLIENT_ID", "17e5f671-d194-4dfb-9706-5516cb48c098"),
+		AntigravityOAuthClientID:     env("ANTIGRAVITY_OAUTH_CLIENT_ID", ""),
+		AntigravityOAuthClientSecret: env("ANTIGRAVITY_OAUTH_CLIENT_SECRET", ""),
 		Cache: CacheConfig{
 			Enabled:       true,
 			TTL:           24 * time.Hour,

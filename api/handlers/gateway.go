@@ -33,6 +33,7 @@ type Gateway struct {
 	OpenAI    entities.Upstream
 	Anthropic entities.Upstream
 	Codex     entities.Upstream
+	Providers map[string]entities.Upstream
 	Selector  *chat.Selector
 	Health    *chat.Health
 	Quota     quota.Coordinator
@@ -240,6 +241,11 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 }
 
 func (g *Gateway) adapter(provider string) (entities.Upstream, bool) {
+	if g.Providers != nil {
+		if value := g.Providers[provider]; value != nil {
+			return value, true
+		}
+	}
 	switch providerpkg.ProtocolFor(provider) {
 	case providerpkg.ProtocolOpenAI:
 		return g.OpenAI, true

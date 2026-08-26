@@ -28,9 +28,22 @@ type ConnectivityProber interface {
 }
 
 type ProviderModel struct {
-	ID            string `json:"id"`
-	OwnedBy       string `json:"owned_by,omitempty"`
-	ContextLength int64  `json:"context_length,omitempty"`
+	ID                 string         `json:"id"`
+	Object             string         `json:"object,omitempty"`
+	Created            int64          `json:"created,omitempty"`
+	OwnedBy            string         `json:"owned_by,omitempty"`
+	Permission         []any          `json:"permission,omitempty"`
+	Root               string         `json:"root,omitempty"`
+	Parent             *string        `json:"parent,omitempty"`
+	APIFormat          string         `json:"api_format,omitempty"`
+	ContextLength      int64          `json:"context_length,omitempty"`
+	MaxOutputTokens    int64          `json:"max_output_tokens,omitempty"`
+	SupportedEndpoints []string       `json:"supported_endpoints,omitempty"`
+	Capabilities       map[string]any `json:"capabilities,omitempty"`
+	InputModalities    []string       `json:"input_modalities,omitempty"`
+	OutputModalities   []string       `json:"output_modalities,omitempty"`
+	MaxInputTokens     int64          `json:"max_input_tokens,omitempty"`
+	Name               string         `json:"name,omitempty"`
 }
 
 type ModelDiscoverer interface {
@@ -89,8 +102,11 @@ func validate(in CreateInput) error {
 		if !definition.OAuthSupported && in.Provider != entities.ProviderAnthropic {
 			return fmt.Errorf("%w: oauth is not supported for %s", ErrInvalidCredential, in.Provider)
 		}
-		if strings.TrimSpace(in.OAuthRefresh) == "" {
+		if definition.OAuthRefreshRequired && strings.TrimSpace(in.OAuthRefresh) == "" {
 			return fmt.Errorf("%w: oauth_refresh is required for kind oauth", ErrInvalidCredential)
+		}
+		if strings.TrimSpace(in.OAuthAccess) == "" && strings.TrimSpace(in.OAuthRefresh) == "" {
+			return fmt.Errorf("%w: oauth token is required for kind oauth", ErrInvalidCredential)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported kind %q", ErrInvalidCredential, in.Kind)

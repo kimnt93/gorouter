@@ -22,13 +22,25 @@ type upstreamModelList struct {
 }
 
 type upstreamModel struct {
-	ID            string `json:"id"`
-	Model         string `json:"model"`
-	Name          string `json:"name"`
-	DisplayName   string `json:"display_name"`
-	OwnedBy       string `json:"owned_by"`
-	Provider      string `json:"provider"`
-	ContextLength int64  `json:"context_length"`
+	ID                 string         `json:"id"`
+	Object             string         `json:"object"`
+	Created            int64          `json:"created"`
+	Model              string         `json:"model"`
+	Name               string         `json:"name"`
+	DisplayName        string         `json:"display_name"`
+	OwnedBy            string         `json:"owned_by"`
+	Provider           string         `json:"provider"`
+	Permission         []any          `json:"permission"`
+	Root               string         `json:"root"`
+	Parent             *string        `json:"parent"`
+	APIFormat          string         `json:"api_format"`
+	ContextLength      int64          `json:"context_length"`
+	MaxOutputTokens    int64          `json:"max_output_tokens"`
+	SupportedEndpoints []string       `json:"supported_endpoints"`
+	Capabilities       map[string]any `json:"capabilities"`
+	InputModalities    []string       `json:"input_modalities"`
+	OutputModalities   []string       `json:"output_modalities"`
+	MaxInputTokens     int64          `json:"max_input_tokens"`
 }
 
 func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
@@ -73,7 +85,28 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 		if ownedBy == "" {
 			ownedBy = strings.TrimSpace(model.Provider)
 		}
-		seen[id] = credential.ProviderModel{ID: id, OwnedBy: ownedBy, ContextLength: model.ContextLength}
+		object := strings.TrimSpace(model.Object)
+		if object == "" {
+			object = "model"
+		}
+		seen[id] = credential.ProviderModel{
+			ID:                 id,
+			Object:             object,
+			Created:            model.Created,
+			OwnedBy:            ownedBy,
+			Permission:         model.Permission,
+			Root:               model.Root,
+			Parent:             model.Parent,
+			APIFormat:          model.APIFormat,
+			ContextLength:      model.ContextLength,
+			MaxOutputTokens:    model.MaxOutputTokens,
+			SupportedEndpoints: model.SupportedEndpoints,
+			Capabilities:       model.Capabilities,
+			InputModalities:    model.InputModalities,
+			OutputModalities:   model.OutputModalities,
+			MaxInputTokens:     model.MaxInputTokens,
+			Name:               model.Name,
+		}
 	}
 	models := make([]credential.ProviderModel, 0, len(seen))
 	for _, model := range seen {
@@ -84,12 +117,29 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 }
 
 func (a *OpenAIAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
-	result, err := get(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "models"), map[string]string{
-		"Accept":        "application/json",
-		"Authorization": "Bearer " + cr.APIKey,
-	})
+	token := cr.APIKey
+	if cr.Kind == entities.KindOAuth {
+		token = cr.OAuthAccess
+	}
+	headers := map[string]string{"Accept": "application/json", "Authorization": "Bearer " + token}
+	applyOAuthProviderHeaders(headers, cr)
+	load := func() (*entities.UpstreamResult, error) {
+		return get(ctx, a.httpClient(), openAIEndpoint(cr.BaseURL, "models"), headers)
+	}
+	result, err := load()
 	if err != nil {
 		return nil, err
+	}
+	if result.StatusCode == http.StatusUnauthorized && cr.Kind == entities.KindOAuth && a.Refresh != nil {
+		result.Body.Close()
+		if err := a.Refresh(ctx, cr); err != nil {
+			return nil, err
+		}
+		headers["Authorization"] = "Bearer " + cr.OAuthAccess
+		result, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer result.Body.Close()
 	if result.StatusCode < http.StatusOK || result.StatusCode >= http.StatusMultipleChoices {
@@ -100,12 +150,15 @@ func (a *OpenAIAdapter) DiscoverModels(ctx context.Context, cr *entities.Credent
 }
 
 func (a *AnthropicAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	if cr.Provider == "kimi-code" {
+		return modelsFor("kimi-code", "k3", "kimi-for-coding", "kimi-for-coding-highspeed"), nil
+	}
 	base := anthropicBase(cr.BaseURL)
 	headers, err := anthropicHeaders(cr)
 	if err != nil {
 		return nil, err
 	}
-	result, err := get(ctx, a.HTTP, base+"/v1/models", headers)
+	result, err := get(ctx, a.httpClient(), base+"/v1/models", headers)
 	if err != nil {
 		return nil, err
 	}

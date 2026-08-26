@@ -64,6 +64,20 @@ type OAuthMetadata struct {
 	AccountID      string `json:"account_id,omitempty"`
 	OrganizationID string `json:"organization_id,omitempty"`
 	DeviceID       string `json:"device_id,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
+	ClientSecret   string `json:"client_secret,omitempty"`
+	Region         string `json:"region,omitempty"`
+	AuthMethod     string `json:"auth_method,omitempty"`
+	MachineID      string `json:"machine_id,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	ProfileARN     string `json:"profile_arn,omitempty"`
+	CopilotToken   string `json:"copilot_token,omitempty"`
+	TokenExpiresAt string `json:"token_expires_at,omitempty"`
+	Login          string `json:"login,omitempty"`
+	Email          string `json:"email,omitempty"`
+	PrincipalType  string `json:"principal_type,omitempty"`
+	PrincipalID    string `json:"principal_id,omitempty"`
+	TeamID         string `json:"team_id,omitempty"`
 }
 
 // CredentialUpdate replaces safe credential metadata and optionally rotates

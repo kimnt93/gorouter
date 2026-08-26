@@ -19,6 +19,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/config"
 	"github.com/kimnt93/gorouter/pkg/credential"
+	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 	"github.com/kimnt93/gorouter/pkg/pricing"
@@ -123,20 +124,47 @@ func main() {
 	codex := &llm.CodexAdapter{HTTP: client}
 	codexRefresher := &llm.CodexOAuthRefresher{HTTP: client, TokenURL: cfg.CodexOAuthTokenURL, ClientID: cfg.CodexOAuthClientID, Persister: credSvc}
 	codex.Refresh = codexRefresher.Refresh
+	copilot := &llm.CopilotAdapter{HTTP: client}
+	grokBuild := &llm.GrokBuildAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.GrokOAuthClientID}
+	xaiOAuth := &llm.XAIAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.GrokOAuthClientID}
+	cline := &llm.ClineAdapter{HTTP: client, Persister: credSvc}
+	clinePass := &llm.ClinePassAdapter{HTTP: client, Persister: credSvc}
+	kiloCode := &llm.KiloCodeAdapter{HTTP: client}
+	kimiCode := &llm.KimiCodeAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.KimiOAuthClientID}
+	cursor := &llm.CursorAdapter{HTTP: client, Persister: credSvc}
+	kiro := &llm.KiroAdapter{HTTP: client, Persister: credSvc}
+	amazonQ := &llm.AmazonQAdapter{HTTP: client, Persister: credSvc}
+	antigravity := &llm.AntigravityAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.AntigravityOAuthClientID, ClientSecret: cfg.AntigravityOAuthClientSecret}
+	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
+	providerProbes := map[string]credential.ConnectivityProber{
+		"github-copilot": copilot,
+		"grok-build":     grokBuild, "xai-oauth": xaiOAuth, "cline": cline, "clinepass": clinePass, "kilo-code": kiloCode,
+		"kimi-code": kimiCode, "cursor": cursor, "kiro": kiro, "amazon-q": amazonQ, "antigravity": antigravity,
+		"opencode-go": opencodeGo,
+	}
+	providerUpstreams := make(map[string]entities.Upstream, len(providerProbes))
+	for id, adapter := range providerProbes {
+		if upstream, ok := adapter.(entities.Upstream); ok {
+			providerUpstreams[id] = upstream
+		}
+	}
 	oauthSvc := oauthpkg.New(client, credSvc, oauthpkg.Config{
 		ClaudeClientID: cfg.OAuthClientID, ClaudeTokenURL: cfg.OAuthTokenURL,
 		CodexClientID: cfg.CodexOAuthClientID, CodexTokenURL: cfg.CodexOAuthTokenURL,
+		GitHubClientID: cfg.GitHubOAuthClientID, GrokClientID: cfg.GrokOAuthClientID,
+		KimiClientID: cfg.KimiOAuthClientID, AntigravityClientID: cfg.AntigravityOAuthClientID,
+		AntigravityClientSecret: cfg.AntigravityOAuthClientSecret,
 	})
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
-		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex,
+		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerUpstreams,
 		Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc,
 		Pricing: priceResolver,
 	}
 	app := routes.New(routes.Dependencies{
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
-		OpenAI: openai, Anthropic: anthropic, Codex: codex, OAuth: oauthSvc,
+		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc,
 		Pricing:   priceResolver,
 		BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
 	})
