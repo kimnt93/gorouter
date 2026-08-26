@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/redis/go-redis/v9"
 )
 
 type resolverRepo struct {
@@ -121,6 +123,59 @@ func TestResolverConcurrentRefreshAndResolve(t *testing.T) {
 		}
 	}
 	wg.Wait()
+}
+
+type lockedResolverRepo struct {
+	mu     sync.RWMutex
+	manual map[string]entities.Price
+}
+
+func (r *lockedResolverRepo) ListPrices(context.Context) (map[string]entities.Price, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]entities.Price, len(r.manual))
+	for model, price := range r.manual {
+		out[model] = price
+	}
+	return out, nil
+}
+func (*lockedResolverRepo) ListCatalogPrices(context.Context) ([]entities.CatalogPrice, error) {
+	return nil, nil
+}
+
+func TestRedisInvalidationRefreshesPriceCacheAcrossReplicas(t *testing.T) {
+	server := miniredis.RunT(t)
+	clientA := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	clientB := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = clientA.Close(); _ = clientB.Close() })
+	repo := &lockedResolverRepo{manual: map[string]entities.Price{"model": {InputPerM: 1}}}
+	first, second := NewResolver(repo), NewResolver(repo)
+	if err := first.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := first.EnableRedisInvalidation(ctx, clientA); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.EnableRedisInvalidation(ctx, clientB); err != nil {
+		t.Fatal(err)
+	}
+	repo.mu.Lock()
+	repo.manual["model"] = entities.Price{InputPerM: 9}
+	repo.mu.Unlock()
+	first.SetManual("model", entities.Price{InputPerM: 9})
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if price, _ := second.Resolve("model", ""); price.InputPerM == 9 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("second replica did not refresh its price snapshot")
 }
 
 type catalogRepo struct {

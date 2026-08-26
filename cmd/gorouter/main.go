@@ -158,6 +158,9 @@ func main() {
 	}
 	if redisClient != nil {
 		keySvc.SetTokenCache(redisClient, cfg.APITokenCacheTTL)
+		if err := priceResolver.EnableRedisInvalidation(ctx, redisClient); err != nil {
+			log.Fatal(err)
+		}
 	}
 	if clickhouseStore != nil {
 		if redisClient != nil {
@@ -237,10 +240,16 @@ func main() {
 	if err := providerQuotaSvc.Restore(context.Background()); err != nil {
 		log.Printf("restore provider quota snapshots: %v", err)
 	}
+	selector := &chat.Selector{}
+	health := chat.NewHealth()
+	if redisClient != nil {
+		selector.SetRedis(redisClient)
+		health.SetRedis(redisClient)
+	}
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
 		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerUpstreams,
-		Selector: &chat.Selector{}, Health: chat.NewHealth(), Quota: quotaSvc,
+		Selector: selector, Health: health, Quota: quotaSvc,
 		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
 	}
 	app := routes.New(routes.Dependencies{

@@ -1,8 +1,11 @@
 package chat
 
 import (
+	"context"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type PromptCache interface {
@@ -49,7 +52,10 @@ type Candidate struct {
 type Selector struct {
 	mu      sync.Mutex
 	counter uint64
+	redis   redis.UniversalClient
 }
+
+func (s *Selector) SetRedis(client redis.UniversalClient) { s.redis = client }
 
 // Order returns candidates in attempt order for the configured strategy.
 func (s *Selector) Order(strategy string, in []Candidate) []Candidate {
@@ -61,10 +67,19 @@ func (s *Selector) Order(strategy string, in []Candidate) []Candidate {
 		if n == 0 {
 			return out
 		}
-		s.mu.Lock()
-		s.counter++
-		start := int(s.counter-1) % n
-		s.mu.Unlock()
+		var count uint64
+		if s.redis != nil {
+			if value, err := s.redis.Incr(context.Background(), "gorouter:routing:round-robin").Uint64(); err == nil {
+				count = value
+			}
+		}
+		if count == 0 {
+			s.mu.Lock()
+			s.counter++
+			count = s.counter
+			s.mu.Unlock()
+		}
+		start := int(count-1) % n
 		rotated := make([]Candidate, 0, n)
 		rotated = append(rotated, out[start:]...)
 		rotated = append(rotated, out[:start]...)
@@ -88,13 +103,22 @@ type Health struct {
 	mu       sync.Mutex
 	failures map[string]int
 	banned   map[string]time.Time
+	redis    redis.UniversalClient
 }
+
+func (h *Health) SetRedis(client redis.UniversalClient) { h.redis = client }
 
 func NewHealth() *Health {
 	return &Health{failures: map[string]int{}, banned: map[string]time.Time{}}
 }
 
 func (h *Health) Available(id string) bool {
+	if h.redis != nil {
+		exists, err := h.redis.Exists(context.Background(), "gorouter:routing:banned:"+id).Result()
+		if err == nil {
+			return exists == 0
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	until, ok := h.banned[id]
@@ -102,6 +126,26 @@ func (h *Health) Available(id string) bool {
 }
 
 func (h *Health) Report(id string, ok bool) {
+	if h.redis != nil {
+		ctx := context.Background()
+		failureKey := "gorouter:routing:failures:" + id
+		bannedKey := "gorouter:routing:banned:" + id
+		if ok {
+			_ = h.redis.Del(ctx, failureKey, bannedKey).Err()
+			return
+		}
+		count, err := h.redis.Incr(ctx, failureKey).Result()
+		if err == nil {
+			_ = h.redis.Expire(ctx, failureKey, 2*time.Minute).Err()
+			if count >= 3 {
+				pipe := h.redis.TxPipeline()
+				pipe.Set(ctx, bannedKey, "1", time.Minute)
+				pipe.Del(ctx, failureKey)
+				_, _ = pipe.Exec(ctx)
+			}
+			return
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if ok {

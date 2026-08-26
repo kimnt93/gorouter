@@ -65,7 +65,7 @@ Common optional settings:
 | Variable | Default | Description |
 |---|---:|---|
 | `LISTEN` | `:8090` | Application listen address. |
-| `APP_ENV` | `development` | Runtime environment. |
+| `APP_ENV` | `development` | Runtime environment. Redis is required for every other value. |
 | `CACHE_ENABLED` | `true` | Enables deterministic response caching. |
 | `CACHE_TTL` | `24h` | Response-cache lifetime. |
 | `CACHE_SCOPE` | `key` | Cache isolation: `key`, `tenant`, or `global`. |
@@ -80,3 +80,5 @@ database, Redis, cache, and runtime option.
 
 PostgreSQL and ClickHouse are standalone alternatives. The application uses
 exactly one durable backend at runtime and does not mirror data between them.
+Redis coordinates distributed cache, quota, OAuth, routing-health, and pricing
+invalidation state. The in-memory fallback is development-only.

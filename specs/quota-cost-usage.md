@@ -9,11 +9,13 @@ Prices are per one million tokens:
 - Cache read
 - Cache write
 
-Manual prices override synchronized catalog prices. The runtime synchronizes the OpenRouter frontend catalog immediately at startup and then once per hour by default. External synchronization must not block request serving or replace the last usable in-memory snapshot when a fetch fails. See <https://openrouter.ai/api/frontend/v1/catalog/models>.
+Manual prices override synchronized catalog prices. The runtime synchronizes the OpenRouter frontend catalog immediately at startup and then once per hour by default. External synchronization must not block request serving or replace the last usable snapshot when a fetch fails. See <https://openrouter.ai/api/frontend/v1/catalog/models>.
 
 The catalog store is intentionally compact: one canonical model row containing the model/name/provider metadata, context length, cache capability, four per-million rates, source, and update time. Do not persist the upstream response or duplicate cached/non-cached estimate totals. When OpenRouter publishes multiple endpoint variants, select the standard variant deterministically.
 
-The resolver uses an atomically replaced in-memory snapshot. Resolution order is:
+The resolver uses an atomically replaced per-process snapshot for fast reads.
+PostgreSQL or ClickHouse remains authoritative, and Redis invalidation refreshes
+the snapshot on every replica after a pricing change. Resolution order is:
 
 1. Manual price for the public model.
 2. Catalog price for the public model.
@@ -52,7 +54,8 @@ The legacy `monthly_quota_usd` API/database field remains compatible and maps to
 For multi-node correctness:
 
 - Reserve budget atomically in Redis.
-- Combine durable usage since the current window began with in-process pending usage.
+- Combine durable usage since the current window began with Redis-coordinated
+  reservations. Per-process pending batches are only a durable-write buffer.
 - Reject with HTTP 429 when the reservation exceeds the selected window limit.
 - Settle the reservation using actual usage after completion.
 - Release unused reservation.
@@ -68,7 +71,9 @@ Optional API-key requests-per-minute limits use Redis atomic counters with expir
 
 Record timestamp, tenant, API key, credential, client model, upstream model, input/output/cache tokens, cost, cache-hit flag, status, duration, and safe error summary.
 
-Usage writes should be buffered and batched. PostgreSQL is the initial durable store. A future ClickHouse sink must implement the same usage repository boundary.
+Usage writes are buffered and batched per process. PostgreSQL and ClickHouse
+implement the same usage repository boundary and persist the same cost and token
+components.
 
 ## Dashboard Reporting Requirements
 
@@ -111,3 +116,8 @@ a remote refresh after the user selects **Reload**. Quota-provider routing is
 fill-first in configured route order. The currently selected account is exposed
 to the dashboard and visibly highlighted; exhausted accounts move out of the
 active position until their reset time.
+
+In distributed deployments, Redis coordinates provider snapshots, exhaustion
+cooldowns, active accounts, OAuth flows, routing health, and round-robin state.
+Process-local maps are permitted only as development or Redis-error fallbacks;
+production configuration requires Redis.

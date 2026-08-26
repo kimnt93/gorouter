@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/redis/go-redis/v9"
 )
 
 type oauthRepoStub struct{ created entities.CredentialInput }
@@ -88,6 +90,31 @@ func TestCodexBrowserFlowUsesPKCEAndPersistsAccountMetadata(t *testing.T) {
 	}
 	if _, err := service.Complete(context.Background(), CompleteInput{Provider: "codex", FlowID: start.FlowID, Callback: "http://localhost:1455/auth/callback?code=x&state=" + start.FlowID, SessionBinding: "master::"}); !errors.Is(err, ErrInvalidFlow) {
 		t.Fatalf("single-use flow error = %v", err)
+	}
+}
+
+func TestOAuthFlowCanCompleteOnAnotherReplicaThroughRedis(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	repo := &oauthRepoStub{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "access", RefreshToken: "refresh", IDToken: jwtWithAccount("account")})
+	}))
+	defer server.Close()
+	first := New(server.Client(), credential.NewService(repo, oauthBoxStub{}), Config{CodexTokenURL: server.URL})
+	second := New(server.Client(), credential.NewService(repo, oauthBoxStub{}), Config{CodexTokenURL: server.URL})
+	first.SetFlowStore(NewRedisFlowStore(redisClient))
+	second.SetFlowStore(NewRedisFlowStore(redisClient))
+	start, err := first.Start("codex", "master::")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = second.Complete(context.Background(), CompleteInput{Provider: "codex", FlowID: start.FlowID, Callback: "code#" + start.FlowID, SessionBinding: "master::"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = first.Complete(context.Background(), CompleteInput{Provider: "codex", FlowID: start.FlowID, Callback: "code#" + start.FlowID, SessionBinding: "master::"}); !errors.Is(err, ErrInvalidFlow) {
+		t.Fatalf("consumed distributed flow error = %v", err)
 	}
 }
 

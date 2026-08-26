@@ -72,7 +72,7 @@ func New(client *http.Client, credentials *credential.Service) *Service {
 	return &Service{client: client, credentials: credentials, snapshots: map[string]Snapshot{}, exhausted: map[string]time.Time{}, active: map[string]string{}}
 }
 
-func (s *Service) SetStore(store Store) { s.store = store }
+func (s *Service) SetStore(store Store)           { s.store = store }
 func (s *Service) SetStateCache(state StateCache) { s.state = state }
 
 // Restore warms the read-only quota cache from durable snapshots. It does not

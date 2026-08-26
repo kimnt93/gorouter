@@ -13,6 +13,7 @@ import (
 
 	"github.com/kimnt93/gorouter/internal/platform/database"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 )
 
@@ -111,5 +112,22 @@ func TestOAuthCredentialMetadataIsEncryptedAndPreservedAcrossRefresh(t *testing.
 	}
 	if after.OAuthIDToken != before.OAuthIDToken || after.OAuthAccount != before.OAuthAccount || after.OAuthMeta != before.OAuthMeta {
 		t.Fatalf("refresh discarded OAuth identity metadata: before=%+v after=%+v", before, after)
+	}
+
+	quotaRepo := NewProviderQuotaRepo(New(db.Pool))
+	fetchedAt := time.Now().UTC().Truncate(time.Microsecond)
+	snapshot := providerquota.Snapshot{CredentialID: created.ID, Provider: "claude", Account: "account-a", Plan: "pro", FetchedAt: &fetchedAt, Available: true, Windows: []providerquota.Window{{Name: "Weekly", RemainingPercent: 62.5}}}
+	if err := quotaRepo.Save(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := quotaRepo.SetInUse(ctx, created.ID, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := quotaRepo.LoadAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 1 || snapshots[0].CredentialID != created.ID || !snapshots[0].InUse || len(snapshots[0].Windows) != 1 || snapshots[0].Windows[0].RemainingPercent != 62.5 {
+		t.Fatalf("provider quota round trip=%+v", snapshots)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kimnt93/gorouter/internal/platform/database"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 )
 
@@ -77,7 +78,7 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 		t.Fatalf("prices=%+v err=%v", prices, err)
 	}
 	usage := NewUsageRepo(s)
-	event := entities.UsageEvent{TS: time.Now().UTC(), TenantID: tenant.ID, ApiKeyID: key.ID, CredentialID: cred.ID, Model: modelName, PromptTokens: 10, CompletionTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 3, CostUSD: .25, Priced: true, StatusCode: 200}
+	event := entities.UsageEvent{TS: time.Now().UTC(), TenantID: tenant.ID, ApiKeyID: key.ID, CredentialID: cred.ID, Model: modelName, PromptTokens: 10, CompletionTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 3, CostUSD: .25, InputCostUSD: .1, OutputCostUSD: .08, CacheReadCostUSD: .03, CacheWriteCostUSD: .04, Priced: true, StatusCode: 200}
 	if err = usage.InsertBatch(ctx, []entities.UsageEvent{event}); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,40 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 		t.Fatalf("usage identity/time=%+v err=%v", recent, err)
 	}
 	activity, err := usage.ActivityUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, APIKeyID: key.ID}, "hour")
-	if err != nil || len(activity) != 1 || activity[0].Requests != 1 || activity[0].PromptTokens != 10 || activity[0].CompletionTokens != 5 || activity[0].CacheReadTokens != 4 || activity[0].CacheWriteTokens != 3 || activity[0].CostUSD != .25 {
+	if err != nil || len(activity) != 1 || activity[0].Requests != 1 || activity[0].PromptTokens != 10 || activity[0].CompletionTokens != 5 || activity[0].CacheReadTokens != 4 || activity[0].CacheWriteTokens != 3 || activity[0].CostUSD != .25 || activity[0].InputCostUSD != .1 || activity[0].OutputCostUSD != .08 || activity[0].CacheReadCostUSD != .03 || activity[0].CacheWriteCostUSD != .04 {
 		t.Fatalf("usage activity=%+v err=%v", activity, err)
+	}
+	quotaRepo := NewProviderQuotaRepo(s)
+	quotaProvider := "integration-" + suffix
+	quotaA := providerquota.Snapshot{CredentialID: cred.ID, Provider: quotaProvider, Account: "account-a", Available: true, Windows: []providerquota.Window{{Name: "Session", RemainingPercent: 75}}}
+	quotaB := providerquota.Snapshot{CredentialID: "quota-" + suffix, Provider: quotaProvider, Account: "account-b", Available: true, Windows: []providerquota.Window{}}
+	if err := quotaRepo.Save(ctx, quotaA); err != nil {
+		t.Fatal(err)
+	}
+	if err := quotaRepo.Save(ctx, quotaB); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.del(context.Background(), "provider_quota", quotaA.CredentialID)
+		_ = s.del(context.Background(), "provider_quota", quotaB.CredentialID)
+	})
+	if err := quotaRepo.SetInUse(ctx, quotaB.CredentialID, quotaProvider); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := quotaRepo.LoadAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundA, foundB := false, false
+	for _, snapshot := range snapshots {
+		switch snapshot.CredentialID {
+		case quotaA.CredentialID:
+			foundA = !snapshot.InUse && len(snapshot.Windows) == 1 && snapshot.Windows[0].RemainingPercent == 75
+		case quotaB.CredentialID:
+			foundB = snapshot.InUse
+		}
+	}
+	if !foundA || !foundB {
+		t.Fatalf("provider quota round trip failed: a=%v b=%v snapshots=%+v", foundA, foundB, snapshots)
 	}
 }

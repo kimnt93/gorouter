@@ -4,10 +4,14 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/redis/go-redis/v9"
 )
+
+const priceInvalidationChannel = "gorouter:pricing:invalidate"
 
 type ResolverRepository interface {
 	ListPrices(ctx context.Context) (map[string]entities.Price, error)
@@ -88,12 +92,52 @@ func catalogPrice(snapshot *resolvedSnapshot, model string) (entities.CatalogPri
 type Resolver struct {
 	repo     ResolverRepository
 	snapshot atomic.Pointer[resolvedSnapshot]
+	redis    redis.UniversalClient
+	redisMu  sync.RWMutex
 }
 
 func NewResolver(repo ResolverRepository) *Resolver {
 	r := &Resolver{repo: repo}
 	r.snapshot.Store(&resolvedSnapshot{manual: map[string]entities.Price{}, catalog: map[string]entities.CatalogPrice{}})
 	return r
+}
+
+// EnableRedisInvalidation keeps immutable in-process read snapshots coherent
+// across replicas. PostgreSQL or ClickHouse remains the source of truth; Redis
+// carries only an invalidation signal.
+func (r *Resolver) EnableRedisInvalidation(ctx context.Context, client redis.UniversalClient) error {
+	subscriber := client.Subscribe(ctx, priceInvalidationChannel)
+	if _, err := subscriber.Receive(ctx); err != nil {
+		_ = subscriber.Close()
+		return err
+	}
+	r.redisMu.Lock()
+	r.redis = client
+	r.redisMu.Unlock()
+	go func() {
+		defer subscriber.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-subscriber.Channel():
+				if !ok {
+					return
+				}
+				_ = r.Refresh(context.Background())
+			}
+		}
+	}()
+	return nil
+}
+
+func (r *Resolver) NotifyChange(ctx context.Context) {
+	r.redisMu.RLock()
+	client := r.redis
+	r.redisMu.RUnlock()
+	if client != nil {
+		_ = client.Publish(ctx, priceInvalidationChannel, "refresh").Err()
+	}
 }
 
 func (r *Resolver) Refresh(ctx context.Context) error {
@@ -125,6 +169,7 @@ func (r *Resolver) SetManual(model string, price entities.Price) {
 		manual[model] = price
 		next := &resolvedSnapshot{manual: manual, catalog: old.catalog}
 		if r.snapshot.CompareAndSwap(old, next) {
+			r.NotifyChange(context.Background())
 			return
 		}
 	}
@@ -141,6 +186,7 @@ func (r *Resolver) DeleteManual(model string) {
 		}
 		next := &resolvedSnapshot{manual: manual, catalog: old.catalog}
 		if r.snapshot.CompareAndSwap(old, next) {
+			r.NotifyChange(context.Background())
 			return
 		}
 	}

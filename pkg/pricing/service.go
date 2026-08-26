@@ -57,7 +57,10 @@ func (s *CatalogService) Sync(ctx context.Context) error {
 		return err
 	}
 	if s.resolver != nil {
-		return s.resolver.Refresh(ctx)
+		if err := s.resolver.Refresh(ctx); err != nil {
+			return err
+		}
+		s.resolver.NotifyChange(ctx)
 	}
 	return nil
 }
