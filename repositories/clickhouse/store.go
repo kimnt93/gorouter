@@ -2,12 +2,12 @@ package clickhouse
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
@@ -18,13 +18,7 @@ type Store struct{ Conn ch.Conn }
 
 func New(conn ch.Conn) *Store { return &Store{Conn: conn} }
 
-func id(prefix string) string {
-	b := make([]byte, 10)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return prefix + "_" + hex.EncodeToString(b)
-}
+func id(prefix string) string { return entities.NewID(prefix) }
 func HashSecret(v string) string { h := sha256.Sum256([]byte(v)); return hex.EncodeToString(h[:]) }
 func GenerateSecret() string {
 	b := make([]byte, 24)
@@ -39,13 +33,13 @@ func (s *Store) put(ctx context.Context, entity, key string, value any) error {
 	if err != nil {
 		return err
 	}
-	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,now64(6),0)`, entity, key, string(b))
+	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,?,0)`, entity, key, string(b), time.Now().UTC())
 }
 func (s *Store) del(ctx context.Context, entity, key string) error {
 	if _, err := s.raw(ctx, entity, key); err != nil {
 		return err
 	}
-	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,now64(6),1)`, entity, key, "{}")
+	return s.Conn.Exec(ctx, `INSERT INTO config_records (entity,key,payload,version,deleted) VALUES (?,?,?,?,1)`, entity, key, "{}", time.Now().UTC())
 }
 func (s *Store) raw(ctx context.Context, entity, key string) (string, error) {
 	var payload string
@@ -193,6 +187,30 @@ func (r *CredentialRepo) List(ctx context.Context) ([]entities.Credential, error
 	return out, err
 }
 func (r *CredentialRepo) Delete(ctx context.Context, id string) error {
+	if _, err := r.stored(ctx, id); err != nil {
+		return err
+	}
+	models, err := list[entities.ModelDef](ctx, r.s, "model")
+	if err != nil {
+		return err
+	}
+	for _, m := range models {
+		routes := m.Routes[:0]
+		changed := false
+		for _, route := range m.Routes {
+			if route.CredentialID == id {
+				changed = true
+				continue
+			}
+			routes = append(routes, route)
+		}
+		if changed {
+			m.Routes = routes
+			if err := r.s.put(ctx, "model", m.Name, m); err != nil {
+				return err
+			}
+		}
+	}
 	return r.s.del(ctx, "credential", id)
 }
 func (r *CredentialRepo) Runtime(ctx context.Context, box entities.SecretBox, id string) (*entities.CredentialRuntime, error) {
@@ -263,5 +281,11 @@ func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]en
 			out = append(out, entities.RouteCandidate{CredentialID: rt.CredentialID, Priority: rt.Priority, Weight: rt.Weight, OwnerTenant: c.OwnerTenantID})
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority == out[j].Priority {
+			return out[i].CredentialID < out[j].CredentialID
+		}
+		return out[i].Priority > out[j].Priority
+	})
 	return out, nil
 }

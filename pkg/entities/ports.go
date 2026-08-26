@@ -82,7 +82,6 @@ type CatalogPriceRepository interface {
 }
 
 type UsageRepository interface {
-	MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error)
 	SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error)
 	Summary(ctx context.Context, since time.Time) (*UsageSummary, error)
 	Recent(ctx context.Context, limit int) ([]RecentEvent, error)

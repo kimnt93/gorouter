@@ -167,12 +167,13 @@ type createCredentialRequest struct {
 }
 
 type createKeyRequest struct {
-	TenantID        string   `json:"tenant_id"`
-	Name            string   `json:"name"`
-	Models          []string `json:"models"`
-	Scopes          []string `json:"scopes"`
-	MonthlyQuotaUSD *float64 `json:"monthly_quota_usd,omitempty"`
-	RPM             *int     `json:"rpm,omitempty"`
+	TenantID    string   `json:"tenant_id"`
+	Name        string   `json:"name"`
+	Models      []string `json:"models"`
+	Scopes      []string `json:"scopes"`
+	QuotaUSD    *float64 `json:"quota_usd,omitempty"`
+	QuotaPeriod string   `json:"quota_period,omitempty"`
+	RPM         *int     `json:"rpm,omitempty"`
 }
 
 type createKeyResponse struct {
@@ -213,8 +214,12 @@ func createConfiguredKey(t *testing.T, h *integrationHarness, model string, quot
 		t.Fatalf("set price: %d", priceRes.StatusCode)
 	}
 	priceRes.Body.Close()
+	period := entities.QuotaPeriodNone
+	if quotaUSD != nil {
+		period = entities.QuotaPeriodWeek
+	}
 	keyRes := h.request(t, http.MethodPost, "/admin/api-keys", h.masterKey, createKeyRequest{
-		TenantID: "tenant_default", Name: model + " key", Models: []string{model}, Scopes: []string{entities.ScopeChat, entities.ScopeUsageRead}, MonthlyQuotaUSD: quotaUSD, RPM: rpm,
+		TenantID: "tenant_default", Name: model + " key", Models: []string{model}, Scopes: []string{entities.ScopeChat, entities.ScopeUsageRead}, QuotaUSD: quotaUSD, QuotaPeriod: period, RPM: rpm,
 	})
 	if keyRes.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(keyRes.Body)

@@ -25,7 +25,13 @@ func (r *ApiKeyRepo) Create(ctx context.Context, tenant, name string, models, sc
 func (r *ApiKeyRepo) CreateWithQuota(ctx context.Context, tenant, name string, models, scopes []string, quota *float64, period string, rpm *int) (*entities.ApiKey, error) {
 	plain := GenerateSecret()
 	k := &entities.ApiKey{ID: id("key"), TenantID: tenant, Name: name, SecretHash: HashSecret(plain), SecretPrefix: plain[:11], Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm, Enabled: true, CreatedAt: time.Now().UTC(), Plaintext: plain}
-	return k, r.s.put(ctx, "api_key", k.ID, storedAPIKey{*k, k.SecretHash})
+	if err := r.s.put(ctx, "api_key", k.ID, storedAPIKey{*k, k.SecretHash}); err != nil {
+		return nil, err
+	}
+	if err := r.s.put(ctx, "api_key_hash", k.SecretHash, k.ID); err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 func (r *ApiKeyRepo) GetByID(ctx context.Context, id string) (*entities.ApiKey, error) {
 	v, e := get[storedAPIKey](ctx, r.s, "api_key", id)
@@ -43,16 +49,11 @@ func (r *ApiKeyRepo) GetByIDForTenant(ctx context.Context, tenant, id string) (*
 	return k, e
 }
 func (r *ApiKeyRepo) GetBySecret(ctx context.Context, hash string) (*entities.ApiKey, error) {
-	keys, e := r.List(ctx)
+	idv, e := get[string](ctx, r.s, "api_key_hash", hash)
 	if e != nil {
 		return nil, e
 	}
-	for i := range keys {
-		if keys[i].SecretHash == hash {
-			return &keys[i], nil
-		}
-	}
-	return nil, entities.ErrNotFound
+	return r.GetByID(ctx, *idv)
 }
 func (r *ApiKeyRepo) List(ctx context.Context) ([]entities.ApiKey, error) {
 	stored, e := list[storedAPIKey](ctx, r.s, "api_key")
@@ -135,7 +136,16 @@ func (r *ApiKeyRepo) patch(ctx context.Context, tenant, id string, enabled *bool
 	}
 	return r.s.put(ctx, "api_key", id, storedAPIKey{*k, k.SecretHash})
 }
-func (r *ApiKeyRepo) Delete(ctx context.Context, id string) error { return r.s.del(ctx, "api_key", id) }
+func (r *ApiKeyRepo) Delete(ctx context.Context, id string) error {
+	k, e := r.GetByID(ctx, id)
+	if e != nil {
+		return e
+	}
+	if e = r.s.del(ctx, "api_key", id); e != nil {
+		return e
+	}
+	return r.s.del(ctx, "api_key_hash", k.SecretHash)
+}
 func (r *ApiKeyRepo) DeleteForTenant(ctx context.Context, tenant, id string) error {
 	if _, e := r.GetByIDForTenant(ctx, tenant, id); e != nil {
 		return e

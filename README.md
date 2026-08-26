@@ -2,12 +2,12 @@
 
 A small, fast multi-tenant LLM gateway in Go. Connect provider credentials (API keys or
 OAuth), define models routed across those credentials (priority failover or round robin),
-issue per-tenant API keys with model allowlists and configurable USD quota periods, and get cost
+issue per-tenant API keys with model allowlists and weekly USD limits, and get cost
 tracking plus a multi-tenant prompt cache — all exposed through an OpenAI-compatible API.
 
 Built for the "only important features" case: no agents, combos, or CLI translation.
 Reference points were CLIProxyAPI (credential handling), new-api (tenancy/billing shape)
-and OmniRoute (feature set), implemented fresh in Go with Fiber v3, HTMX, Tailwind, and `pgx`.
+and OmniRoute (feature set), implemented fresh in Go with Fiber v3, HTMX, Tailwind, `pgx`, and the ClickHouse Go client.
 
 Implementation references:
 
@@ -26,7 +26,7 @@ for response models when a struct can represent the response shape.
   import models, or run a direct streaming chat test without navigating to another page.
 - **OAuth subscriptions**: guided copy/paste PKCE flows for Claude Code and OpenAI Codex.
   Flows are session-bound, single-use, and expire after 10 minutes. Access, refresh, ID,
-  account, and provider metadata are encrypted before they touch PostgreSQL; refresh-token
+  account, and provider metadata are encrypted before they touch the selected store; refresh-token
   rotation is persisted.
 - **API-key providers**: presets for OpenAI, Anthropic, Gemini, Groq, OpenRouter,
   OpenCode Zen, xAI, DeepSeek, Moonshot, Qwen, and custom OpenAI-compatible endpoints.
@@ -35,8 +35,8 @@ for response models when a struct can represent the response shape.
 - **Routing**: per-model strategy — `priority` (failover, higher priority first) or
   `round_robin`. Automatic retry across candidates on 429/5xx/transport errors with a
   simple health cooldown (3 consecutive failures → 60s cooldown).
-- **Quota & cost**: each derived key selects imported models and can use a UTC daily,
-  ISO-weekly, UTC monthly, or no-limit USD quota. Estimates are reserved in Redis before a
+- **Quota & cost**: each derived key selects imported models and can use a weekly or no-limit
+  USD quota. Weeks start Sunday by default and are configurable. Estimates are reserved in Redis before a
   request and settled against actual usage afterward. Prices are per-model
   (input/output/cache-read/cache-write per 1M tokens).
 - **OpenRouter pricing**: a background job fetches the public catalog immediately and hourly,
@@ -47,7 +47,9 @@ for response models when a struct can represent the response shape.
   Cache hits cost $0 and are tagged in usage logs. Streaming responses are cached as
   assembled text and replayed as SSE.
 - **Usage log**: every request recorded (tokens incl. provider cache read/write, cost,
-  latency, status) via batched async inserts.
+  latency, status) through a bounded, configurable pool of batched async writers.
+- **API-token cache**: Redis caches hashed token lookups with a sliding 10-minute TTL;
+  storage is the fallback and mutations invalidate the corresponding cache entries.
 - **Master-key admin API + embedded UI** (login with master key or scoped API key).
 - **Distributed cache**: Redis uses structured `REDIS_*` settings; local memory cache is the development fallback.
 
@@ -63,14 +65,13 @@ Container profiles:
 ```bash
 cp .env.example .env
 make compose-postgres
-# or, for ClickHouse usage analytics:
+# or, with ClickHouse as the complete primary store:
 make compose-clickhouse
 ```
 
-The optional ClickHouse profile provisions an analytics database and initializes
-`platform/database/clickhouse/001_usage_events.sql`. The current runtime still writes usage
-to PostgreSQL; ClickHouse is prepared for a future sink behind the existing usage repository
-boundary and is not a replacement for transactional PostgreSQL configuration.
+The two profiles are standalone alternatives. PostgreSQL stores relational configuration and
+usage events; ClickHouse stores configuration in versioned records and usage in a MergeTree.
+The ClickHouse profile does not start or require PostgreSQL.
 
 Open <http://localhost:8090/> and sign in with your master key.
 
@@ -87,13 +88,19 @@ curl http://localhost:8090/v1/chat/completions \
 | Variable | Default | Notes |
 |---|---|---|
 | `MASTER_KEY` | required during setup | Arbitrary random string with no required prefix; generate with `openssl rand -base64 33`. Used for admin login and internal key derivation. |
-| `DB_BACKEND` | `postgresql` | Primary transactional backend. ClickHouse is analytics-only and is rejected as a primary store. |
+| `DB_BACKEND` | `postgresql` | Complete primary backend: `postgresql` or `clickhouse`. |
 | `DB_HOST` | `127.0.0.1` | Database host; Compose uses the internal service name. |
 | `DB_PORT` | `5432` | Database port. |
 | `DB_USER` | required | Database user. |
 | `DB_PASSWORD` | required | Database password. |
 | `DB_NAME` | required | Database name. |
 | `DB_SSLMODE` | `disable` | PostgreSQL TLS mode. Use `require` or a verification mode for a TLS-enabled remote database. |
+| `CLICKHOUSE_HOST` | `127.0.0.1` | ClickHouse native-protocol host. |
+| `CLICKHOUSE_PORT` | `9000` | ClickHouse native-protocol port. |
+| `CLICKHOUSE_USER` | required in ClickHouse mode | ClickHouse user. |
+| `CLICKHOUSE_PASSWORD` | required in ClickHouse mode | ClickHouse password. |
+| `CLICKHOUSE_DB` | required in ClickHouse mode | ClickHouse database. |
+| `CLICKHOUSE_TLS` | `false` | Enables the secure native protocol. |
 | `REDIS_HOST` | empty | Redis host; Compose uses the internal service name. Empty enables the development memory fallback. |
 | `REDIS_PORT` | `6379` | Redis port. |
 | `REDIS_USER` | empty | Redis ACL user. |
@@ -108,6 +115,10 @@ curl http://localhost:8090/v1/chat/completions \
 | `CACHE_MAX_TOTAL_BYTES` | `268435456` | Memory fallback capacity. |
 | `CACHE_MEMORY_FALLBACK` | environment-dependent | Allowed only for local development. |
 | `REDIS_OUTAGE_POLICY` | `strict` | `strict` fails quota/RPM closed; `open` is an explicit bypass policy. |
+| `API_TOKEN_CACHE_TTL` | `10m` | Sliding Redis TTL for API-token lookups. |
+| `WEEK_START` | `sunday` | Weekly-limit boundary; weekday name, three-letter name, or `0..6`. |
+| `USAGE_WRITE_CONCURRENCY` | `4` | Concurrent durable usage batch writers. |
+| `USAGE_WRITE_QUEUE_SIZE` | `100000` | Bounded in-memory usage-event queue. |
 | `REQUEST_LIMIT_MB` | `20` | max request body |
 | `ANTHROPIC_OAUTH_CLIENT_ID` | built-in client ID | OAuth refresh client ID. |
 | `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint | Optional compatible/test override. |
@@ -133,11 +144,10 @@ The `down -v` command permanently removes the local PostgreSQL and Redis data vo
 
 ## PostgreSQL vs ClickHouse
 
-They are different engines, not "same query, different schema". This project uses
-PostgreSQL for everything in v1 (relational config + usage events with batched inserts),
-which is correct up to roughly thousands of requests/second. The usage-event insert path
-is isolated in `pkg/usage` and the repository interface; at higher volume add a ClickHouse
-sink behind the same interface and keep Postgres for configuration only.
+They are complete, mutually exclusive primary-store modes behind the same repository
+interfaces. PostgreSQL uses relational tables and transactions. ClickHouse uses versioned
+`ReplacingMergeTree` configuration records, tombstones for deletion, and a partitioned
+`MergeTree` for usage. Choose one with `DB_BACKEND`; neither mode depends on the other.
 
 ## Layout
 
@@ -147,6 +157,7 @@ cmd/mock-gorouter    fake OpenAI/Anthropic upstream for local testing
 pkg/config            env parsing
 pkg/seal              AES-GCM secret sealing
 repositories/postgres pgx repositories + migrations
+repositories/clickhouse ClickHouse repositories for configuration and usage
 platform/llm          OpenAI types, Anthropic translation (incl. SSE), upstream adapters
 pkg/chat               priority / round-robin selection + health cooldown + cache port
 platform/promptcache  memory and Redis prompt-cache implementations

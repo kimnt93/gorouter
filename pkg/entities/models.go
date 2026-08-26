@@ -94,21 +94,19 @@ type CredentialUpdate struct {
 }
 
 type ApiKey struct {
-	ID           string   `json:"id"`
-	TenantID     string   `json:"tenant_id"`
-	TenantName   string   `json:"tenant_name,omitempty"`
-	Name         string   `json:"name"`
-	SecretHash   string   `json:"-"`
-	SecretPrefix string   `json:"key_prefix"`
-	Models       []string `json:"models"`
-	Scopes       []string `json:"scopes"`
-	QuotaUSD     *float64 `json:"quota_usd"`
-	QuotaPeriod  string   `json:"quota_period"`
-	// MonthlyQuotaUSD is retained as a response alias for older clients.
-	MonthlyQuotaUSD *float64  `json:"monthly_quota_usd,omitempty"`
-	RPM             *int      `json:"rpm"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	TenantName   string    `json:"tenant_name,omitempty"`
+	Name         string    `json:"name"`
+	SecretHash   string    `json:"-"`
+	SecretPrefix string    `json:"key_prefix"`
+	Models       []string  `json:"models"`
+	Scopes       []string  `json:"scopes"`
+	QuotaUSD     *float64  `json:"quota_usd"`
+	QuotaPeriod  string    `json:"quota_period"`
+	RPM          *int      `json:"rpm"`
+	Enabled      bool      `json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
 
 	Plaintext string `json:"-"`
 }
@@ -135,6 +133,8 @@ type ModelDef struct {
 }
 
 type UsageEvent struct {
+	ID               string    `json:"id"`
+	Sequence         int64     `json:"-"`
 	TS               time.Time `json:"ts"`
 	TenantID         string    `json:"tenant_id"`
 	ApiKeyID         string    `json:"api_key_id"`
@@ -154,6 +154,7 @@ type UsageEvent struct {
 }
 
 type RecentEvent struct {
+	ID               string    `json:"id"`
 	TS               time.Time `json:"ts"`
 	TenantID         string    `json:"tenant_id"`
 	KeyID            string    `json:"api_key_id"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,11 +42,13 @@ type Reservation struct {
 	Bypassed  bool
 }
 
-var weekStart = time.Sunday
+var weekStart atomic.Int32
+
+func init() { weekStart.Store(int32(time.Sunday)) }
 
 func SetWeekStart(day time.Weekday) {
 	if day >= time.Sunday && day <= time.Saturday {
-		weekStart = day
+		weekStart.Store(int32(day))
 	}
 }
 
@@ -68,8 +71,8 @@ func Window(period string, now time.Time) (start, end time.Time, suffix string, 
 	u := now.UTC()
 	switch period {
 	case "week", "":
-		daysSinceMonday := (int(u.Weekday()) - int(weekStart) + 7) % 7
-		start = time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -daysSinceMonday)
+		daysSinceStart := (int(u.Weekday()) - int(weekStart.Load()) + 7) % 7
+		start = time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -daysSinceStart)
 		end = start.AddDate(0, 0, 7)
 		suffix = start.Format("2006-01-02")
 	case "none":

@@ -25,9 +25,10 @@ func (r *ModelRouteRepo) Upsert(ctx context.Context, m entities.ModelDef) error 
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO models (name,strategy,upstream_model,enabled) VALUES ($1,$2,$3,$4)
+	createdAt := time.Now().UTC()
+	if _, err := tx.Exec(ctx, `INSERT INTO models (name,strategy,upstream_model,enabled,created_at) VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (name) DO UPDATE SET strategy=EXCLUDED.strategy, upstream_model=EXCLUDED.upstream_model, enabled=EXCLUDED.enabled`,
-		m.Name, strategy, up, m.Enabled); err != nil {
+		m.Name, strategy, up, m.Enabled, createdAt); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM model_routes WHERE model=$1`, m.Name); err != nil {
@@ -105,11 +106,12 @@ func (r *ModelRouteRepo) List(ctx context.Context) ([]entities.ModelDef, error) 
 }
 
 func (r *ModelRouteRepo) SetPrice(ctx context.Context, model string, p entities.Price) error {
+	updatedAt := time.Now().UTC()
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO prices (model,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m,updated_at)
-		VALUES ($1,$2,$3,$4,$5,now())
+		VALUES ($1,$2,$3,$4,$5,$6)
 		ON CONFLICT (model) DO UPDATE SET input_per_m=EXCLUDED.input_per_m, output_per_m=EXCLUDED.output_per_m,
-		cached_input_per_m=EXCLUDED.cached_input_per_m, cache_write_per_m=EXCLUDED.cache_write_per_m, updated_at=now()`,
-		model, p.InputPerM, p.OutputPerM, p.CachedInputPerM, p.CacheWritePerM)
+		cached_input_per_m=EXCLUDED.cached_input_per_m, cache_write_per_m=EXCLUDED.cache_write_per_m, updated_at=EXCLUDED.updated_at`,
+		model, p.InputPerM, p.OutputPerM, p.CachedInputPerM, p.CacheWritePerM, updatedAt)
 	return err
 }
 
@@ -148,7 +150,10 @@ func (r *ModelRouteRepo) ReplaceCatalogPrices(ctx context.Context, source string
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	now := time.Now().UTC()
 	for _, item := range prices {
+		updatedAt := item.UpdatedAt.UTC()
+		if item.UpdatedAt.IsZero() { updatedAt = now }
 		_, err = tx.Exec(ctx, `INSERT INTO catalog_prices
 			(model,name,provider,context_length,cache_supported,input_per_m,output_per_m,cached_input_per_m,cache_write_per_m,source,updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -158,7 +163,7 @@ func (r *ModelRouteRepo) ReplaceCatalogPrices(ctx context.Context, source string
 			cached_input_per_m=EXCLUDED.cached_input_per_m, cache_write_per_m=EXCLUDED.cache_write_per_m,
 			source=EXCLUDED.source, updated_at=EXCLUDED.updated_at`, item.Model, item.Name, item.Provider,
 			item.ContextLength, item.CacheSupported, item.Price.InputPerM, item.Price.OutputPerM,
-			item.Price.CachedInputPerM, item.Price.CacheWritePerM, source, item.UpdatedAt)
+			item.Price.CachedInputPerM, item.Price.CacheWritePerM, source, updatedAt)
 		if err != nil {
 			return err
 		}
@@ -202,11 +207,6 @@ func (r *ModelRouteRepo) ListCatalogPrices(ctx context.Context) ([]entities.Cata
 type UsageRepo struct{ db *DB }
 
 func NewUsageRepo(db *DB) *UsageRepo { return &UsageRepo{db: db} }
-
-func (r *UsageRepo) MonthSpendForKey(ctx context.Context, apiKeyID string) (float64, error) {
-	u := time.Now().UTC()
-	return r.SpendForKeySince(ctx, apiKeyID, time.Date(u.Year(), u.Month(), 1, 0, 0, 0, 0, time.UTC))
-}
 
 func (r *UsageRepo) SpendForKeySince(ctx context.Context, apiKeyID string, since time.Time) (float64, error) {
 	var spent float64
@@ -266,9 +266,9 @@ func (r *UsageRepo) Recent(ctx context.Context, limit int) ([]entities.RecentEve
 		limit = 100
 	}
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,
+		SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,
 		       cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error
-		FROM usage_events ORDER BY seq DESC LIMIT $1`, limit)
+		FROM usage_events ORDER BY ts DESC,event_id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func (r *UsageRepo) Recent(ctx context.Context, limit int) ([]entities.RecentEve
 	var out []entities.RecentEvent
 	for rows.Next() {
 		var ev entities.RecentEvent
-		if err := rows.Scan(&ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.UpstreamModel,
+		if err := rows.Scan(&ev.ID, &ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.UpstreamModel,
 			&ev.PromptTokens, &ev.CompletionTokens, &ev.CacheReadTokens, &ev.CacheWriteTokens,
 			&ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error); err != nil {
 			return nil, err

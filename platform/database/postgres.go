@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -36,7 +37,7 @@ func Connect(ctx context.Context, url string) (*Postgres, error) {
 func (p *Postgres) Close() { p.Pool.Close() }
 
 func (p *Postgres) Migrate(ctx context.Context) error {
-	if _, err := p.Pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
+	if _, err := p.Pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)`); err != nil {
 		return err
 	}
 	entries, err := fs.Glob(migrationsFS, "migrations/*.sql")
@@ -68,7 +69,7 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("migration %s: %w", name, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, version); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version,applied_at) VALUES ($1,$2)`, version, time.Now().UTC()); err != nil {
 			_ = tx.Rollback(ctx)
 			return err
 		}

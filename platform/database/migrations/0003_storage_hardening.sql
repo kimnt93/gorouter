@@ -1,5 +1,5 @@
 ALTER TABLE credentials
-    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
 ALTER TABLE api_keys
     DROP CONSTRAINT IF EXISTS api_keys_monthly_quota_nonnegative;

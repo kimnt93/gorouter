@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -36,8 +37,8 @@ func (r *TenantRepo) List(ctx context.Context) ([]entities.Tenant, error) {
 }
 
 func (r *TenantRepo) Create(ctx context.Context, name string) (*entities.Tenant, error) {
-	t := &entities.Tenant{ID: NewID("tenant"), Name: name}
-	err := r.db.Pool.QueryRow(ctx, `INSERT INTO tenants (id,name) VALUES ($1,$2) RETURNING created_at`, t.ID, t.Name).Scan(&t.CreatedAt)
+	t := &entities.Tenant{ID: NewID("tenant"), Name: name, CreatedAt: time.Now().UTC()}
+	_, err := r.db.Pool.Exec(ctx, `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3)`, t.ID, t.Name, t.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,8 @@ func (r *TenantRepo) Create(ctx context.Context, name string) (*entities.Tenant,
 }
 
 func (r *TenantRepo) EnsureDefault(ctx context.Context) error {
-	_, err := r.db.Pool.Exec(ctx, `INSERT INTO tenants (id,name) VALUES ('tenant_default','default') ON CONFLICT DO NOTHING`)
+	createdAt := time.Now().UTC()
+	_, err := r.db.Pool.Exec(ctx, `INSERT INTO tenants (id,name,created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, "tenant_default", "default", createdAt)
 	return err
 }
 
@@ -82,7 +84,7 @@ func wrapDecrypt(id string, err error) error {
 func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput, box entities.SecretBox) (*entities.Credential, error) {
 	c := &entities.Credential{
 		ID: NewID("cred"), Name: in.Name, Provider: in.Provider, Kind: in.Kind,
-		BaseURL: in.BaseURL, Status: "active", OwnerTenantID: in.OwnerTenant,
+		BaseURL: in.BaseURL, Status: "active", OwnerTenantID: in.OwnerTenant, CreatedAt: time.Now().UTC(),
 	}
 	var apiKeyEnc, oauthEnc []byte
 	if in.APIKey != "" {
@@ -103,9 +105,9 @@ func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput
 		c.KeyPreview = preview(in.OAuthAccess)
 	}
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO credentials
-		(id,name,provider,kind,base_url,key_preview,api_key_enc,oauth_blob_enc,status,owner_tenant_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		c.ID, c.Name, c.Provider, c.Kind, c.BaseURL, c.KeyPreview, apiKeyEnc, oauthEnc, c.Status, c.OwnerTenantID)
+		(id,name,provider,kind,base_url,key_preview,api_key_enc,oauth_blob_enc,status,owner_tenant_id,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		c.ID, c.Name, c.Provider, c.Kind, c.BaseURL, c.KeyPreview, apiKeyEnc, oauthEnc, c.Status, c.OwnerTenantID, c.CreatedAt, c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -148,9 +150,10 @@ func (r *CredentialRepo) Update(ctx context.Context, box entities.SecretBox, id 
 			keyPreview = preview(in.OAuthAccess)
 		}
 	}
+	updatedAt := time.Now().UTC()
 	row := r.db.Pool.QueryRow(ctx, `UPDATE credentials SET name=$1,base_url=$2,status=$3,owner_tenant_id=$4,
-		key_preview=$5,api_key_enc=$6,oauth_blob_enc=$7,updated_at=now() WHERE id=$8 RETURNING `+credColumns,
-		in.Name, in.BaseURL, in.Status, in.OwnerTenant, keyPreview, apiKeyEnc, oauthEnc, id)
+		key_preview=$5,api_key_enc=$6,oauth_blob_enc=$7,updated_at=$8 WHERE id=$9 RETURNING `+credColumns,
+		in.Name, in.BaseURL, in.Status, in.OwnerTenant, keyPreview, apiKeyEnc, oauthEnc, updatedAt, id)
 	updated, err := scanCredential(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, entities.ErrNotFound
@@ -251,7 +254,7 @@ func (r *CredentialRepo) UpdateOAuthTokens(ctx context.Context, box entities.Sec
 	if err != nil {
 		return err
 	}
-	tag, err := r.db.Pool.Exec(ctx, `UPDATE credentials SET oauth_blob_enc=$1, updated_at=now() WHERE id=$2`, sealed, id)
+	tag, err := r.db.Pool.Exec(ctx, `UPDATE credentials SET oauth_blob_enc=$1, updated_at=$2 WHERE id=$3`, sealed, time.Now().UTC(), id)
 	if err != nil {
 		return err
 	}
@@ -322,7 +325,6 @@ func scanApiKey(row pgx.Row) (*entities.ApiKey, error) {
 	}
 	k.Models = decodeJSONStrings(modelsJSON)
 	k.Scopes = decodeJSONStrings(scopesJSON)
-	k.MonthlyQuotaUSD = nil
 	return &k, nil
 }
 
@@ -347,15 +349,15 @@ func (r *ApiKeyRepo) CreateWithQuota(ctx context.Context, tenantID, name string,
 	k := &entities.ApiKey{
 		ID: NewID("key"), TenantID: tenantID, Name: name,
 		SecretHash: HashSecret(plain), SecretPrefix: plain[:11],
-		Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm, Enabled: true,
+		Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm, Enabled: true, CreatedAt: time.Now().UTC(),
 		Plaintext: plain,
 	}
 	modelsJSON, _ := json.Marshal(orEmpty(models))
 	scopesJSON, _ := json.Marshal(orEmpty(scopes))
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO api_keys
-		(id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)`,
-		k.ID, k.TenantID, k.Name, k.SecretHash, k.SecretPrefix, modelsJSON, scopesJSON, quota, period, rpm)
+		(id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		k.ID, k.TenantID, k.Name, k.SecretHash, k.SecretPrefix, modelsJSON, scopesJSON, quota, period, rpm, k.Enabled, k.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

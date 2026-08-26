@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS credentials (
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS credentials (
     key_preview TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     owner_tenant_id TEXT REFERENCES tenants(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS api_keys (
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     monthly_quota_usd DOUBLE PRECISION,
     rpm INTEGER,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS models (
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS models (
     strategy TEXT NOT NULL DEFAULT 'priority',
     upstream_model TEXT NOT NULL DEFAULT '',
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS model_routes (
@@ -54,12 +54,13 @@ CREATE TABLE IF NOT EXISTS prices (
     output_per_m DOUBLE PRECISION NOT NULL DEFAULT 0,
     cached_input_per_m DOUBLE PRECISION NOT NULL DEFAULT 0,
     cache_write_per_m DOUBLE PRECISION NOT NULL DEFAULT 0,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS usage_events (
-    seq BIGSERIAL PRIMARY KEY,
-    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    seq BIGINT PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE,
+    ts TIMESTAMPTZ NOT NULL,
     tenant_id TEXT NOT NULL,
     api_key_id TEXT NOT NULL,
     credential_id TEXT NOT NULL DEFAULT '',
@@ -78,6 +79,3 @@ CREATE TABLE IF NOT EXISTS usage_events (
 CREATE INDEX IF NOT EXISTS idx_usage_key_ts ON usage_events (api_key_id, ts);
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events (ts);
 CREATE INDEX IF NOT EXISTS idx_usage_model_ts ON usage_events (model, ts);
-
-INSERT INTO tenants (id, name) VALUES ('tenant_default', 'default')
-ON CONFLICT (id) DO NOTHING;

@@ -131,10 +131,6 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}()
 	quotaLimit := key.QuotaUSD
 	quotaPeriod := key.QuotaPeriod
-	if quotaLimit == nil && key.MonthlyQuotaUSD != nil {
-		quotaLimit = key.MonthlyQuotaUSD
-		quotaPeriod = entities.QuotaPeriodWeek
-	}
 	if quotaLimit != nil && quotaPeriod != entities.QuotaPeriodNone {
 		if g.Quota == nil {
 			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")

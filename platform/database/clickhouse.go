@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 )
@@ -35,12 +36,26 @@ func ConnectClickHouse(ctx context.Context, dsn string) (*ClickHouse, error) {
 func (c *ClickHouse) Close() { _ = c.Conn.Close() }
 
 func (c *ClickHouse) Migrate(ctx context.Context) error {
+	if err := c.Conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version UInt32, applied_at DateTime64(3,'UTC')) ENGINE=ReplacingMergeTree(applied_at) ORDER BY version`); err != nil {
+		return err
+	}
 	entries, err := fs.Glob(clickhouseMigrations, "clickhouse/*.sql")
 	if err != nil {
 		return err
 	}
 	sort.Strings(entries)
 	for _, name := range entries {
+		var version uint32
+		if _, err := fmt.Sscanf(name, "clickhouse/%d_", &version); err != nil {
+			continue
+		}
+		var applied uint64
+		if err := c.Conn.QueryRow(ctx, `SELECT count() FROM schema_migrations WHERE version=?`, version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied > 0 {
+			continue
+		}
 		b, err := clickhouseMigrations.ReadFile(name)
 		if err != nil {
 			return err
@@ -52,6 +67,9 @@ func (c *ClickHouse) Migrate(ctx context.Context) error {
 			if err := c.Conn.Exec(ctx, statement); err != nil {
 				return fmt.Errorf("migration %s: %w", name, err)
 			}
+		}
+		if err := c.Conn.Exec(ctx, `INSERT INTO schema_migrations (version,applied_at) VALUES (?,?)`, version, time.Now().UTC()); err != nil {
+			return err
 		}
 	}
 	return nil

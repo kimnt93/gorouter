@@ -38,18 +38,17 @@ type loginResponse struct {
 }
 
 type createdAPIKeyResponse struct {
-	ID              string   `json:"id"`
-	TenantID        string   `json:"tenant_id"`
-	Name            string   `json:"name"`
-	KeyPrefix       string   `json:"key_prefix"`
-	Models          []string `json:"models"`
-	Scopes          []string `json:"scopes"`
-	MonthlyQuotaUSD *float64 `json:"monthly_quota_usd"`
-	QuotaUSD        *float64 `json:"quota_usd"`
-	QuotaPeriod     string   `json:"quota_period"`
-	RPM             *int     `json:"rpm"`
-	Enabled         bool     `json:"enabled"`
-	Plaintext       string   `json:"plaintext"`
+	ID          string   `json:"id"`
+	TenantID    string   `json:"tenant_id"`
+	Name        string   `json:"name"`
+	KeyPrefix   string   `json:"key_prefix"`
+	Models      []string `json:"models"`
+	Scopes      []string `json:"scopes"`
+	QuotaUSD    *float64 `json:"quota_usd"`
+	QuotaPeriod string   `json:"quota_period"`
+	RPM         *int     `json:"rpm"`
+	Enabled     bool     `json:"enabled"`
+	Plaintext   string   `json:"plaintext"`
 }
 
 type Admin struct {
@@ -304,14 +303,13 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 }
 func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	var b struct {
-		TenantID        string   `json:"tenant_id"`
-		Name            string   `json:"name"`
-		Models          []string `json:"models"`
-		Scopes          []string `json:"scopes"`
-		MonthlyQuotaUSD *float64 `json:"monthly_quota_usd"`
-		QuotaUSD        *float64 `json:"quota_usd"`
-		QuotaPeriod     string   `json:"quota_period"`
-		RPM             *int     `json:"rpm"`
+		TenantID    string   `json:"tenant_id"`
+		Name        string   `json:"name"`
+		Models      []string `json:"models"`
+		Scopes      []string `json:"scopes"`
+		QuotaUSD    *float64 `json:"quota_usd"`
+		QuotaPeriod string   `json:"quota_period"`
+		RPM         *int     `json:"rpm"`
 	}
 	if err := c.Bind().Body(&b); err != nil {
 		return presenter.BadRequest(c, "invalid body")
@@ -322,7 +320,7 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if len(b.Scopes) == 0 {
 		b.Scopes = []string{entities.ScopeChat}
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, MonthlyQuotaUSD: b.MonthlyQuotaUSD, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM}
 	sess := SessionFrom(c)
 	var v *entities.ApiKey
 	var err error
@@ -337,14 +335,13 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
-	return c.Status(201).JSON(createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, MonthlyQuotaUSD: v.MonthlyQuotaUSD, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext})
+	return c.Status(201).JSON(createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext})
 }
 func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	var b struct {
 		Enabled     *bool     `json:"enabled"`
 		Models      *[]string `json:"models"`
 		Scopes      *[]string `json:"scopes"`
-		Quota       **float64 `json:"monthly_quota_usd"`
 		QuotaUSD    **float64 `json:"quota_usd"`
 		QuotaPeriod *string   `json:"quota_period"`
 		RPM         **int     `json:"rpm"`
@@ -354,14 +351,6 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	}
 	quotaValue := b.QuotaUSD
 	period := b.QuotaPeriod
-	if quotaValue == nil && b.Quota != nil {
-		quotaValue = b.Quota
-		legacyPeriod := entities.QuotaPeriodNone
-		if *b.Quota != nil {
-			legacyPeriod = entities.QuotaPeriodWeek
-		}
-		period = &legacyPeriod
-	}
 	sess := SessionFrom(c)
 	var err error
 	if sess != nil && !sess.IsMaster() {

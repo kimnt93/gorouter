@@ -9,6 +9,6 @@ CREATE TABLE IF NOT EXISTS catalog_prices (
     cached_input_per_m DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (cached_input_per_m >= 0),
     cache_write_per_m DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (cache_write_per_m >= 0),
     source TEXT NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_catalog_prices_source ON catalog_prices (source);

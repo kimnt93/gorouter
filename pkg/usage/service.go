@@ -10,7 +10,6 @@ import (
 )
 
 type Repository interface {
-	MonthSpendForKey(context.Context, string) (float64, error)
 	SpendForKeySince(context.Context, string, time.Time) (float64, error)
 	Summary(context.Context, time.Time) (*entities.UsageSummary, error)
 	Recent(context.Context, int) ([]entities.RecentEvent, error)
@@ -58,20 +57,23 @@ func NewServiceWithConcurrency(repo Repository, buffer, concurrency int, pending
 func (s *Service) Record(ev entities.UsageEvent) { _ = s.RecordContext(context.Background(), ev) }
 
 func (s *Service) RecordContext(ctx context.Context, ev entities.UsageEvent) error {
+	if ev.ID == "" { ev.ID = entities.NewID("usage") }
+	if ev.Sequence == 0 { ev.Sequence = entities.NewSequence() }
+	if ev.TS.IsZero() { ev.TS = time.Now().UTC() } else { ev.TS = ev.TS.UTC() }
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
 		return ErrClosed
 	}
 	if s.pending != nil {
-		s.pending.Add(ev.ApiKeyID, ev.CostUSD)
+		s.pending.AddAt(ev.ApiKeyID, ev.TS, ev.CostUSD)
 	}
 	select {
 	case s.ch <- ev:
 		return nil
 	case <-ctx.Done():
 		if s.pending != nil {
-			s.pending.Sub(ev.ApiKeyID, ev.CostUSD)
+			s.pending.SubAt(ev.ApiKeyID, ev.TS, ev.CostUSD)
 		}
 		return ctx.Err()
 	}
@@ -144,7 +146,7 @@ func (s *Service) worker() {
 			if err == nil {
 				if s.pending != nil {
 					for _, ev := range batch {
-						s.pending.Sub(ev.ApiKeyID, ev.CostUSD)
+						s.pending.SubAt(ev.ApiKeyID, ev.TS, ev.CostUSD)
 					}
 				}
 				break
@@ -158,23 +160,13 @@ func (s *Service) worker() {
 	}
 }
 
-func (s *Service) MonthSpendForKey(ctx context.Context, id string) (float64, error) {
-	v, err := s.repo.MonthSpendForKey(ctx, id)
-	if err != nil {
-		return 0, err
-	}
-	if s.pending != nil {
-		v += s.pending.Load(id)
-	}
-	return v, nil
-}
 func (s *Service) SpendForKeySince(ctx context.Context, id string, since time.Time) (float64, error) {
 	v, err := s.repo.SpendForKeySince(ctx, id, since.UTC())
 	if err != nil {
 		return 0, err
 	}
 	if s.pending != nil {
-		v += s.pending.Load(id)
+		v += s.pending.LoadSince(id, since)
 	}
 	return v, nil
 }

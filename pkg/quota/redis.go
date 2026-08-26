@@ -136,7 +136,7 @@ func (r *Redis) mutationResult(ok int, err error) error {
 	return nil
 }
 
-func quotaKey(keyID, month string) string { return quotaPrefix + keyID + ":" + month }
+func quotaKey(keyID, window string) string { return quotaPrefix + keyID + ":" + window }
 func reservationWindow(res *Reservation) string {
 	if res.Window != "" {
 		return res.Window

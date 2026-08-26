@@ -27,7 +27,6 @@ func (r *testRepo) InsertBatch(_ context.Context, events []entities.UsageEvent) 
 	r.events = append(r.events, events...)
 	return nil
 }
-func (*testRepo) MonthSpendForKey(context.Context, string) (float64, error) { return 2, nil }
 func (r *testRepo) SpendForKeySince(_ context.Context, _ string, since time.Time) (float64, error) {
 	r.since = since
 	return 3, nil
@@ -53,6 +52,16 @@ func TestSpendForKeySinceIncludesPendingAndPassesUTCWindow(t *testing.T) {
 		t.Fatalf("repository since=%v, want UTC equivalent of %v", repo.since, since)
 	}
 }
+
+func TestPendingSpendRespectsWindowStart(t *testing.T) {
+	p := NewPending()
+	start := time.Date(2026, time.August, 23, 0, 0, 0, 0, time.UTC)
+	p.AddAt("key", start.Add(-time.Second), 10)
+	p.AddAt("key", start.Add(time.Second), .5)
+	if got := p.LoadSince("key", start); got != .5 {
+		t.Fatalf("window pending=%v, want .5", got)
+	}
+}
 func (*testRepo) RecentForTenant(context.Context, string, int) ([]entities.RecentEvent, error) {
 	return nil, nil
 }
@@ -65,8 +74,8 @@ func TestServiceRetriesAndTracksPending(t *testing.T) {
 	if err := svc.RecordContext(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
-	spent, err := svc.MonthSpendForKey(context.Background(), "key")
-	if err != nil || spent != 2.75 {
+	spent, err := svc.SpendForKeySince(context.Background(), "key", time.Time{})
+	if err != nil || spent != 3.75 {
 		t.Fatalf("pending spend missing: spent=%v err=%v", spent, err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -87,23 +96,43 @@ func TestServiceRetriesAndTracksPending(t *testing.T) {
 type concurrencyRepo struct {
 	*testRepo
 	active int
-	max int
+	max    int
 }
 
 func (r *concurrencyRepo) InsertBatch(_ context.Context, events []entities.UsageEvent) error {
-	r.mu.Lock(); r.active++; if r.active>r.max { r.max=r.active }; r.mu.Unlock()
-	time.Sleep(20*time.Millisecond)
-	r.mu.Lock(); r.events=append(r.events,events...); r.active--; r.mu.Unlock()
+	r.mu.Lock()
+	r.active++
+	if r.active > r.max {
+		r.max = r.active
+	}
+	r.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	r.mu.Lock()
+	r.events = append(r.events, events...)
+	r.active--
+	r.mu.Unlock()
 	return nil
 }
 
 func TestServiceUsesConfiguredWritersAndDrains(t *testing.T) {
-	repo:=&concurrencyRepo{testRepo:&testRepo{}}
-	svc:=NewServiceWithConcurrency(repo,100000,4,NewPending())
-	for i:=0;i<1024;i++ { if err:=svc.RecordContext(context.Background(),entities.UsageEvent{ApiKeyID:"key"});err!=nil{t.Fatal(err)} }
-	ctx,cancel:=context.WithTimeout(context.Background(),3*time.Second);defer cancel()
-	if err:=svc.CloseContext(ctx);err!=nil{t.Fatal(err)}
-	repo.mu.Lock();defer repo.mu.Unlock()
-	if len(repo.events)!=1024{t.Fatalf("durable events=%d, want 1024",len(repo.events))}
-	if repo.max<2{t.Fatalf("max concurrent writes=%d, want at least 2",repo.max)}
+	repo := &concurrencyRepo{testRepo: &testRepo{}}
+	svc := NewServiceWithConcurrency(repo, 100000, 4, NewPending())
+	for i := 0; i < 1024; i++ {
+		if err := svc.RecordContext(context.Background(), entities.UsageEvent{ApiKeyID: "key"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := svc.CloseContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.events) != 1024 {
+		t.Fatalf("durable events=%d, want 1024", len(repo.events))
+	}
+	if repo.max < 2 {
+		t.Fatalf("max concurrent writes=%d, want at least 2", repo.max)
+	}
 }

@@ -27,10 +27,37 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("CACHE_ENABLED", "")
 	t.Setenv("REQUEST_LIMIT_MB", "")
 	t.Setenv("REQUEST_TIMEOUT", "")
+	t.Setenv("API_TOKEN_CACHE_TTL", "")
+	t.Setenv("WEEK_START", "")
+	t.Setenv("USAGE_WRITE_CONCURRENCY", "")
+	t.Setenv("USAGE_WRITE_QUEUE_SIZE", "")
 	t.Setenv("OPENROUTER_CATALOG_ENABLED", "")
 	t.Setenv("OPENROUTER_CATALOG_URL", "")
 	t.Setenv("OPENROUTER_SYNC_INTERVAL", "")
 	t.Setenv("OPENROUTER_HTTP_TIMEOUT", "")
+}
+
+func TestTokenQuotaAndUsageWriterDefaultsAndOverrides(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APITokenCacheTTL != 10*time.Minute || cfg.WeekStart != time.Sunday || cfg.UsageWriteConcurrency != 4 || cfg.UsageWriteQueueSize != 100000 {
+		t.Fatalf("defaults: ttl=%s week=%s concurrency=%d queue=%d", cfg.APITokenCacheTTL, cfg.WeekStart, cfg.UsageWriteConcurrency, cfg.UsageWriteQueueSize)
+	}
+	requiredEnv(t)
+	t.Setenv("API_TOKEN_CACHE_TTL", "30m")
+	t.Setenv("WEEK_START", "monday")
+	t.Setenv("USAGE_WRITE_CONCURRENCY", "8")
+	t.Setenv("USAGE_WRITE_QUEUE_SIZE", "2048")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APITokenCacheTTL != 30*time.Minute || cfg.WeekStart != time.Monday || cfg.UsageWriteConcurrency != 8 || cfg.UsageWriteQueueSize != 2048 {
+		t.Fatalf("overrides: %+v", cfg)
+	}
 }
 
 func TestPricingCatalogDefaultsAndOverrides(t *testing.T) {
@@ -137,8 +164,13 @@ func TestAcceptsClickHouseAsPrimaryStore(t *testing.T) {
 	t.Setenv("CLICKHOUSE_USER", "gorouter")
 	t.Setenv("CLICKHOUSE_PASSWORD", "secret")
 	t.Setenv("CLICKHOUSE_DB", "gorouter")
-	cfg,err:=Load();if err!=nil{t.Fatal(err)}
-	if cfg.ClickHouseURL==""{t.Fatal("ClickHouse URL is empty")}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClickHouseURL == "" {
+		t.Fatal("ClickHouse URL is empty")
+	}
 }
 
 func TestRejectsInvalidLimitsAndScope(t *testing.T) {

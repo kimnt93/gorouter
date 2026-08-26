@@ -32,7 +32,7 @@ func (r *repositoryStub) PatchQuotaForTenant(_ context.Context, tenantID, id str
 }
 
 func (r *repositoryStub) Create(_ context.Context, tenantID, name string, models, scopes []string, quota *float64, rpm *int) (*entities.ApiKey, error) {
-	r.created = CreateInput{TenantID: tenantID, Name: name, Models: models, Scopes: scopes, MonthlyQuotaUSD: quota, RPM: rpm}
+	r.created = CreateInput{TenantID: tenantID, Name: name, Models: models, Scopes: scopes, QuotaUSD: quota, RPM: rpm}
 	return &entities.ApiKey{ID: "key_1", TenantID: tenantID, Name: name, Models: models, Scopes: scopes}, nil
 }
 func (*repositoryStub) GetBySecret(context.Context, string) (*entities.ApiKey, error) {
@@ -103,7 +103,6 @@ func TestCreateNormalizesQuotaPeriods(t *testing.T) {
 		{"no limit", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: "none"}, nil, entities.QuotaPeriodNone},
 		{"weekly", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota, QuotaPeriod: " WEEK "}, &quota, entities.QuotaPeriodWeek},
 		{"generic default", CreateInput{TenantID: "t", Name: "k", QuotaUSD: &quota}, &quota, entities.QuotaPeriodWeek},
-		{"legacy value becomes weekly", CreateInput{TenantID: "t", Name: "k", MonthlyQuotaUSD: &quota}, &quota, entities.QuotaPeriodWeek},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,7 +129,7 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 		{"name", CreateInput{TenantID: "t"}, ErrNameRequired},
 		{"model", CreateInput{TenantID: "t", Name: "x", Models: []string{" "}}, ErrInvalidModel},
 		{"scope", CreateInput{TenantID: "t", Name: "x", Scopes: []string{"admin"}}, ErrInvalidScope},
-		{"quota", CreateInput{TenantID: "t", Name: "x", MonthlyQuotaUSD: &quota}, ErrInvalidQuota},
+		{"quota", CreateInput{TenantID: "t", Name: "x", QuotaUSD: &quota}, ErrInvalidQuota},
 		{"period", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "year"}, ErrInvalidPeriod},
 		{"missing quota", CreateInput{TenantID: "t", Name: "x", QuotaPeriod: "week"}, ErrQuotaRequired},
 		{"daily rejected", CreateInput{TenantID: "t", Name: "x", QuotaUSD: new(float64), QuotaPeriod: "day"}, ErrInvalidPeriod},

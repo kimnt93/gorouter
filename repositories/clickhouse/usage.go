@@ -13,10 +13,6 @@ func jsonUnmarshal(v string, out any) error { return json.Unmarshal([]byte(v), o
 type UsageRepo struct{ s *Store }
 
 func NewUsageRepo(s *Store) *UsageRepo { return &UsageRepo{s} }
-func (r *UsageRepo) MonthSpendForKey(ctx context.Context, id string) (float64, error) {
-	u := time.Now().UTC()
-	return r.SpendForKeySince(ctx, id, time.Date(u.Year(), u.Month(), 1, 0, 0, 0, 0, time.UTC))
-}
 func (r *UsageRepo) SpendForKeySince(ctx context.Context, id string, since time.Time) (float64, error) {
 	var v float64
 	e := r.s.Conn.QueryRow(ctx, `SELECT sum(cost_usd) FROM usage_events WHERE api_key_id=? AND ts>=?`, id, since.UTC()).Scan(&v)
@@ -31,7 +27,9 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		return e
 	}
 	for _, v := range events {
-		if e = b.Append(v.TS.UTC(), v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error); e != nil {
+		if v.ID == "" { v.ID = entities.NewID("usage") }
+		if v.TS.IsZero() { v.TS = time.Now().UTC() } else { v.TS = v.TS.UTC() }
+		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error); e != nil {
 			return e
 		}
 	}
@@ -94,13 +92,13 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	q := `SELECT ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error FROM usage_events`
+	q := `SELECT event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error FROM usage_events`
 	args := []any{}
 	if tenant != "" {
 		q += ` WHERE tenant_id=?`
 		args = append(args, tenant)
 	}
-	q += ` ORDER BY ts DESC LIMIT ?`
+	q += ` ORDER BY ts DESC,event_id DESC LIMIT ?`
 	args = append(args, limit)
 	rows, e := r.s.Conn.Query(ctx, q, args...)
 	if e != nil {
@@ -110,7 +108,7 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	out := []entities.RecentEvent{}
 	for rows.Next() {
 		var v entities.RecentEvent
-		if e = rows.Scan(&v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &v.StatusCode, &v.DurationMS, &v.Error); e != nil {
+		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &v.StatusCode, &v.DurationMS, &v.Error); e != nil {
 			return nil, e
 		}
 		out = append(out, v)
