@@ -14,6 +14,7 @@ import (
 )
 
 type Config struct {
+	Environment                  string
 	Listen                       string
 	DatabaseBackend              string
 	DatabaseURL                  string
@@ -64,7 +65,9 @@ type PricingConfig struct {
 }
 
 func Load() (*Config, error) {
+	environment := strings.ToLower(strings.TrimSpace(env("APP_ENV", "development")))
 	cfg := &Config{
+		Environment:                  environment,
 		Listen:                       env("LISTEN", ":8090"),
 		MasterKey:                    os.Getenv("MASTER_KEY"),
 		RequestLimit:                 20 << 20,
@@ -84,7 +87,7 @@ func Load() (*Config, error) {
 			Scope:         "key",
 			MaxEntryBytes: 1 << 20,
 			MaxTotalBytes: 256 << 20,
-			AllowMemory:   !strings.EqualFold(env("APP_ENV", "development"), "production"),
+			AllowMemory:   environment == "development",
 		},
 		Quota:                 QuotaConfig{RedisPolicy: "strict"},
 		APITokenCacheTTL:      10 * time.Minute,
@@ -208,6 +211,12 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("CACHE_MEMORY_FALLBACK"); v != "" {
 		cfg.Cache.AllowMemory = strings.EqualFold(v, "true") || v == "1"
+	}
+	if cfg.Environment != "development" && cfg.Cache.AllowMemory {
+		return nil, errors.New("CACHE_MEMORY_FALLBACK is allowed only in development")
+	}
+	if cfg.Environment != "development" && cfg.RedisURL == "" {
+		return nil, errors.New("Redis is required outside development for distributed runtime state")
 	}
 	switch strings.ToLower(os.Getenv("REDIS_OUTAGE_POLICY")) {
 	case "", "strict":

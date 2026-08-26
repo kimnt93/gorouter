@@ -20,6 +20,7 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("REDIS_USER", "gorouter")
 	t.Setenv("REDIS_PASSWORD", "redis-secret")
 	t.Setenv("CACHE_MEMORY_FALLBACK", "")
+	t.Setenv("APP_ENV", "production")
 	t.Setenv("CACHE_MAX_ENTRY_BYTES", "")
 	t.Setenv("CACHE_MAX_TOTAL_BYTES", "")
 	t.Setenv("CACHE_SCOPE", "")
@@ -148,6 +149,7 @@ func TestDatabaseSSLModeOverride(t *testing.T) {
 
 func TestRedisIsOptionalForDevelopment(t *testing.T) {
 	requiredEnv(t)
+	t.Setenv("APP_ENV", "development")
 	t.Setenv("REDIS_HOST", "")
 	cfg, err := Load()
 	if err != nil {
@@ -155,6 +157,19 @@ func TestRedisIsOptionalForDevelopment(t *testing.T) {
 	}
 	if cfg.RedisURL != "" {
 		t.Fatalf("Redis URL = %q, want empty", cfg.RedisURL)
+	}
+}
+
+func TestRedisIsRequiredForDistributedDeployment(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("REDIS_HOST", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("production configuration without Redis was accepted")
+	}
+	requiredEnv(t)
+	t.Setenv("CACHE_MEMORY_FALLBACK", "true")
+	if _, err := Load(); err == nil {
+		t.Fatal("production in-memory cache fallback was accepted")
 	}
 }
 

@@ -226,8 +226,14 @@ func main() {
 		KimiClientID: cfg.KimiOAuthClientID, AntigravityClientID: cfg.AntigravityOAuthClientID,
 		AntigravityClientSecret: cfg.AntigravityOAuthClientSecret,
 	})
+	if redisClient != nil {
+		oauthSvc.SetFlowStore(oauthpkg.NewRedisFlowStore(redisClient))
+	}
 	providerQuotaSvc := providerquota.New(client, credSvc)
 	providerQuotaSvc.SetStore(providerQuotaStore)
+	if redisClient != nil {
+		providerQuotaSvc.SetStateCache(providerquota.NewRedisState(redisClient))
+	}
 	if err := providerQuotaSvc.Restore(context.Background()); err != nil {
 		log.Printf("restore provider quota snapshots: %v", err)
 	}
