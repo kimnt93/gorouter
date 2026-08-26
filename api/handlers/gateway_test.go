@@ -159,6 +159,28 @@ func TestGatewayUsesPriceResolverFallback(t *testing.T) {
 	}
 }
 
+func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
+	gateway := &Gateway{Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", Enabled: true}})}
+	app := fiber.New()
+	app.Get("/v1/models", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes})
+		access, err := gateway.accessForSession(c, SessionFrom(c))
+		if err != nil || !access.Master || access.StoredKey != nil || access.Actor.Type != entities.ActorMaster {
+			t.Fatalf("master access=%+v err=%v", access, err)
+		}
+		return gateway.ListModels(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "model-a") {
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+}
+
 func (u *gatewayUpstream) Send(_ context.Context, runtime *entities.CredentialRuntime, _ string, _ []byte) (*entities.UpstreamResult, error) {
 	u.calls = append(u.calls, runtime.ID)
 	status := u.statuses[runtime.ID]

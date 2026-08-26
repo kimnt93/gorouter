@@ -140,6 +140,30 @@ func (s *Service) Rotate(ctx context.Context, id string) (*entities.ApiKey, erro
 	return key, err
 }
 
+func (s *Service) InvalidateUser(ctx context.Context, userID string) error {
+	return s.invalidateMatching(ctx, func(key entities.ApiKey) bool { return key.OwnerUserID == userID })
+}
+func (s *Service) InvalidateOrganization(ctx context.Context, organizationID string) error {
+	return s.invalidateMatching(ctx, func(key entities.ApiKey) bool {
+		return key.OwnerOrganizationID == organizationID || key.ContextOrganizationID == organizationID
+	})
+}
+func (s *Service) invalidateMatching(ctx context.Context, match func(entities.ApiKey) bool) error {
+	if s.cache == nil {
+		return nil
+	}
+	keys, err := s.repo.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if match(key) {
+			s.cache.invalidate(ctx, key.ID, key.SecretHash)
+		}
+	}
+	return nil
+}
+
 func (s *Service) CreateForTenant(ctx context.Context, tenantID string, in CreateInput) (*entities.ApiKey, error) {
 	in.TenantID = tenantID
 	return s.Create(ctx, in)

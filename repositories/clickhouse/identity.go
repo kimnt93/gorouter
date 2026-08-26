@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ func (r *IdentityRepo) CreateUser(ctx context.Context, user entities.User) error
 	return r.s.mutate(ctx, "user_username:"+user.NormalizedUsername, func() error {
 		if _, err := get[lookupRecord](ctx, r.s, "user_username", user.NormalizedUsername); err == nil {
 			return entities.ErrConflict
+		} else if !errors.Is(err, entities.ErrNotFound) {
+			return err
 		}
 		if err := r.s.put(ctx, "user", user.ID, user); err != nil {
 			return err
@@ -75,6 +78,8 @@ func (r *IdentityRepo) CreateOrganization(ctx context.Context, organization enti
 	return r.s.mutate(ctx, "organization_name:"+organization.NormalizedName, func() error {
 		if _, err := get[lookupRecord](ctx, r.s, "organization_name", organization.NormalizedName); err == nil {
 			return entities.ErrConflict
+		} else if !errors.Is(err, entities.ErrNotFound) {
+			return err
 		}
 		if err := r.s.put(ctx, "organization", organization.ID, organization); err != nil {
 			return err
@@ -156,6 +161,8 @@ func (r *IdentityRepo) UpdateOrganization(ctx context.Context, organization enti
 		if current.NormalizedName != organization.NormalizedName {
 			if _, err := get[lookupRecord](ctx, r.s, "organization_name", organization.NormalizedName); err == nil {
 				return entities.ErrConflict
+			} else if !errors.Is(err, entities.ErrNotFound) {
+				return err
 			}
 			if err := r.s.put(ctx, "organization_name", organization.NormalizedName, lookupRecord{ID: organization.ID}); err != nil {
 				return err
@@ -232,6 +239,50 @@ func (r *IdentityRepo) CountActiveOrganizationAdmins(ctx context.Context, organi
 func (r *IdentityRepo) DeleteMembership(ctx context.Context, organizationID, userID string) error {
 	key := membershipKey(organizationID, userID)
 	return r.s.mutate(ctx, "organization_membership:"+key, func() error { return r.s.del(ctx, "organization_membership", key) })
+}
+
+func (r *IdentityRepo) ChangeMembershipRoleAtomic(ctx context.Context, organizationID, userID, role string) (bool, error) {
+	lastAdmin := false
+	err := r.s.mutate(ctx, "organization_memberships:"+organizationID, func() error {
+		membership, err := r.Membership(ctx, organizationID, userID)
+		if err != nil {
+			return err
+		}
+		if membership.Role == entities.MembershipAdmin && role != entities.MembershipAdmin {
+			count, countErr := r.CountActiveOrganizationAdmins(ctx, organizationID)
+			if countErr != nil {
+				return countErr
+			}
+			if count <= 1 {
+				lastAdmin = true
+				return nil
+			}
+		}
+		membership.Role = role
+		return r.s.put(ctx, "organization_membership", membershipKey(organizationID, userID), membership)
+	})
+	return lastAdmin, err
+}
+func (r *IdentityRepo) DeleteMembershipAtomic(ctx context.Context, organizationID, userID string) (bool, error) {
+	lastAdmin := false
+	err := r.s.mutate(ctx, "organization_memberships:"+organizationID, func() error {
+		membership, err := r.Membership(ctx, organizationID, userID)
+		if err != nil {
+			return err
+		}
+		if membership.Role == entities.MembershipAdmin {
+			count, countErr := r.CountActiveOrganizationAdmins(ctx, organizationID)
+			if countErr != nil {
+				return countErr
+			}
+			if count <= 1 {
+				lastAdmin = true
+				return nil
+			}
+		}
+		return r.s.del(ctx, "organization_membership", membershipKey(organizationID, userID))
+	})
+	return lastAdmin, err
 }
 
 func boundedConfigLimit(limit int) int {

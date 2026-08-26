@@ -39,8 +39,8 @@ func TestTenantUsageQueriesAreIsolated(t *testing.T) {
 	})
 	now := time.Now().UTC()
 	_, err = pool.Exec(ctx, `INSERT INTO usage_events
-		(event_id,ts,tenant_id,api_key_id,model,cost_usd,priced) VALUES
-		($1,$2,$3,$4,'model-a',1,true),($5,$6,$7,$8,'model-b',2,true)`,
+		(event_id,ts,tenant_id,api_key_id,model,cost_usd,priced,actor_type,user_id,username,organization_id) VALUES
+		($1,$2,$3,$4,'model-a',1,true,'legacy','','legacy',$3),($5,$6,$7,$8,'model-b',2,true,'legacy','','legacy',$7)`,
 		entities.NewID("usage"), now, id+"-tenant-a", keyA,
 		entities.NewID("usage"), now, id+"-tenant-b", keyB)
 	if err != nil {

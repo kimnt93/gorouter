@@ -57,6 +57,7 @@ func main() {
 	var auditRepo entities.AuditRepository
 	var hashSecret func(string) string
 	var generateSecret func() string
+	var clickhouseStore *clickhouserepo.Store
 	if cfg.DatabaseBackend == "clickhouse" {
 		db, connectErr := database.ConnectClickHouse(ctx, cfg.ClickHouseURL)
 		if connectErr != nil {
@@ -67,6 +68,7 @@ func main() {
 			log.Fatal(err)
 		}
 		store := clickhouserepo.New(db.Conn)
+		clickhouseStore = store
 		tenantRepo, credRepo, keyRepo = clickhouserepo.NewTenantRepo(store), clickhouserepo.NewCredentialRepo(store), clickhouserepo.NewApiKeyRepo(store)
 		modelRepo, usageRepo = clickhouserepo.NewModelRouteRepo(store), clickhouserepo.NewUsageRepo(store)
 		identityRepo, auditRepo = clickhouserepo.NewIdentityRepo(store), clickhouserepo.NewAuditRepo(store)
@@ -98,6 +100,7 @@ func main() {
 	credSvc := credential.NewService(credRepo, box)
 	keySvc := apikey.NewService(keyRepo, hashSecret, generateSecret)
 	identitySvc := identity.NewService(identityRepo, auditRepo)
+	identitySvc.SetAuthorizationCache(keySvc)
 	modelSvc := modelroute.NewService(modelRepo)
 	priceResolver := pricing.NewResolver(modelRepo)
 	if err := priceResolver.Refresh(ctx); err != nil {
@@ -141,6 +144,17 @@ func main() {
 	}
 	if redisClient != nil {
 		keySvc.SetTokenCache(redisClient, cfg.APITokenCacheTTL)
+	}
+	if clickhouseStore != nil {
+		if redisClient != nil {
+			locker, lockErr := clickhouserepo.NewRedisMutationLocker(redisClient, 15*time.Second)
+			if lockErr != nil {
+				log.Fatal(lockErr)
+			}
+			clickhouseStore.SetMutationLocker(locker)
+		} else if !cfg.ClickHouseSingleWriter {
+			log.Fatal("ClickHouse administration requires Redis locking unless CLICKHOUSE_SINGLE_WRITER=true is explicitly declared")
+		}
 	}
 	quota.SetWeekStart(cfg.WeekStart)
 	var quotaSvc quota.Coordinator

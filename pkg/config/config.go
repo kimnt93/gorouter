@@ -18,6 +18,7 @@ type Config struct {
 	DatabaseBackend              string
 	DatabaseURL                  string
 	ClickHouseURL                string
+	ClickHouseSingleWriter       bool
 	RedisURL                     string
 	APITokenCacheTTL             time.Duration
 	WeekStart                    time.Weekday
@@ -125,6 +126,13 @@ func Load() (*Config, error) {
 	}
 	if backend == "clickhouse" && (os.Getenv("CLICKHOUSE_USER") == "" || os.Getenv("CLICKHOUSE_PASSWORD") == "" || os.Getenv("CLICKHOUSE_DB") == "") {
 		return nil, errors.New("CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and CLICKHOUSE_DB are required for ClickHouse")
+	}
+	if value := strings.TrimSpace(os.Getenv("CLICKHOUSE_SINGLE_WRITER")); value != "" {
+		parsed, parseErr := strconv.ParseBool(value)
+		if parseErr != nil {
+			return nil, errors.New("CLICKHOUSE_SINGLE_WRITER must be true or false")
+		}
+		cfg.ClickHouseSingleWriter = parsed
 	}
 	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" {
 		cfg.RedisURL = connectionURL("redis", redisHost, env("REDIS_PORT", "6379"), os.Getenv("REDIS_USER"), os.Getenv("REDIS_PASSWORD"), "0")

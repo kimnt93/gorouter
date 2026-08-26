@@ -29,6 +29,7 @@ func New(conn ch.Conn) *Store { return &Store{Conn: conn, locker: newProcessLock
 func NewWithLocker(conn ch.Conn, locker MutationLocker) *Store {
 	return &Store{Conn: conn, locker: locker}
 }
+func (s *Store) SetMutationLocker(locker MutationLocker) { s.locker = locker }
 
 func (s *Store) mutate(ctx context.Context, key string, fn func() error) error {
 	if s.locker == nil {

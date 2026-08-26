@@ -167,33 +167,59 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 }
 
 func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
-	page, err := r.QueryUsage(ctx, query)
+	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
+	filter, args := postgresUsageFilter(query)
+	if err := r.db.Pool.QueryRow(ctx, `SELECT count(*),coalesce(sum(cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),count(*) FILTER (WHERE cache_hit),count(*) FILTER (WHERE NOT priced) FROM usage_events WHERE `+filter, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheHits, &summary.Unpriced); err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Pool.Query(ctx, `SELECT model,count(*),coalesce(sum(cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0) FROM usage_events WHERE `+filter+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err
 	}
-	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
-	for _, event := range page.Data {
-		summary.Requests++
-		summary.CostUSD += event.CostUSD
-		summary.PromptTok += event.PromptTokens
-		summary.CompletionTo += event.CompletionTokens
-		summary.CacheReadTok += event.CacheReadTokens
-		if event.CacheHit {
-			summary.CacheHits++
+	for rows.Next() {
+		var name string
+		var value entities.ModelU
+		if err = rows.Scan(&name, &value.Requests, &value.CostUSD, &value.InTok, &value.OutTok); err != nil {
+			rows.Close()
+			return nil, err
 		}
-		if !event.Priced {
-			summary.Unpriced++
-		}
-		model := summary.ByModel[event.Model]
-		model.Requests++
-		model.CostUSD += event.CostUSD
-		model.InTok += event.PromptTokens
-		model.OutTok += event.CompletionTokens
-		summary.ByModel[event.Model] = model
-		key := summary.ByKey[event.KeyID]
-		key.Requests++
-		key.CostUSD += event.CostUSD
-		summary.ByKey[event.KeyID] = key
+		summary.ByModel[name] = value
 	}
-	return summary, nil
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	rows, err = r.db.Pool.Query(ctx, `SELECT api_key_id,count(*),coalesce(sum(cost_usd),0) FROM usage_events WHERE `+filter+` GROUP BY api_key_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var value entities.KeyU
+		if err = rows.Scan(&name, &value.Requests, &value.CostUSD); err != nil {
+			return nil, err
+		}
+		summary.ByKey[name] = value
+	}
+	return summary, rows.Err()
+}
+
+func postgresUsageFilter(query entities.UsageQuery) (string, []any) {
+	var since, until time.Time
+	if query.Since != nil {
+		since = query.Since.UTC()
+	}
+	if query.Until != nil {
+		until = query.Until.UTC()
+	}
+	master := query.Visibility.PrincipalType == entities.PrincipalMaster
+	organizationWide := query.Visibility.OrganizationWide && query.Visibility.OrganizationID != ""
+	status := 0
+	hasStatus := query.StatusCode != nil
+	if hasStatus {
+		status = *query.StatusCode
+	}
+	return `($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND ($5='' OR organization_id=$5) AND ($6='' OR user_id=$6) AND ($7='' OR model=$7) AND ($8='' OR api_key_id=$8) AND (NOT $9 OR status_code=$10) AND ($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND ($12::timestamptz='0001-01-01 00:00:00+00' OR ts <= $12)`, []any{master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID, query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until}
 }

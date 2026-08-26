@@ -196,6 +196,65 @@ func (r *IdentityRepo) DeleteMembership(ctx context.Context, organizationID, use
 	return err
 }
 
+func (r *IdentityRepo) ChangeMembershipRoleAtomic(ctx context.Context, organizationID, userID, role string) (bool, error) {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT id FROM organizations WHERE id=$1 FOR UPDATE`, organizationID); err != nil {
+		return false, err
+	}
+	var current string
+	if err = tx.QueryRow(ctx, `SELECT role FROM organization_memberships WHERE organization_id=$1 AND user_id=$2`, organizationID, userID).Scan(&current); errors.Is(err, pgx.ErrNoRows) {
+		return false, entities.ErrNotFound
+	} else if err != nil {
+		return false, err
+	}
+	if current == entities.MembershipAdmin && role != entities.MembershipAdmin {
+		var count int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM organization_memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.role='admin' AND u.status='active'`, organizationID).Scan(&count); err != nil {
+			return false, err
+		}
+		if count <= 1 {
+			return true, nil
+		}
+	}
+	if _, err = tx.Exec(ctx, `UPDATE organization_memberships SET role=$1 WHERE organization_id=$2 AND user_id=$3`, role, organizationID, userID); err != nil {
+		return false, err
+	}
+	return false, tx.Commit(ctx)
+}
+func (r *IdentityRepo) DeleteMembershipAtomic(ctx context.Context, organizationID, userID string) (bool, error) {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT id FROM organizations WHERE id=$1 FOR UPDATE`, organizationID); err != nil {
+		return false, err
+	}
+	var current string
+	if err = tx.QueryRow(ctx, `SELECT role FROM organization_memberships WHERE organization_id=$1 AND user_id=$2`, organizationID, userID).Scan(&current); errors.Is(err, pgx.ErrNoRows) {
+		return false, entities.ErrNotFound
+	} else if err != nil {
+		return false, err
+	}
+	if current == entities.MembershipAdmin {
+		var count int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM organization_memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.role='admin' AND u.status='active'`, organizationID).Scan(&count); err != nil {
+			return false, err
+		}
+		if count <= 1 {
+			return true, nil
+		}
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM organization_memberships WHERE organization_id=$1 AND user_id=$2`, organizationID, userID); err != nil {
+		return false, err
+	}
+	return false, tx.Commit(ctx)
+}
+
 func boundedLimit(limit int) int {
 	if limit <= 0 {
 		return 100

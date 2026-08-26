@@ -21,16 +21,26 @@ type Repository interface {
 	entities.OrganizationRepository
 	entities.MembershipRepository
 }
+type atomicMembershipRepository interface {
+	ChangeMembershipRoleAtomic(context.Context, string, string, string) (bool, error)
+	DeleteMembershipAtomic(context.Context, string, string) (bool, error)
+}
 
 type Service struct {
 	repo  Repository
 	audit entities.AuditRepository
 	now   func() time.Time
+	cache AuthorizationCache
+}
+type AuthorizationCache interface {
+	InvalidateUser(context.Context, string) error
+	InvalidateOrganization(context.Context, string) error
 }
 
 func NewService(repo Repository, audit entities.AuditRepository) *Service {
 	return &Service{repo: repo, audit: audit, now: func() time.Time { return time.Now().UTC() }}
 }
+func (s *Service) SetAuthorizationCache(cache AuthorizationCache) { s.cache = cache }
 
 func (s *Service) CreateUser(ctx context.Context, actor entities.Principal, username string) (*entities.User, error) {
 	if actor.Type != entities.PrincipalMaster {
@@ -61,6 +71,11 @@ func (s *Service) SetUserStatus(ctx context.Context, actor entities.Principal, i
 	}
 	if err := s.repo.UpdateUserStatus(ctx, id, status, s.now()); err != nil {
 		return err
+	}
+	if s.cache != nil {
+		if err := s.cache.InvalidateUser(ctx, id); err != nil {
+			return err
+		}
 	}
 	return s.appendAudit(ctx, actor, "user.status", "user", id, "", map[string]string{"status": status})
 }
@@ -113,6 +128,11 @@ func (s *Service) UpdateOrganization(ctx context.Context, actor entities.Princip
 	if err = s.repo.UpdateOrganization(ctx, *organization); err != nil {
 		return nil, err
 	}
+	if s.cache != nil {
+		if err = s.cache.InvalidateOrganization(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	if err = s.appendAudit(ctx, actor, "organization.update", "organization", id, id, metadata); err != nil {
 		return nil, err
 	}
@@ -144,6 +164,14 @@ func (s *Service) AddMembership(ctx context.Context, actor entities.Principal, o
 	if err := s.repo.PutMembership(ctx, *membership); err != nil {
 		return nil, err
 	}
+	if s.cache != nil {
+		if err := s.cache.InvalidateUser(ctx, userID); err != nil {
+			return nil, err
+		}
+		if err := s.cache.InvalidateOrganization(ctx, organizationID); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.appendAudit(ctx, actor, "membership.add", "membership", organizationID+":"+userID, organizationID, map[string]string{"role": role}); err != nil {
 		return nil, err
 	}
@@ -156,6 +184,24 @@ func (s *Service) ChangeMembershipRole(ctx context.Context, actor entities.Princ
 	}
 	if !entities.ValidMembershipRole(role) {
 		return entities.ErrInvalidRole
+	}
+	if repository, ok := s.repo.(atomicMembershipRepository); ok {
+		lastAdmin, err := repository.ChangeMembershipRoleAtomic(ctx, organizationID, userID, role)
+		if err != nil {
+			return err
+		}
+		if lastAdmin {
+			return ErrLastAdmin
+		}
+		if s.cache != nil {
+			if err = s.cache.InvalidateUser(ctx, userID); err != nil {
+				return err
+			}
+			if err = s.cache.InvalidateOrganization(ctx, organizationID); err != nil {
+				return err
+			}
+		}
+		return s.appendAudit(ctx, actor, "membership.role", "membership", organizationID+":"+userID, organizationID, map[string]string{"role": role})
 	}
 	existing, err := s.repo.Membership(ctx, organizationID, userID)
 	if err != nil {
@@ -170,12 +216,38 @@ func (s *Service) ChangeMembershipRole(ctx context.Context, actor entities.Princ
 	if err := s.repo.PutMembership(ctx, *existing); err != nil {
 		return err
 	}
+	if s.cache != nil {
+		if err := s.cache.InvalidateUser(ctx, userID); err != nil {
+			return err
+		}
+		if err := s.cache.InvalidateOrganization(ctx, organizationID); err != nil {
+			return err
+		}
+	}
 	return s.appendAudit(ctx, actor, "membership.role", "membership", organizationID+":"+userID, organizationID, map[string]string{"role": role})
 }
 
 func (s *Service) RemoveMembership(ctx context.Context, actor entities.Principal, organizationID, userID string) error {
 	if err := authorizeMembership(actor, organizationID); err != nil {
 		return err
+	}
+	if repository, ok := s.repo.(atomicMembershipRepository); ok {
+		lastAdmin, err := repository.DeleteMembershipAtomic(ctx, organizationID, userID)
+		if err != nil {
+			return err
+		}
+		if lastAdmin {
+			return ErrLastAdmin
+		}
+		if s.cache != nil {
+			if err = s.cache.InvalidateUser(ctx, userID); err != nil {
+				return err
+			}
+			if err = s.cache.InvalidateOrganization(ctx, organizationID); err != nil {
+				return err
+			}
+		}
+		return s.appendAudit(ctx, actor, "membership.remove", "membership", organizationID+":"+userID, organizationID, nil)
 	}
 	existing, err := s.repo.Membership(ctx, organizationID, userID)
 	if err != nil {
@@ -188,6 +260,14 @@ func (s *Service) RemoveMembership(ctx context.Context, actor entities.Principal
 	}
 	if err := s.repo.DeleteMembership(ctx, organizationID, userID); err != nil {
 		return err
+	}
+	if s.cache != nil {
+		if err := s.cache.InvalidateUser(ctx, userID); err != nil {
+			return err
+		}
+		if err := s.cache.InvalidateOrganization(ctx, organizationID); err != nil {
+			return err
+		}
 	}
 	return s.appendAudit(ctx, actor, "membership.remove", "membership", organizationID+":"+userID, organizationID, nil)
 }

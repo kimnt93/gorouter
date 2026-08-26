@@ -192,6 +192,12 @@ func (a *Admin) Logout(c fiber.Ctx) error {
 }
 
 func (a *Admin) Tenants(c fiber.Ctx) error {
+	c.Set("Deprecation", "true")
+	c.Set("Sunset", "Wed, 26 Aug 2027 00:00:00 GMT")
+	c.Set("Link", `</admin/organizations>; rel="successor-version"`)
+	if a.IdentitySvc != nil && a.IdentityRepo != nil {
+		return a.Organizations(c)
+	}
 	if c.Method() == fiber.MethodGet {
 		v, err := a.TenantSvc.List(c.Context())
 		if err != nil {
