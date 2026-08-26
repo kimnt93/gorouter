@@ -270,7 +270,7 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 			return presenter.ServerError(c, "failed to load credentials")
 		}
 		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
-			v = filterCredentials(v, sess.TenantID)
+			v = filterCredentialsForSession(v, sess)
 		}
 		return responseapi.JSON(c, v)
 	}
@@ -284,10 +284,16 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if b.Provider == "" {
 		b.Provider = entities.ProviderOpenAICompatible
 	}
+	// Credential ownership is derived from the authenticated principal.
+	var ownerTenant *string
+	ownerUserID := ""
 	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
-		b.OwnerTenant = &sess.TenantID
+		ownerUserID = sess.UserID
+		if ownerUserID == "" {
+			ownerTenant = &sess.TenantID
+		}
 	}
-	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: b.OwnerTenant})
+	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: ownerTenant, OwnerUserID: ownerUserID})
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
@@ -306,7 +312,7 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 // @Router /admin/credentials/{id} [delete]
 func (a *Admin) CredentialByID(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	if sess != nil && !sess.IsMaster() && !a.tenantOwnsCredential(c, sess.TenantID, c.Params("id")) {
+	if sess != nil && !sess.IsMaster() && !a.sessionOwnsCredential(c, sess, c.Params("id")) {
 		return presenter.NotFound(c, "credential not found")
 	}
 	if c.Method() == fiber.MethodPut {
@@ -314,12 +320,9 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 		if err := c.Bind().Body(&b); err != nil {
 			return presenter.BadRequest(c, "invalid body")
 		}
-		if sess != nil && !sess.IsMaster() {
-			b.OwnerTenantID = &sess.TenantID
-		}
 		updated, err := a.CredsSvc.Update(c.Context(), c.Params("id"), entities.CredentialUpdate{
 			Name: b.Name, BaseURL: b.BaseURL, Status: b.Status, APIKey: b.APIKey,
-			OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: b.OwnerTenantID,
+			OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh,
 		})
 		if errors.Is(err, entities.ErrNotFound) {
 			return presenter.NotFound(c, "credential not found")
@@ -457,15 +460,13 @@ func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
 		return presenter.ServerError(c, "failed to load models")
 	}
 	visibleCredentials := map[string]bool{}
-	if organizationID != "" {
+	if !sess.IsMaster() {
 		credentials, listErr := a.CredsSvc.List(c.Context())
 		if listErr != nil {
 			return presenter.ServerError(c, "failed to load model connections")
 		}
-		for _, credential := range credentials {
-			if policy.CredentialVisible(false, organizationID, credential.OwnerTenantID) {
-				visibleCredentials[credential.ID] = true
-			}
+		for _, credential := range filterCredentialsForSession(credentials, sess) {
+			visibleCredentials[credential.ID] = true
 		}
 	}
 	allowed := make(map[string]bool, len(sess.AllowedModels))
@@ -477,7 +478,7 @@ func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
 		if !model.Enabled || (!sess.IsMaster() && !allowed[model.Name]) {
 			continue
 		}
-		if organizationID != "" {
+		if !sess.IsMaster() {
 			callable := false
 			for _, route := range model.Routes {
 				if route.Enabled && visibleCredentials[route.CredentialID] {
@@ -742,7 +743,7 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 			return presenter.ServerError(c, "failed to filter model routes")
 		}
 		allowed := map[string]bool{}
-		for _, cred := range filterCredentials(credentials, sess.TenantID) {
+		for _, cred := range filterCredentialsForSession(credentials, sess) {
 			allowed[cred.ID] = true
 		}
 		for i := range v {
@@ -876,6 +877,9 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	}
 	actor := principalFromSession(SessionFrom(c))
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
+		return presenter.BadRequest(c, "multiple organization filters require the master session")
+	}
 	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
 		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
 			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
@@ -913,6 +917,9 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 func (a *Admin) UsageRecent(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
+		return presenter.BadRequest(c, "multiple organization filters require the master session")
+	}
 	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
 		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
 			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
@@ -966,6 +973,9 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 func (a *Admin) UsageDetail(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
+		return presenter.BadRequest(c, "multiple organization filters require the master session")
+	}
 	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
 		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
 			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
@@ -1003,6 +1013,9 @@ func (a *Admin) UsageDetail(c fiber.Ctx) error {
 func (a *Admin) UsageActivity(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
+		return presenter.BadRequest(c, "multiple organization filters require the master session")
+	}
 	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
 		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
 			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
@@ -1056,7 +1069,11 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to load usage activity")
 	}
-	return responseapi.JSON(c, UsageActivityResponse{GroupBy: groupBy, Data: buckets})
+	summary, err := a.UsageSvc.SummaryQuery(c.Context(), query)
+	if err != nil {
+		return presenter.ServerError(c, "failed to load usage breakdown")
+	}
+	return responseapi.JSON(c, UsageActivityResponse{GroupBy: groupBy, Data: buckets, Summary: summary})
 }
 
 // CacheStats returns safe prompt-cache counters.
@@ -1087,15 +1104,19 @@ func (a *Admin) CacheFlush(c fiber.Ctx) error {
 	return responseapi.JSON(c, okResponse{OK: true})
 }
 
-func (a *Admin) tenantOwnsCredential(c fiber.Ctx, tenantID, credentialID string) bool {
+func (a *Admin) sessionOwnsCredential(c fiber.Ctx, session *entities.Session, credentialID string) bool {
 	credentials, err := a.CredsSvc.List(c.Context())
 	if err != nil {
 		return false
 	}
 	for _, cred := range credentials {
-		if cred.ID == credentialID && cred.OwnerTenantID != nil && *cred.OwnerTenantID == tenantID {
-			return true
+		if cred.ID != credentialID {
+			continue
 		}
+		if cred.OwnerUserID != "" {
+			return cred.OwnerUserID == session.UserID
+		}
+		return cred.OwnerTenantID != nil && *cred.OwnerTenantID == session.TenantID
 	}
 	return false
 }

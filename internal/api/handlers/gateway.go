@@ -46,6 +46,7 @@ type Gateway struct {
 type ProviderQuotaRouter interface {
 	Available(credentialID string) bool
 	MarkExhausted(credentialID string)
+	MarkInUse(credentialID string)
 }
 
 // GatewayAccessContext separates a stored API key (absent for master) from
@@ -199,16 +200,41 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "no credentials available", "service_unavailable", "no_credentials")
 	}
 	candidates := make([]chat.Candidate, 0, len(routes))
+	runtimes := make(map[string]*entities.CredentialRuntime, len(routes))
+	fillFirstProvider := ""
+	fillFirst := true
 	for _, route := range routes {
+		if route.OwnerUserID != "" && !key.Master && route.OwnerUserID != key.Actor.UserID {
+			continue
+		}
 		if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
 			continue
 		}
 		quotaAvailable := g.ProviderQuotas == nil || g.ProviderQuotas.Available(route.CredentialID)
-		if quotaAvailable && g.Health.Available(route.CredentialID) {
-			candidates = append(candidates, chat.Candidate{ID: route.CredentialID, Priority: route.Priority, Weight: route.Weight})
+		if !quotaAvailable || !g.Health.Available(route.CredentialID) {
+			continue
 		}
+		runtime, runtimeErr := g.Creds.Runtime(c.Context(), route.CredentialID)
+		if runtimeErr != nil {
+			g.Health.Report(route.CredentialID, false)
+			continue
+		}
+		runtimes[route.CredentialID] = runtime
+		definition, knownProvider := providerpkg.Lookup(runtime.Provider)
+		if !knownProvider || !definition.QuotaSupported {
+			fillFirst = false
+		} else if fillFirstProvider == "" {
+			fillFirstProvider = runtime.Provider
+		} else if fillFirstProvider != runtime.Provider {
+			fillFirst = false
+		}
+		candidates = append(candidates, chat.Candidate{ID: route.CredentialID, Priority: route.Priority, Weight: route.Weight})
 	}
-	candidates = g.Selector.Order(model.Strategy, candidates)
+	strategy := model.Strategy
+	if fillFirst && fillFirstProvider != "" {
+		strategy = chat.StrategyPriority
+	}
+	candidates = g.Selector.Order(strategy, candidates)
 	if len(candidates) == 0 {
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials")
 	}
@@ -220,11 +246,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	lastCredential := ""
 	for _, candidate := range candidates {
 		lastCredential = candidate.ID
-		runtime, rerr := g.Creds.Runtime(c.Context(), candidate.ID)
-		if rerr != nil {
-			g.Health.Report(candidate.ID, false)
-			continue
-		}
+		runtime := runtimes[candidate.ID]
 		adapter, ok := g.adapter(runtime.Provider)
 		if !ok || adapter == nil {
 			g.Health.Report(candidate.ID, false)
@@ -257,6 +279,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			continue
 		}
 		g.Health.Report(candidate.ID, true)
+		if g.ProviderQuotas != nil {
+			g.ProviderQuotas.MarkInUse(candidate.ID)
+		}
 		if req.Stream {
 			streamOwnsReservation = true
 			return g.stream(c, key, model, runtime, result, raw, deterministic, started, pricePtr, reservation)
@@ -578,7 +603,7 @@ func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *
 	}
 	requestText, requestTruncated := storedConversationBody(requestBody)
 	responseText, responseTruncated := storedConversationBody(responseBody)
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, RequestBody: requestText, ResponseBody: responseText, ContentTruncated: requestTruncated || responseTruncated})
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, RequestBody: requestText, ResponseBody: responseText, ContentTruncated: requestTruncated || responseTruncated})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

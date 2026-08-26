@@ -55,6 +55,7 @@ type RouteCandidate struct {
 	Priority     int
 	Weight       int
 	OwnerTenant  *string
+	OwnerUserID  string
 }
 
 type ApiKeyRepository interface {

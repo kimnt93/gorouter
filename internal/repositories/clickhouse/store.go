@@ -212,7 +212,7 @@ func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput
 	if err != nil {
 		return nil, err
 	}
-	c := entities.Credential{ID: id("cred"), Name: in.Name, Provider: in.Provider, Kind: in.Kind, BaseURL: in.BaseURL, Status: "active", KeyPreview: p, OwnerTenantID: in.OwnerTenant, CreatedAt: time.Now().UTC()}
+	c := entities.Credential{ID: id("cred"), Name: in.Name, Provider: in.Provider, Kind: in.Kind, BaseURL: in.BaseURL, Status: "active", KeyPreview: p, OwnerTenantID: in.OwnerTenant, OwnerUserID: in.OwnerUserID, CreatedAt: time.Now().UTC()}
 	c.SetSecrets(key, oauth)
 	return &c, r.s.put(ctx, "credential", c.ID, storedCredential{c, key, oauth})
 }
@@ -227,7 +227,6 @@ func (r *CredentialRepo) Update(ctx context.Context, box entities.SecretBox, idv
 	v.Name = in.Name
 	v.BaseURL = in.BaseURL
 	v.Status = in.Status
-	v.OwnerTenantID = in.OwnerTenant
 	if v.Kind == entities.KindAPIKey && in.APIKey != "" {
 		v.APIKeyEnc, err = box.Seal([]byte(in.APIKey))
 		v.KeyPreview = preview(in.APIKey)
@@ -347,7 +346,7 @@ func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]en
 		}
 		c, e := r.stored(ctx, rt.CredentialID)
 		if e == nil && c.Status == "active" {
-			out = append(out, entities.RouteCandidate{CredentialID: rt.CredentialID, Priority: rt.Priority, Weight: rt.Weight, OwnerTenant: c.OwnerTenantID})
+			out = append(out, entities.RouteCandidate{CredentialID: rt.CredentialID, Priority: rt.Priority, Weight: rt.Weight, OwnerTenant: c.OwnerTenantID, OwnerUserID: c.OwnerUserID})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

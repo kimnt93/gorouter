@@ -160,8 +160,8 @@ func TestOAuthCompleteBindsFlowAndCredentialOwnershipToSession(t *testing.T) {
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("master complete status = %d, want %d", response.StatusCode, http.StatusCreated)
 	}
-	if len(repo.created) != 2 || repo.created[1].OwnerTenant == nil || *repo.created[1].OwnerTenant != "managed-tenant" {
-		t.Fatalf("master-selected credential owner = %+v, want managed-tenant", repo.created)
+	if len(repo.created) != 2 || repo.created[1].OwnerTenant != nil || repo.created[1].OwnerUserID != "" {
+		t.Fatalf("master credential owner = %+v, want global server-derived ownership", repo.created)
 	}
 }
 

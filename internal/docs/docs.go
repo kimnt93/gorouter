@@ -3938,6 +3938,18 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_pkg_entities.Cost": {
             "type": "object",
             "properties": {
+                "cache_read_usd": {
+                    "type": "number"
+                },
+                "cache_write_usd": {
+                    "type": "number"
+                },
+                "input_usd": {
+                    "type": "number"
+                },
+                "output_usd": {
+                    "type": "number"
+                },
                 "priced": {
                     "type": "boolean"
                 },
@@ -3968,6 +3980,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "owner_tenant_id": {
+                    "type": "string"
+                },
+                "owner_user_id": {
                     "type": "string"
                 },
                 "provider": {
@@ -4058,6 +4073,12 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_pkg_entities.ModelU": {
             "type": "object",
             "properties": {
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
                 "cost_usd": {
                     "type": "number"
                 },
@@ -4194,8 +4215,14 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_pkg_entities.UsageActivityBucket": {
             "type": "object",
             "properties": {
+                "cache_read_cost_usd": {
+                    "type": "number"
+                },
                 "cache_read_tokens": {
                     "type": "integer"
+                },
+                "cache_write_cost_usd": {
+                    "type": "number"
                 },
                 "cache_write_tokens": {
                     "type": "integer"
@@ -4206,6 +4233,12 @@ const docTemplate = `{
                 "cost_usd": {
                     "type": "number"
                 },
+                "input_cost_usd": {
+                    "type": "number"
+                },
+                "output_cost_usd": {
+                    "type": "number"
+                },
                 "prompt_tokens": {
                     "type": "integer"
                 },
@@ -4213,6 +4246,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "start": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -4312,8 +4351,14 @@ const docTemplate = `{
                 "cache_hits": {
                     "type": "integer"
                 },
+                "cache_read_cost_usd": {
+                    "type": "number"
+                },
                 "cache_read_tokens": {
                     "type": "integer"
+                },
+                "cache_write_cost_usd": {
+                    "type": "number"
                 },
                 "cache_write_tokens": {
                     "type": "integer"
@@ -4322,6 +4367,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "cost_usd": {
+                    "type": "number"
+                },
+                "input_cost_usd": {
+                    "type": "number"
+                },
+                "output_cost_usd": {
                     "type": "number"
                 },
                 "prompt_tokens": {
@@ -4410,6 +4461,9 @@ const docTemplate = `{
                 },
                 "fetched_at": {
                     "type": "string"
+                },
+                "in_use": {
+                    "type": "boolean"
                 },
                 "message": {
                     "type": "string"
@@ -4671,9 +4725,6 @@ const docTemplate = `{
                 "oauth_refresh": {
                     "type": "string"
                 },
-                "owner_tenant_id": {
-                    "type": "string"
-                },
                 "provider": {
                     "type": "string"
                 }
@@ -4695,9 +4746,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "oauth_refresh": {
-                    "type": "string"
-                },
-                "owner_tenant_id": {
                     "type": "string"
                 },
                 "status": {
@@ -4844,9 +4892,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "owner_tenant_id": {
                     "type": "string"
                 }
             }
@@ -5130,6 +5175,9 @@ const docTemplate = `{
                 },
                 "group_by": {
                     "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"
                 }
             }
         },

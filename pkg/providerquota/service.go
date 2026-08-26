@@ -31,6 +31,15 @@ type Snapshot struct {
 	Available    bool       `json:"available"`
 	Windows      []Window   `json:"windows"`
 	Message      string     `json:"message,omitempty"`
+	InUse        bool       `json:"in_use,omitempty"`
+}
+
+// Store persists only safe quota metadata. Implementations must never store
+// credential tokens or upstream response bodies.
+type Store interface {
+	LoadAll(ctx context.Context) ([]Snapshot, error)
+	Save(ctx context.Context, snapshot Snapshot) error
+	SetInUse(ctx context.Context, credentialID, provider string) error
 }
 
 type Service struct {
@@ -39,13 +48,38 @@ type Service struct {
 	mu          sync.RWMutex
 	snapshots   map[string]Snapshot
 	exhausted   map[string]time.Time
+	active      map[string]string
+	store       Store
 }
 
 func New(client *http.Client, credentials *credential.Service) *Service {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &Service{client: client, credentials: credentials, snapshots: map[string]Snapshot{}, exhausted: map[string]time.Time{}}
+	return &Service{client: client, credentials: credentials, snapshots: map[string]Snapshot{}, exhausted: map[string]time.Time{}, active: map[string]string{}}
+}
+
+func (s *Service) SetStore(store Store) { s.store = store }
+
+// Restore warms the read-only quota cache from durable snapshots. It does not
+// contact any provider and is safe to call during startup.
+func (s *Service) Restore(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	snapshots, err := s.store.LoadAll(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	for _, snapshot := range snapshots {
+		s.snapshots[snapshot.CredentialID] = snapshot
+		if snapshot.InUse {
+			s.active[snapshot.Provider] = snapshot.CredentialID
+		}
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 func Supported(provider string) bool {
@@ -102,6 +136,41 @@ func (s *Service) MarkExhausted(id string) {
 	s.mu.Unlock()
 }
 
+// MarkInUse records the credential that most recently accepted a gateway
+// request. Only one credential per provider is highlighted.
+func (s *Service) MarkInUse(id string) {
+	s.mu.RLock()
+	target, ok := s.snapshots[id]
+	alreadyActive := ok && s.active[target.Provider] == id
+	s.mu.RUnlock()
+	if alreadyActive {
+		return
+	}
+	if !ok {
+		runtime, err := s.credentials.Runtime(context.Background(), id)
+		if err != nil {
+			return
+		}
+		target = Snapshot{CredentialID: id, Provider: runtime.Provider, Account: maskAccount(runtime), Available: true, Windows: []Window{}}
+	}
+	s.mu.Lock()
+	provider := target.Provider
+	for key, snapshot := range s.snapshots {
+		if key == id || provider == "" || snapshot.Provider == provider {
+			snapshot.InUse = key == id
+			s.snapshots[key] = snapshot
+		}
+	}
+	target.InUse = true
+	s.snapshots[id] = target
+	s.active[provider] = id
+	s.mu.Unlock()
+	if s.store != nil {
+		_ = s.store.Save(context.Background(), target)
+		_ = s.store.SetInUse(context.Background(), id, provider)
+	}
+}
+
 func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 	runtime, err := s.credentials.Runtime(ctx, id)
 	if err != nil {
@@ -117,6 +186,7 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 	case "codex":
 		payload, err = s.fetch(ctx, runtime, http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", nil, map[string]string{"chatgpt-account-id": runtime.OAuthAccount, "originator": "codex_cli_rs"})
 		if err == nil {
+			snapshot.Plan = textAny(payload, "plan_type", "plan", "subscription_plan")
 			snapshot.Windows = append(snapshot.Windows, parsePercentWindow("Session (5h)", object(object(payload, "rate_limit"), "primary_window")), parsePercentWindow("Weekly (7d)", object(object(payload, "rate_limit"), "secondary_window")))
 		}
 	case "claude":
@@ -166,9 +236,16 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 		}
 	}
 	snapshot.Windows = compact(snapshot.Windows)
+	usableRefresh := err == nil && len(snapshot.Windows) > 0
 	if err != nil {
-		snapshot.Available = true
-		snapshot.Message = err.Error()
+		message := err.Error()
+		if previous, ok := s.Cached(id); ok {
+			snapshot = previous
+			snapshot.Message = message
+		} else {
+			snapshot.Available = true
+			snapshot.Message = message
+		}
 	} else if len(snapshot.Windows) == 0 {
 		snapshot.Message = "Provider returned no quota windows"
 	}
@@ -178,11 +255,17 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 		}
 	}
 	s.mu.Lock()
+	snapshot.InUse = s.active[snapshot.Provider] == id
 	s.snapshots[id] = snapshot
-	if snapshot.Available {
+	if usableRefresh && snapshot.Available {
 		delete(s.exhausted, id)
 	}
 	s.mu.Unlock()
+	if s.store != nil {
+		if saveErr := s.store.Save(ctx, snapshot); saveErr != nil {
+			return Snapshot{}, fmt.Errorf("save quota snapshot: %w", saveErr)
+		}
+	}
 	return snapshot, nil
 }
 
@@ -314,6 +397,14 @@ func number(value any) float64 {
 func text(value map[string]any, key string) string {
 	result, _ := value[key].(string)
 	return strings.TrimSpace(result)
+}
+func textAny(value map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if result := text(value, key); result != "" {
+			return result
+		}
+	}
+	return ""
 }
 func parseTime(value any) *time.Time {
 	switch item := value.(type) {

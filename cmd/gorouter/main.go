@@ -69,6 +69,7 @@ func main() {
 	var hashSecret func(string) string
 	var generateSecret func() string
 	var clickhouseStore *clickhouserepo.Store
+	var providerQuotaStore providerquota.Store
 	if cfg.DatabaseBackend == "clickhouse" {
 		db, connectErr := database.ConnectClickHouse(ctx, cfg.ClickHouseURL)
 		if connectErr != nil {
@@ -80,6 +81,7 @@ func main() {
 		}
 		store := clickhouserepo.New(db.Conn)
 		clickhouseStore = store
+		providerQuotaStore = clickhouserepo.NewProviderQuotaRepo(store)
 		tenantRepo, credRepo, keyRepo = clickhouserepo.NewTenantRepo(store), clickhouserepo.NewCredentialRepo(store), clickhouserepo.NewApiKeyRepo(store)
 		modelRepo, usageRepo = clickhouserepo.NewModelRouteRepo(store), clickhouserepo.NewUsageRepo(store)
 		identityRepo, auditRepo = clickhouserepo.NewIdentityRepo(store), clickhouserepo.NewAuditRepo(store)
@@ -94,6 +96,7 @@ func main() {
 			log.Fatal(err)
 		}
 		store := postgres.New(db.Pool)
+		providerQuotaStore = postgres.NewProviderQuotaRepo(store)
 		tenantRepo, credRepo, keyRepo = postgres.NewTenantRepo(store), postgres.NewCredentialRepo(store), postgres.NewApiKeyRepo(store)
 		modelRepo, usageRepo = postgres.NewModelRouteRepo(store), postgres.NewUsageRepo(store)
 		identityRepo, auditRepo = postgres.NewIdentityRepo(store), postgres.NewAuditRepo(store)
@@ -224,6 +227,10 @@ func main() {
 		AntigravityClientSecret: cfg.AntigravityOAuthClientSecret,
 	})
 	providerQuotaSvc := providerquota.New(client, credSvc)
+	providerQuotaSvc.SetStore(providerQuotaStore)
+	if err := providerQuotaSvc.Restore(context.Background()); err != nil {
+		log.Printf("restore provider quota snapshots: %v", err)
+	}
 	gw := &handlers.Gateway{
 		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
 		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerUpstreams,

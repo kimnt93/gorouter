@@ -33,6 +33,7 @@ type Credential struct {
 	Status        string    `json:"status"`
 	KeyPreview    string    `json:"key_preview,omitempty"`
 	OwnerTenantID *string   `json:"owner_tenant_id"`
+	OwnerUserID   string    `json:"owner_user_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 
 	apiKeySealed []byte
@@ -61,6 +62,7 @@ type CredentialInput struct {
 	OAuthAccount string
 	OAuthMeta    OAuthMetadata
 	OwnerTenant  *string
+	OwnerUserID  string
 }
 
 type OAuthMetadata struct {
@@ -93,7 +95,6 @@ type CredentialUpdate struct {
 	APIKey       string
 	OAuthAccess  string
 	OAuthRefresh string
-	OwnerTenant  *string
 }
 
 type ApiKey struct {
@@ -140,30 +141,34 @@ type ModelDef struct {
 }
 
 type UsageEvent struct {
-	ID               string    `json:"id"`
-	TS               time.Time `json:"ts"`
-	TenantID         string    `json:"tenant_id"`
-	ApiKeyID         string    `json:"api_key_id"`
-	CredentialID     string    `json:"credential_id"`
-	Model            string    `json:"model"`
-	UpstreamModel    string    `json:"upstream_model"`
-	PromptTokens     int64     `json:"prompt_tokens"`
-	CompletionTokens int64     `json:"completion_tokens"`
-	CacheReadTokens  int64     `json:"cache_read_tokens"`
-	CacheWriteTokens int64     `json:"cache_write_tokens"`
-	CostUSD          float64   `json:"cost_usd"`
-	Priced           bool      `json:"priced"`
-	CacheHit         bool      `json:"cache_hit"`
-	StatusCode       int       `json:"status_code"`
-	DurationMS       int64     `json:"duration_ms"`
-	Error            string    `json:"error"`
-	ActorType        string    `json:"actor_type"`
-	UserID           string    `json:"user_id"`
-	Username         string    `json:"username"`
-	OrganizationID   string    `json:"organization_id"`
-	RequestBody      string    `json:"-"`
-	ResponseBody     string    `json:"-"`
-	ContentTruncated bool      `json:"-"`
+	ID                string    `json:"id"`
+	TS                time.Time `json:"ts"`
+	TenantID          string    `json:"tenant_id"`
+	ApiKeyID          string    `json:"api_key_id"`
+	CredentialID      string    `json:"credential_id"`
+	Model             string    `json:"model"`
+	UpstreamModel     string    `json:"upstream_model"`
+	PromptTokens      int64     `json:"prompt_tokens"`
+	CompletionTokens  int64     `json:"completion_tokens"`
+	CacheReadTokens   int64     `json:"cache_read_tokens"`
+	CacheWriteTokens  int64     `json:"cache_write_tokens"`
+	CostUSD           float64   `json:"cost_usd"`
+	InputCostUSD      float64   `json:"input_cost_usd"`
+	OutputCostUSD     float64   `json:"output_cost_usd"`
+	CacheReadCostUSD  float64   `json:"cache_read_cost_usd"`
+	CacheWriteCostUSD float64   `json:"cache_write_cost_usd"`
+	Priced            bool      `json:"priced"`
+	CacheHit          bool      `json:"cache_hit"`
+	StatusCode        int       `json:"status_code"`
+	DurationMS        int64     `json:"duration_ms"`
+	Error             string    `json:"error"`
+	ActorType         string    `json:"actor_type"`
+	UserID            string    `json:"user_id"`
+	Username          string    `json:"username"`
+	OrganizationID    string    `json:"organization_id"`
+	RequestBody       string    `json:"-"`
+	ResponseBody      string    `json:"-"`
+	ContentTruncated  bool      `json:"-"`
 }
 
 type RecentEvent struct {
@@ -198,26 +203,36 @@ type UsageDetail struct {
 }
 
 type UsageSummary struct {
-	Requests      int64             `json:"requests"`
-	CacheHits     int64             `json:"cache_hits"`
-	CostUSD       float64           `json:"cost_usd"`
-	PromptTok     int64             `json:"prompt_tokens"`
-	CompletionTo  int64             `json:"completion_tokens"`
-	CacheReadTok  int64             `json:"cache_read_tokens"`
-	CacheWriteTok int64             `json:"cache_write_tokens"`
-	Unpriced      int64             `json:"unpriced_requests"`
-	ByModel       map[string]ModelU `json:"by_model"`
-	ByKey         map[string]KeyU   `json:"by_key"`
+	Requests          int64             `json:"requests"`
+	CacheHits         int64             `json:"cache_hits"`
+	CostUSD           float64           `json:"cost_usd"`
+	InputCostUSD      float64           `json:"input_cost_usd"`
+	OutputCostUSD     float64           `json:"output_cost_usd"`
+	CacheReadCostUSD  float64           `json:"cache_read_cost_usd"`
+	CacheWriteCostUSD float64           `json:"cache_write_cost_usd"`
+	PromptTok         int64             `json:"prompt_tokens"`
+	CompletionTo      int64             `json:"completion_tokens"`
+	CacheReadTok      int64             `json:"cache_read_tokens"`
+	CacheWriteTok     int64             `json:"cache_write_tokens"`
+	Unpriced          int64             `json:"unpriced_requests"`
+	ByModel           map[string]ModelU `json:"by_model"`
+	ByKey             map[string]KeyU   `json:"by_key"`
 }
 
 type UsageActivityBucket struct {
-	Start            time.Time `json:"start"`
-	Requests         int64     `json:"requests"`
-	PromptTokens     int64     `json:"prompt_tokens"`
-	CompletionTokens int64     `json:"completion_tokens"`
-	CacheReadTokens  int64     `json:"cache_read_tokens"`
-	CacheWriteTokens int64     `json:"cache_write_tokens"`
-	CostUSD          float64   `json:"cost_usd"`
+	Start             time.Time `json:"start"`
+	Requests          int64     `json:"requests"`
+	PromptTokens      int64     `json:"prompt_tokens"`
+	CompletionTokens  int64     `json:"completion_tokens"`
+	CacheReadTokens   int64     `json:"cache_read_tokens"`
+	CacheWriteTokens  int64     `json:"cache_write_tokens"`
+	CostUSD           float64   `json:"cost_usd"`
+	InputCostUSD      float64   `json:"input_cost_usd"`
+	OutputCostUSD     float64   `json:"output_cost_usd"`
+	CacheReadCostUSD  float64   `json:"cache_read_cost_usd"`
+	CacheWriteCostUSD float64   `json:"cache_write_cost_usd"`
+	UserID            string    `json:"user_id"`
+	Username          string    `json:"username"`
 }
 
 type UsageActivity struct {
@@ -226,10 +241,12 @@ type UsageActivity struct {
 }
 
 type ModelU struct {
-	Requests int64   `json:"requests"`
-	CostUSD  float64 `json:"cost_usd"`
-	InTok    int64   `json:"in_tokens"`
-	OutTok   int64   `json:"out_tokens"`
+	Requests      int64   `json:"requests"`
+	CostUSD       float64 `json:"cost_usd"`
+	InTok         int64   `json:"in_tokens"`
+	OutTok        int64   `json:"out_tokens"`
+	CacheReadTok  int64   `json:"cache_read_tokens"`
+	CacheWriteTok int64   `json:"cache_write_tokens"`
 }
 
 type KeyU struct {

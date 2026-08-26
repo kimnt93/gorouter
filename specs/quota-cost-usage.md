@@ -69,3 +69,45 @@ Optional API-key requests-per-minute limits use Redis atomic counters with expir
 Record timestamp, tenant, API key, credential, client model, upstream model, input/output/cache tokens, cost, cache-hit flag, status, duration, and safe error summary.
 
 Usage writes should be buffered and batched. PostgreSQL is the initial durable store. A future ClickHouse sink must implement the same usage repository boundary.
+
+## Dashboard Reporting Requirements
+
+Analysis, request logs, and provider-cache reporting share one filter model:
+
+- Range: `1D`, `7D`, `30D`, `90D`, `YTD`, `All`, or a custom range.
+- Resolution is rendered as three visible controls: `Hour`, `Day`, and `Week`.
+- One filter dimension is selected at a time: user, API key, or organization.
+- The selected dimension accepts multiple values and displays every currently
+  selected value. API requests encode repeated IDs as comma-separated query
+  values.
+- Log-specific model and HTTP-status filters remain available after the shared
+  identity filter.
+
+Analysis uses vertical charts:
+
+- Requests are grouped by time bucket and stacked by user. Each bar represents
+  100% of requests in that bucket; the tooltip shows absolute request counts.
+- Token and cost bars use absolute scale. Token tooltips show input, output,
+  cache-read, and cache-write tokens. Cost tooltips show the same four cost
+  components.
+- The model breakdown reports model, request count, input, output, cache read,
+  cache write, total tokens, cost, and percentage of selected token volume.
+
+The cache page reuses the same filter and vertical-chart language. Cache-read
+share is bounded to 100% and is calculated as cache-read tokens divided by all
+input-context tokens (`input + cache read`). Both percentage and token totals
+must be displayed.
+
+## Provider Ownership and Quota State
+
+Provider credentials are personal to the user who connects them. The provider
+connection form does not expose an owner-organization selector. The server
+derives ownership from the authenticated principal; master-created credentials
+remain globally available for operational compatibility.
+
+Manual provider quota reloads persist the latest safe snapshot. The dashboard
+reads the persisted snapshot without contacting the provider and only performs
+a remote refresh after the user selects **Reload**. Quota-provider routing is
+fill-first in configured route order. The currently selected account is exposed
+to the dashboard and visibly highlighted; exhausted accounts move out of the
+active position until their reset time.

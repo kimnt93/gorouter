@@ -38,6 +38,15 @@ func (r *activityRepository) ActivityUsage(_ context.Context, query entities.Usa
 	r.query, r.groupBy = query, groupBy
 	return []entities.UsageActivityBucket{{Start: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC), Requests: 2, CacheWriteTokens: 12}}, nil
 }
+func (*activityRepository) QueryUsage(context.Context, entities.UsageQuery) (*entities.UsagePage, error) {
+	return &entities.UsagePage{}, nil
+}
+func (*activityRepository) SummaryUsage(context.Context, entities.UsageQuery) (*entities.UsageSummary, error) {
+	return &entities.UsageSummary{ByModel: map[string]entities.ModelU{}}, nil
+}
+func (*activityRepository) UsageDetail(context.Context, string, entities.UsageVisibility) (*entities.UsageDetail, error) {
+	return nil, entities.ErrNotFound
+}
 
 func TestUsageActivityParsesFiltersAndReturnsTypedBuckets(t *testing.T) {
 	repository := &activityRepository{}
@@ -66,6 +75,26 @@ func TestUsageActivityParsesFiltersAndReturnsTypedBuckets(t *testing.T) {
 	}
 	if repository.groupBy != "week" || repository.query.UserID != "user_1" || repository.query.APIKeyID != "key_1" || repository.query.Since == nil {
 		t.Fatalf("query=%+v group=%q", repository.query, repository.groupBy)
+	}
+}
+
+func TestUsageActivityRejectsMultipleOrganizationContextsForUser(t *testing.T) {
+	repository := &activityRepository{}
+	service := usage.NewService(repository, 1, nil)
+	t.Cleanup(service.Close)
+	admin := &Admin{UsageSvc: service}
+	app := fiber.New()
+	app.Get("/activity", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "user_1", Scopes: []string{entities.ScopeUsageRead}})
+		return c.Next()
+	}, admin.UsageActivity)
+	response, err := app.Test(httptest.NewRequest("GET", "/activity?organization_id=org_1,org_2", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status=%d, want %d", response.StatusCode, fiber.StatusBadRequest)
 	}
 }
 

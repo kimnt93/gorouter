@@ -7,8 +7,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
+
+type quotaCredentialRepo struct{ runtime *entities.CredentialRuntime }
+
+type quotaStore struct {
+	loaded   []Snapshot
+	saved    []Snapshot
+	inUseIDs []string
+}
+
+func (s *quotaStore) LoadAll(context.Context) ([]Snapshot, error) { return s.loaded, nil }
+func (s *quotaStore) Save(_ context.Context, snapshot Snapshot) error {
+	s.saved = append(s.saved, snapshot)
+	return nil
+}
+func (s *quotaStore) SetInUse(_ context.Context, id, _ string) error {
+	s.inUseIDs = append(s.inUseIDs, id)
+	return nil
+}
+
+func (r quotaCredentialRepo) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
+	return nil, nil
+}
+func (r quotaCredentialRepo) List(context.Context) ([]entities.Credential, error) { return nil, nil }
+func (r quotaCredentialRepo) Update(context.Context, entities.SecretBox, string, entities.CredentialUpdate) (*entities.Credential, error) {
+	return nil, nil
+}
+func (r quotaCredentialRepo) Delete(context.Context, string) error { return nil }
+func (r quotaCredentialRepo) Runtime(context.Context, entities.SecretBox, string) (*entities.CredentialRuntime, error) {
+	return r.runtime, nil
+}
+func (r quotaCredentialRepo) UpdateOAuthTokens(context.Context, entities.SecretBox, string, string, string) error {
+	return nil
+}
+func (r quotaCredentialRepo) RoutesForModel(context.Context, string) ([]entities.RouteCandidate, error) {
+	return nil, nil
+}
 
 func TestPercentAndUtilizationWindows(t *testing.T) {
 	now := time.Now()
@@ -57,6 +94,32 @@ func TestAvailabilityExpiresExhaustionCooldown(t *testing.T) {
 	}
 }
 
+func TestRestoreAndMarkInUsePersistOnlyOnAccountTransition(t *testing.T) {
+	runtime := &entities.CredentialRuntime{ID: "cred-b", Provider: "codex", OAuthMeta: entities.OAuthMetadata{Email: "person@example.test"}}
+	credentials := credential.NewService(quotaCredentialRepo{runtime: runtime}, nil)
+	store := &quotaStore{loaded: []Snapshot{{CredentialID: "cred-a", Provider: "codex", Account: "first", Available: true, InUse: true, Windows: []Window{}}}}
+	service := New(nil, credentials)
+	service.SetStore(store)
+	if err := service.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot, ok := service.Cached("cred-a"); !ok || !snapshot.InUse {
+		t.Fatalf("restored snapshot = %+v, %v", snapshot, ok)
+	}
+
+	service.MarkInUse("cred-b")
+	service.MarkInUse("cred-b")
+	if len(store.saved) != 1 || len(store.inUseIDs) != 1 || store.inUseIDs[0] != "cred-b" {
+		t.Fatalf("persistence calls saved=%+v inUse=%+v", store.saved, store.inUseIDs)
+	}
+	if first, _ := service.Cached("cred-a"); first.InUse {
+		t.Fatal("previous account remained active")
+	}
+	if second, _ := service.Cached("cred-b"); !second.InUse || second.Account != "pe****@example.test" {
+		t.Fatalf("active account = %+v", second)
+	}
+}
+
 func TestMaskAccountNeverReturnsToken(t *testing.T) {
 	runtime := &entities.CredentialRuntime{APIKey: "top-secret", OAuthMeta: entities.OAuthMetadata{Email: "person@example.test"}}
 	if got := maskAccount(runtime); got != "pe****@example.test" {
@@ -65,6 +128,36 @@ func TestMaskAccountNeverReturnsToken(t *testing.T) {
 	runtime.OAuthMeta = entities.OAuthMetadata{}
 	if got := maskAccount(runtime); got != "connected account" {
 		t.Fatalf("fallback mask = %q", got)
+	}
+}
+
+func TestFailedReloadPreservesLastKnownQuotaAndExhaustion(t *testing.T) {
+	status := http.StatusOK
+	reset := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			_, _ = w.Write([]byte(`{"quota":{"window_weekly":{"used":100,"limit":100,"reset_at":"` + reset + `"}}}`))
+		}
+	}))
+	defer server.Close()
+
+	runtime := &entities.CredentialRuntime{ID: "cred-1", Provider: "opencode-go", BaseURL: server.URL, APIKey: "secret"}
+	credentials := credential.NewService(quotaCredentialRepo{runtime: runtime}, nil)
+	service := New(server.Client(), credentials)
+	first, err := service.Refresh(context.Background(), runtime.ID)
+	if err != nil || first.Available || len(first.Windows) != 1 {
+		t.Fatalf("initial refresh = %+v, err=%v", first, err)
+	}
+
+	status = http.StatusInternalServerError
+	failed, err := service.Refresh(context.Background(), runtime.ID)
+	if err != nil || failed.Available || len(failed.Windows) != 1 || failed.Message != "quota endpoint returned HTTP 500" {
+		t.Fatalf("failed refresh = %+v, err=%v", failed, err)
+	}
+	if service.Available(runtime.ID) {
+		t.Fatal("failed reload made an exhausted credential available")
 	}
 }
 

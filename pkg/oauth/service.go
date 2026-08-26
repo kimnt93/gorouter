@@ -66,6 +66,7 @@ type CompleteInput struct {
 	Callback       string
 	Name           string
 	OwnerTenant    *string
+	OwnerUserID    string
 	SessionBinding string
 }
 
@@ -95,6 +96,14 @@ type oauthDriver interface {
 	Complete(context.Context, *Service, flow, string) (tokenResponse, error)
 }
 
+type FlowStore interface {
+	Put(ctx context.Context, id string, value flow, ttl time.Duration) error
+	Get(ctx context.Context, id string) (flow, bool, error)
+	Delete(ctx context.Context, id string) error
+	Claim(ctx context.Context, id string, ttl time.Duration) (bool, error)
+	Release(ctx context.Context, id string) error
+}
+
 type Service struct {
 	client      *http.Client
 	credentials *credential.Service
@@ -102,7 +111,10 @@ type Service struct {
 	now         func() time.Time
 	mu          sync.Mutex
 	flows       map[string]flow
+	flowStore   FlowStore
 }
+
+func (s *Service) SetFlowStore(store FlowStore) { s.flowStore = store }
 
 func New(client *http.Client, credentials *credential.Service, cfg Config) *Service {
 	if client == nil {
@@ -174,14 +186,22 @@ func (s *Service) StartContext(ctx context.Context, providerID, sessionBinding s
 	if result.FlowType == "" {
 		result.FlowType = f.flowType
 	}
-	s.storeFlow(f)
+	if err := s.storeFlow(ctx, f); err != nil {
+		return StartResult{}, err
+	}
 	return result, nil
 }
 
 func (s *Service) Complete(ctx context.Context, in CompleteInput) (*entities.Credential, error) {
-	s.mu.Lock()
-	f, ok := s.flows[in.FlowID]
-	s.mu.Unlock()
+	claimed, err := s.claimFlow(ctx, in.FlowID)
+	if err != nil || !claimed {
+		return nil, ErrInvalidFlow
+	}
+	defer s.releaseFlow(context.Background(), in.FlowID)
+	f, ok, err := s.loadFlow(ctx, in.FlowID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok || !f.expires.After(s.now()) || f.provider != in.Provider || f.sessionBinding != in.SessionBinding {
 		return nil, ErrInvalidFlow
 	}
@@ -193,9 +213,9 @@ func (s *Service) Complete(ctx context.Context, in CompleteInput) (*entities.Cre
 	if errors.Is(err, ErrAuthorizationPending) {
 		return nil, err
 	}
-	s.mu.Lock()
-	delete(s.flows, in.FlowID)
-	s.mu.Unlock()
+	if deleteErr := s.deleteFlow(ctx, in.FlowID); deleteErr != nil {
+		return nil, deleteErr
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -211,10 +231,13 @@ func (s *Service) Complete(ctx context.Context, in CompleteInput) (*entities.Cre
 	if tokens.Metadata.TokenExpiresAt == "" && tokens.ExpiresIn > 0 {
 		tokens.Metadata.TokenExpiresAt = s.now().Add(time.Duration(tokens.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
 	}
-	return s.credentials.Create(ctx, entities.CredentialInput{Name: name, Provider: in.Provider, Kind: entities.KindOAuth, OAuthAccess: tokens.AccessToken, OAuthRefresh: tokens.RefreshToken, OAuthIDToken: tokens.IDToken, OAuthAccount: account, OAuthMeta: tokens.Metadata, OwnerTenant: in.OwnerTenant})
+	return s.credentials.Create(ctx, entities.CredentialInput{Name: name, Provider: in.Provider, Kind: entities.KindOAuth, OAuthAccess: tokens.AccessToken, OAuthRefresh: tokens.RefreshToken, OAuthIDToken: tokens.IDToken, OAuthAccount: account, OAuthMeta: tokens.Metadata, OwnerTenant: in.OwnerTenant, OwnerUserID: in.OwnerUserID})
 }
 
-func (s *Service) storeFlow(f flow) {
+func (s *Service) storeFlow(ctx context.Context, f flow) error {
+	if s.flowStore != nil {
+		return s.flowStore.Put(ctx, f.state, f, time.Until(f.expires))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, existing := range s.flows {
@@ -223,6 +246,40 @@ func (s *Service) storeFlow(f flow) {
 		}
 	}
 	s.flows[f.state] = f
+	return nil
+}
+
+func (s *Service) loadFlow(ctx context.Context, id string) (flow, bool, error) {
+	if s.flowStore != nil {
+		return s.flowStore.Get(ctx, id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.flows[id]
+	return f, ok, nil
+}
+
+func (s *Service) deleteFlow(ctx context.Context, id string) error {
+	if s.flowStore != nil {
+		return s.flowStore.Delete(ctx, id)
+	}
+	s.mu.Lock()
+	delete(s.flows, id)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) claimFlow(ctx context.Context, id string) (bool, error) {
+	if s.flowStore != nil {
+		return s.flowStore.Claim(ctx, id, 2*time.Minute)
+	}
+	return true, nil
+}
+
+func (s *Service) releaseFlow(ctx context.Context, id string) {
+	if s.flowStore != nil {
+		_ = s.flowStore.Release(ctx, id)
+	}
 }
 
 func parseCallback(value string) (string, string, error) {

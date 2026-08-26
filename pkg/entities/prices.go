@@ -40,8 +40,12 @@ type TokenUsage struct {
 // Cost preserves whether a price was available. USD=0 alone cannot distinguish
 // genuinely free usage from usage that has not been priced yet.
 type Cost struct {
-	USD    float64 `json:"usd"`
-	Priced bool    `json:"priced"`
+	USD           float64 `json:"usd"`
+	InputUSD      float64 `json:"input_usd"`
+	OutputUSD     float64 `json:"output_usd"`
+	CacheReadUSD  float64 `json:"cache_read_usd"`
+	CacheWriteUSD float64 `json:"cache_write_usd"`
+	Priced        bool    `json:"priced"`
 }
 
 func (u TokenUsage) TotalTokens() int64 {
@@ -52,10 +56,15 @@ func CalculateCost(p *Price, u TokenUsage) Cost {
 	if p == nil {
 		return Cost{}
 	}
-	return Cost{USD: (float64(u.PromptTokens)*p.InputPerM +
-		float64(u.CompletionTokens)*p.OutputPerM +
-		float64(u.CacheReadTokens)*p.CachedInputPerM +
-		float64(u.CacheWriteTokens)*p.CacheWritePerM) / 1e6, Priced: true}
+	result := Cost{
+		InputUSD:      float64(u.PromptTokens) * p.InputPerM / 1e6,
+		OutputUSD:     float64(u.CompletionTokens) * p.OutputPerM / 1e6,
+		CacheReadUSD:  float64(u.CacheReadTokens) * p.CachedInputPerM / 1e6,
+		CacheWriteUSD: float64(u.CacheWriteTokens) * p.CacheWritePerM / 1e6,
+		Priced:        true,
+	}
+	result.USD = result.InputUSD + result.OutputUSD + result.CacheReadUSD + result.CacheWriteUSD
+	return result
 }
 
 // EstimateCosts derives both totals from rates at read time, so neither total
@@ -70,7 +79,8 @@ func EstimateCosts(p *Price, promptTokens, completionTokens int64, cacheSupporte
 	if !cacheSupported {
 		cacheRate = p.InputPerM
 	}
-	with := Cost{USD: (float64(promptTokens)*cacheRate + float64(completionTokens)*p.OutputPerM) / 1e6, Priced: true}
+	with := Cost{InputUSD: float64(promptTokens) * cacheRate / 1e6, OutputUSD: float64(completionTokens) * p.OutputPerM / 1e6, Priced: true}
+	with.USD = with.InputUSD + with.OutputUSD
 	return PriceEstimates{WithoutCache: without, WithCache: with}
 }
 

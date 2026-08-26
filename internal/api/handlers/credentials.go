@@ -42,6 +42,7 @@ type CredentialConnectivity struct {
 // @Router /admin/credentials/{id}/quota [get]
 // @Router /admin/credentials/{id}/quota [post]
 func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	if !h.authorize(c) {
 		return presenter.NotFound(c, "credential not found")
 	}
@@ -140,9 +141,13 @@ func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
 			return false
 		}
 		for _, candidate := range credentials {
-			if candidate.ID == c.Params("id") && candidate.OwnerTenantID != nil && *candidate.OwnerTenantID == sess.TenantID {
-				return true
+			if candidate.ID != c.Params("id") {
+				continue
 			}
+			if candidate.OwnerUserID != "" {
+				return candidate.OwnerUserID == sess.UserID
+			}
+			return candidate.OwnerTenantID != nil && *candidate.OwnerTenantID == sess.TenantID
 		}
 		return false
 	}

@@ -66,13 +66,17 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return presenter.BadRequest(c, "flow_id is required")
 	}
 	session := SessionFrom(c)
-	owner := body.OwnerTenant
+	var ownerUserID string
+	var ownerTenant *string
 	if session != nil && !session.IsMaster() {
-		owner = &session.TenantID
+		ownerUserID = session.UserID
+		if ownerUserID == "" {
+			ownerTenant = &session.TenantID
+		}
 	}
 	created, err := h.Service.Complete(c.Context(), oauthpkg.CompleteInput{
 		Provider: strings.ToLower(c.Params("provider")), FlowID: body.FlowID,
-		Callback: body.Callback, Name: body.Name, OwnerTenant: owner,
+		Callback: body.Callback, Name: body.Name, OwnerTenant: ownerTenant, OwnerUserID: ownerUserID,
 		SessionBinding: oauthSessionBinding(session),
 	})
 	if errors.Is(err, oauthpkg.ErrInvalidFlow) || errors.Is(err, oauthpkg.ErrBadCallback) {

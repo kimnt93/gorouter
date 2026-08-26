@@ -3935,6 +3935,18 @@
         "github_com_kimnt93_gorouter_pkg_entities.Cost": {
             "type": "object",
             "properties": {
+                "cache_read_usd": {
+                    "type": "number"
+                },
+                "cache_write_usd": {
+                    "type": "number"
+                },
+                "input_usd": {
+                    "type": "number"
+                },
+                "output_usd": {
+                    "type": "number"
+                },
                 "priced": {
                     "type": "boolean"
                 },
@@ -3965,6 +3977,9 @@
                     "type": "string"
                 },
                 "owner_tenant_id": {
+                    "type": "string"
+                },
+                "owner_user_id": {
                     "type": "string"
                 },
                 "provider": {
@@ -4055,6 +4070,12 @@
         "github_com_kimnt93_gorouter_pkg_entities.ModelU": {
             "type": "object",
             "properties": {
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
                 "cost_usd": {
                     "type": "number"
                 },
@@ -4191,8 +4212,14 @@
         "github_com_kimnt93_gorouter_pkg_entities.UsageActivityBucket": {
             "type": "object",
             "properties": {
+                "cache_read_cost_usd": {
+                    "type": "number"
+                },
                 "cache_read_tokens": {
                     "type": "integer"
+                },
+                "cache_write_cost_usd": {
+                    "type": "number"
                 },
                 "cache_write_tokens": {
                     "type": "integer"
@@ -4203,6 +4230,12 @@
                 "cost_usd": {
                     "type": "number"
                 },
+                "input_cost_usd": {
+                    "type": "number"
+                },
+                "output_cost_usd": {
+                    "type": "number"
+                },
                 "prompt_tokens": {
                     "type": "integer"
                 },
@@ -4210,6 +4243,12 @@
                     "type": "integer"
                 },
                 "start": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -4309,8 +4348,14 @@
                 "cache_hits": {
                     "type": "integer"
                 },
+                "cache_read_cost_usd": {
+                    "type": "number"
+                },
                 "cache_read_tokens": {
                     "type": "integer"
+                },
+                "cache_write_cost_usd": {
+                    "type": "number"
                 },
                 "cache_write_tokens": {
                     "type": "integer"
@@ -4319,6 +4364,12 @@
                     "type": "integer"
                 },
                 "cost_usd": {
+                    "type": "number"
+                },
+                "input_cost_usd": {
+                    "type": "number"
+                },
+                "output_cost_usd": {
                     "type": "number"
                 },
                 "prompt_tokens": {
@@ -4407,6 +4458,9 @@
                 },
                 "fetched_at": {
                     "type": "string"
+                },
+                "in_use": {
+                    "type": "boolean"
                 },
                 "message": {
                     "type": "string"
@@ -4668,9 +4722,6 @@
                 "oauth_refresh": {
                     "type": "string"
                 },
-                "owner_tenant_id": {
-                    "type": "string"
-                },
                 "provider": {
                     "type": "string"
                 }
@@ -4692,9 +4743,6 @@
                     "type": "string"
                 },
                 "oauth_refresh": {
-                    "type": "string"
-                },
-                "owner_tenant_id": {
                     "type": "string"
                 },
                 "status": {
@@ -4841,9 +4889,6 @@
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "owner_tenant_id": {
                     "type": "string"
                 }
             }
@@ -5127,6 +5172,9 @@
                 },
                 "group_by": {
                     "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"
                 }
             }
         },

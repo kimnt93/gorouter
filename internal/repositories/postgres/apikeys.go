@@ -85,13 +85,13 @@ type oauthBlob struct {
 
 func NewCredentialRepo(db *DB) *CredentialRepo { return &CredentialRepo{db: db} }
 
-const credColumns = `id,name,provider,kind,base_url,key_preview,coalesce(api_key_enc,''::bytea),coalesce(oauth_blob_enc,''::bytea),status,owner_tenant_id,created_at`
+const credColumns = `id,name,provider,kind,base_url,key_preview,coalesce(api_key_enc,''::bytea),coalesce(oauth_blob_enc,''::bytea),status,owner_tenant_id,coalesce(owner_user_id,''),created_at`
 
 func scanCredential(row pgx.Row) (*entities.Credential, error) {
 	var c entities.Credential
 	var keyEnc, oauthEnc []byte
 	err := row.Scan(&c.ID, &c.Name, &c.Provider, &c.Kind, &c.BaseURL, &c.KeyPreview,
-		&keyEnc, &oauthEnc, &c.Status, &c.OwnerTenantID, &c.CreatedAt)
+		&keyEnc, &oauthEnc, &c.Status, &c.OwnerTenantID, &c.OwnerUserID, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func wrapDecrypt(id string, err error) error {
 func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput, box entities.SecretBox) (*entities.Credential, error) {
 	c := &entities.Credential{
 		ID: NewID("cred"), Name: in.Name, Provider: in.Provider, Kind: in.Kind,
-		BaseURL: in.BaseURL, Status: "active", OwnerTenantID: in.OwnerTenant, CreatedAt: time.Now().UTC(),
+		BaseURL: in.BaseURL, Status: "active", OwnerTenantID: in.OwnerTenant, OwnerUserID: in.OwnerUserID, CreatedAt: time.Now().UTC(),
 	}
 	var apiKeyEnc, oauthEnc []byte
 	if in.APIKey != "" {
@@ -127,9 +127,9 @@ func (r *CredentialRepo) Create(ctx context.Context, in entities.CredentialInput
 		c.KeyPreview = preview(in.OAuthAccess)
 	}
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO credentials
-		(id,name,provider,kind,base_url,key_preview,api_key_enc,oauth_blob_enc,status,owner_tenant_id,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		c.ID, c.Name, c.Provider, c.Kind, c.BaseURL, c.KeyPreview, apiKeyEnc, oauthEnc, c.Status, c.OwnerTenantID, c.CreatedAt, c.CreatedAt)
+		(id,name,provider,kind,base_url,key_preview,api_key_enc,oauth_blob_enc,status,owner_tenant_id,owner_user_id,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		c.ID, c.Name, c.Provider, c.Kind, c.BaseURL, c.KeyPreview, apiKeyEnc, oauthEnc, c.Status, c.OwnerTenantID, nullableString(c.OwnerUserID), c.CreatedAt, c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -173,9 +173,9 @@ func (r *CredentialRepo) Update(ctx context.Context, box entities.SecretBox, id 
 		}
 	}
 	updatedAt := time.Now().UTC()
-	row := r.db.Pool.QueryRow(ctx, `UPDATE credentials SET name=$1,base_url=$2,status=$3,owner_tenant_id=$4,
-		key_preview=$5,api_key_enc=$6,oauth_blob_enc=$7,updated_at=$8 WHERE id=$9 RETURNING `+credColumns,
-		in.Name, in.BaseURL, in.Status, in.OwnerTenant, keyPreview, apiKeyEnc, oauthEnc, updatedAt, id)
+	row := r.db.Pool.QueryRow(ctx, `UPDATE credentials SET name=$1,base_url=$2,status=$3,
+		key_preview=$4,api_key_enc=$5,oauth_blob_enc=$6,updated_at=$7 WHERE id=$8 RETURNING `+credColumns,
+		in.Name, in.BaseURL, in.Status, keyPreview, apiKeyEnc, oauthEnc, updatedAt, id)
 	updated, err := scanCredential(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, entities.ErrNotFound
@@ -193,7 +193,7 @@ func (r *CredentialRepo) List(ctx context.Context) ([]entities.Credential, error
 	for rows.Next() {
 		var c entities.Credential
 		var keyEnc, oauthEnc []byte
-		if err := rows.Scan(&c.ID, &c.Name, &c.Provider, &c.Kind, &c.BaseURL, &c.KeyPreview, &keyEnc, &oauthEnc, &c.Status, &c.OwnerTenantID, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Provider, &c.Kind, &c.BaseURL, &c.KeyPreview, &keyEnc, &oauthEnc, &c.Status, &c.OwnerTenantID, &c.OwnerUserID, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		c.SetSecrets(keyEnc, oauthEnc)
@@ -288,7 +288,7 @@ func (r *CredentialRepo) UpdateOAuthTokens(ctx context.Context, box entities.Sec
 
 func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]entities.RouteCandidate, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT mr.credential_id, mr.priority, mr.weight, c.owner_tenant_id
+		SELECT mr.credential_id, mr.priority, mr.weight, c.owner_tenant_id, coalesce(c.owner_user_id,'')
 		FROM model_routes mr JOIN credentials c ON c.id = mr.credential_id
 		WHERE mr.model=$1 AND mr.enabled AND c.status='active'
 		ORDER BY mr.priority DESC, mr.credential_id`, model)
@@ -300,7 +300,7 @@ func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]en
 	for rows.Next() {
 		var rc entities.RouteCandidate
 		var w int
-		if err := rows.Scan(&rc.CredentialID, &rc.Priority, &w, &rc.OwnerTenant); err != nil {
+		if err := rows.Scan(&rc.CredentialID, &rc.Priority, &w, &rc.OwnerTenant, &rc.OwnerUserID); err != nil {
 			return nil, err
 		}
 		rc.Weight = w
@@ -314,6 +314,13 @@ func preview(secret string) string {
 		return "…"
 	}
 	return secret[:6] + "…" + secret[len(secret)-4:]
+}
+
+func nullableString(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }
 
 type ApiKeyRepo struct{ db *DB }

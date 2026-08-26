@@ -33,23 +33,21 @@ type TenantCreateRequest struct {
 	Name string `json:"name"`
 }
 type CredentialCreateRequest struct {
-	Name         string  `json:"name"`
-	Provider     string  `json:"provider"`
-	Kind         string  `json:"kind"`
-	BaseURL      string  `json:"base_url"`
-	APIKey       string  `json:"api_key"`
-	OAuthAccess  string  `json:"oauth_access"`
-	OAuthRefresh string  `json:"oauth_refresh"`
-	OwnerTenant  *string `json:"owner_tenant_id"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	Kind         string `json:"kind"`
+	BaseURL      string `json:"base_url"`
+	APIKey       string `json:"api_key"`
+	OAuthAccess  string `json:"oauth_access"`
+	OAuthRefresh string `json:"oauth_refresh"`
 }
 type CredentialUpdateRequest struct {
-	Name          string  `json:"name"`
-	BaseURL       string  `json:"base_url"`
-	Status        string  `json:"status"`
-	APIKey        string  `json:"api_key"`
-	OAuthAccess   string  `json:"oauth_access"`
-	OAuthRefresh  string  `json:"oauth_refresh"`
-	OwnerTenantID *string `json:"owner_tenant_id"`
+	Name         string `json:"name"`
+	BaseURL      string `json:"base_url"`
+	Status       string `json:"status"`
+	APIKey       string `json:"api_key"`
+	OAuthAccess  string `json:"oauth_access"`
+	OAuthRefresh string `json:"oauth_refresh"`
 }
 type APIKeyCreateRequest struct {
 	TenantID              string   `json:"tenant_id"`
@@ -128,6 +126,7 @@ type UsageRecentResponse struct {
 type UsageActivityResponse struct {
 	GroupBy string                         `json:"group_by"`
 	Data    []entities.UsageActivityBucket `json:"data"`
+	Summary *entities.UsageSummary         `json:"summary"`
 }
 type UserListResponse struct {
 	Object     string          `json:"object"`
@@ -243,10 +242,9 @@ type OAuthStartResponse struct {
 	Instructions            string `json:"instructions"`
 }
 type OAuthCompleteRequest struct {
-	FlowID      string  `json:"flow_id"`
-	Callback    string  `json:"callback"`
-	Name        string  `json:"name"`
-	OwnerTenant *string `json:"owner_tenant_id"`
+	FlowID   string `json:"flow_id"`
+	Callback string `json:"callback"`
+	Name     string `json:"name"`
 }
 type OAuthCompleteResponse struct {
 	ID       string `json:"id"`

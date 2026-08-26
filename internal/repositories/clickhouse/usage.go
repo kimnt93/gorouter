@@ -25,7 +25,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 	if len(events) == 0 {
 		return nil
 	}
-	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,request_body,response_body,content_truncated)`)
+	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,request_body,response_body,content_truncated)`)
 	if e != nil {
 		return e
 	}
@@ -41,7 +41,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if v.ActorType == "" {
 			v.ActorType, v.Username, v.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, v.TenantID
 		}
-		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID, v.RequestBody, v.ResponseBody, v.ContentTruncated); e != nil {
+		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.InputCostUSD, v.OutputCostUSD, v.CacheReadCostUSD, v.CacheWriteCostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID, v.RequestBody, v.ResponseBody, v.ContentTruncated); e != nil {
 			return e
 		}
 	}
@@ -142,7 +142,11 @@ func usageWhere(query entities.UsageQuery, includeCursor bool) ([]string, []any)
 	}
 	for _, filter := range []struct{ column, value string }{{"organization_id", query.OrganizationID}, {"user_id", query.UserID}, {"model", query.Model}, {"api_key_id", query.APIKeyID}} {
 		if filter.value != "" {
-			clauses, args = append(clauses, filter.column+"=?"), append(args, filter.value)
+			if values := strings.Split(filter.value, ","); len(values) > 1 {
+				clauses, args = append(clauses, filter.column+" IN ?"), append(args, values)
+			} else {
+				clauses, args = append(clauses, filter.column+"=?"), append(args, filter.value)
+			}
 		}
 	}
 	if query.StatusCode != nil {
@@ -218,17 +222,17 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 	clauses, args := usageWhere(query, false)
 	where := strings.Join(clauses, " AND ")
 	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
-	if err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced); err != nil {
+	if err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(input_cost_usd),sum(output_cost_usd),sum(cache_read_cost_usd),sum(cache_write_cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.InputCostUSD, &summary.OutputCostUSD, &summary.CacheReadCostUSD, &summary.CacheWriteCostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced); err != nil {
 		return nil, err
 	}
-	rows, err := r.s.Conn.Query(ctx, `SELECT model,count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens) FROM usage_events WHERE `+where+` GROUP BY model`, args...)
+	rows, err := r.s.Conn.Query(ctx, `SELECT model,count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens) FROM usage_events WHERE `+where+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var name string
 		var value entities.ModelU
-		if err = rows.Scan(&name, &value.Requests, &value.CostUSD, &value.InTok, &value.OutTok); err != nil {
+		if err = rows.Scan(&name, &value.Requests, &value.CostUSD, &value.InTok, &value.OutTok, &value.CacheReadTok, &value.CacheWriteTok); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -267,7 +271,7 @@ func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery
 		groupBy = "day"
 	}
 	clauses, args := usageWhere(query, false)
-	rows, err := r.s.Conn.Query(ctx, `SELECT `+bucketFunction+`(ts) AS bucket,count(),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),sum(cost_usd) FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` GROUP BY bucket ORDER BY bucket`, args...)
+	rows, err := r.s.Conn.Query(ctx, `SELECT `+bucketFunction+`(ts) AS bucket,user_id,if(username!='',username,if(user_id!='',user_id,'Legacy')) AS user_label,count(),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),sum(cost_usd),sum(input_cost_usd),sum(output_cost_usd),sum(cache_read_cost_usd),sum(cache_write_cost_usd) FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` GROUP BY bucket,user_id,user_label ORDER BY bucket,user_label`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +280,7 @@ func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery
 	for rows.Next() {
 		var bucket entities.UsageActivityBucket
 		var requests uint64
-		if err := rows.Scan(&bucket.Start, &requests, &bucket.PromptTokens, &bucket.CompletionTokens, &bucket.CacheReadTokens, &bucket.CacheWriteTokens, &bucket.CostUSD); err != nil {
+		if err := rows.Scan(&bucket.Start, &bucket.UserID, &bucket.Username, &requests, &bucket.PromptTokens, &bucket.CompletionTokens, &bucket.CacheReadTokens, &bucket.CacheWriteTokens, &bucket.CostUSD, &bucket.InputCostUSD, &bucket.OutputCostUSD, &bucket.CacheReadCostUSD, &bucket.CacheWriteCostUSD); err != nil {
 			return nil, err
 		}
 		bucket.Requests = int64(requests)

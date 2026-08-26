@@ -308,11 +308,10 @@
     button.disabled = true;
     setResult(byID("oauth-dialog-result"), "Exchanging and encrypting OAuth credentials…", "loading");
     try {
-      const owner = byID("oauth-owner")?.value || "";
       const response = await fetch(`/admin/oauth/${encodeURIComponent(oauthProvider)}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ flow_id: oauthFlowID, callback, name: byID("oauth-name").value.trim(), owner_tenant_id: owner || null }),
+        body: JSON.stringify({ flow_id: oauthFlowID, callback, name: byID("oauth-name").value.trim() }),
       });
       if (response.status === 202) {
         setResult(byID("oauth-dialog-result"), "Waiting for authorization…", "loading");
