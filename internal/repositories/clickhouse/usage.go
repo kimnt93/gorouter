@@ -59,7 +59,7 @@ func (r *UsageRepo) summary(ctx context.Context, tenant string, since time.Time)
 		where = "tenant_id=? AND ts>=?"
 		args = []any{tenant, since.UTC()}
 	}
-	e := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheHits, &s.Unpriced)
+	e := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheWriteTok, &s.CacheHits, &s.Unpriced)
 	if e != nil {
 		return nil, e
 	}
@@ -195,7 +195,7 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 	clauses, args := usageWhere(query, false)
 	where := strings.Join(clauses, " AND ")
 	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
-	if err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheHits, &summary.Unpriced); err != nil {
+	if err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+where, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced); err != nil {
 		return nil, err
 	}
 	rows, err := r.s.Conn.Query(ctx, `SELECT model,count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens) FROM usage_events WHERE `+where+` GROUP BY model`, args...)
@@ -230,4 +230,32 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 		summary.ByKey[name] = value
 	}
 	return summary, rows.Err()
+}
+
+func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {
+	bucketFunction := "toStartOfDay"
+	switch groupBy {
+	case "hour":
+		bucketFunction = "toStartOfHour"
+	case "week":
+		bucketFunction = "toStartOfWeek"
+	case "day":
+	default:
+		groupBy = "day"
+	}
+	clauses, args := usageWhere(query, false)
+	rows, err := r.s.Conn.Query(ctx, `SELECT `+bucketFunction+`(ts) AS bucket,count(),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),sum(cost_usd) FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` GROUP BY bucket ORDER BY bucket`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]entities.UsageActivityBucket, 0)
+	for rows.Next() {
+		var bucket entities.UsageActivityBucket
+		if err := rows.Scan(&bucket.Start, &bucket.Requests, &bucket.PromptTokens, &bucket.CompletionTokens, &bucket.CacheReadTokens, &bucket.CacheWriteTokens, &bucket.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, bucket)
+	}
+	return out, rows.Err()
 }

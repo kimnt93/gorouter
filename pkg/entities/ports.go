@@ -151,6 +151,10 @@ type PrincipalUsageRepository interface {
 	SummaryUsage(ctx context.Context, query UsageQuery) (*UsageSummary, error)
 }
 
+type UsageActivityRepository interface {
+	ActivityUsage(ctx context.Context, query UsageQuery, groupBy string) ([]UsageActivityBucket, error)
+}
+
 type AuditQuery struct {
 	Visibility     UsageVisibility
 	OrganizationID string

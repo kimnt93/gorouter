@@ -42,11 +42,11 @@ func (r *UsageRepo) SummaryForTenant(ctx context.Context, tenantID string, since
 	s := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT COUNT(*), COALESCE(SUM(cost_usd),0), COALESCE(SUM(prompt_tokens),0),
-		       COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		       COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
 		       COALESCE(SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN NOT priced THEN 1 ELSE 0 END),0)
 		FROM usage_events WHERE tenant_id=$1 AND ts >= $2`, tenantID, since).
-		Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheHits, &s.Unpriced)
+		Scan(&s.Requests, &s.CostUSD, &s.PromptTok, &s.CompletionTo, &s.CacheReadTok, &s.CacheWriteTok, &s.CacheHits, &s.Unpriced)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
 	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
 	filter, args := postgresUsageFilter(query)
-	if err := r.db.Pool.QueryRow(ctx, `SELECT count(*),coalesce(sum(cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),count(*) FILTER (WHERE cache_hit),count(*) FILTER (WHERE NOT priced) FROM usage_events WHERE `+filter, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheHits, &summary.Unpriced); err != nil {
+	if err := r.db.Pool.QueryRow(ctx, `SELECT count(*),coalesce(sum(cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),coalesce(sum(cache_write_tokens),0),count(*) FILTER (WHERE cache_hit),count(*) FILTER (WHERE NOT priced) FROM usage_events WHERE `+filter, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.Pool.Query(ctx, `SELECT model,count(*),coalesce(sum(cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0) FROM usage_events WHERE `+filter+` GROUP BY model`, args...)
@@ -204,6 +204,27 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 		summary.ByKey[name] = value
 	}
 	return summary, rows.Err()
+}
+
+func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {
+	if groupBy != "hour" && groupBy != "day" && groupBy != "week" {
+		groupBy = "day"
+	}
+	filter, args := postgresUsageFilter(query)
+	rows, err := r.db.Pool.Query(ctx, `SELECT date_trunc('`+groupBy+`',ts) AS bucket,count(*),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),coalesce(sum(cache_write_tokens),0),coalesce(sum(cost_usd),0) FROM usage_events WHERE `+filter+` GROUP BY bucket ORDER BY bucket`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]entities.UsageActivityBucket, 0)
+	for rows.Next() {
+		var bucket entities.UsageActivityBucket
+		if err := rows.Scan(&bucket.Start, &bucket.Requests, &bucket.PromptTokens, &bucket.CompletionTokens, &bucket.CacheReadTokens, &bucket.CacheWriteTokens, &bucket.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, bucket)
+	}
+	return out, rows.Err()
 }
 
 func postgresUsageFilter(query entities.UsageQuery) (string, []any) {

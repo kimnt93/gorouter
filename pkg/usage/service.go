@@ -205,3 +205,11 @@ func (s *Service) SummaryQuery(ctx context.Context, query entities.UsageQuery) (
 	}
 	return repo.SummaryUsage(ctx, query)
 }
+
+func (s *Service) Activity(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {
+	repo, ok := s.repo.(entities.UsageActivityRepository)
+	if !ok {
+		return nil, errors.New("usage activity queries unavailable")
+	}
+	return repo.ActivityUsage(ctx, query, groupBy)
+}

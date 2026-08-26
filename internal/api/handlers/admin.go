@@ -841,6 +841,79 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 	return responseapi.JSON(c, UsageRecentResponse{Object: "list", Data: page.Data, NextCursor: page.NextCursor})
 }
 
+// UsageActivity returns policy-constrained time buckets for the analysis UI.
+// @Summary Get usage activity
+// @Tags usage
+// @Security BearerAuth
+// @Param range query string false "1d, 7d, 30d, 90d, ytd, or all"
+// @Param since query string false "RFC3339 lower bound for a custom range"
+// @Param until query string false "RFC3339 upper bound for a custom range"
+// @Param group_by query string false "hour, day, or week" default(day)
+// @Param organization_id query string false "Organization filter"
+// @Param user_id query string false "User filter"
+// @Param api_key_id query string false "API-key filter"
+// @Success 200 {object} UsageActivityResponse
+// @Failure 400,401,403,500 {object} presenter.Error
+// @Router /admin/usage/activity [get]
+func (a *Admin) UsageActivity(c fiber.Ctx) error {
+	actor := principalFromSession(SessionFrom(c))
+	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
+		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
+			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
+		}
+	}
+	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
+	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
+	if policyErr != nil {
+		return presenter.Forbidden(c, "usage access is not allowed")
+	}
+	groupBy := strings.ToLower(strings.TrimSpace(c.Query("group_by", "day")))
+	if groupBy != "hour" && groupBy != "day" && groupBy != "week" {
+		return presenter.BadRequest(c, "group_by must be hour, day, or week")
+	}
+	now := time.Now().UTC()
+	query := entities.UsageQuery{Visibility: visibility, OrganizationID: requestedOrganization, UserID: strings.TrimSpace(c.Query("user_id")), APIKeyID: strings.TrimSpace(c.Query("api_key_id"))}
+	switch strings.ToLower(strings.TrimSpace(c.Query("range", "7d"))) {
+	case "1d":
+		since := now.Add(-24 * time.Hour)
+		query.Since = &since
+	case "7d":
+		since := now.Add(-7 * 24 * time.Hour)
+		query.Since = &since
+	case "30d":
+		since := now.Add(-30 * 24 * time.Hour)
+		query.Since = &since
+	case "90d":
+		since := now.Add(-90 * 24 * time.Hour)
+		query.Since = &since
+	case "ytd":
+		since := time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		query.Since = &since
+	case "all":
+	case "custom":
+		since, err := time.Parse(time.RFC3339, c.Query("since"))
+		if err != nil {
+			return presenter.BadRequest(c, "since must be RFC3339 for a custom range")
+		}
+		until, err := time.Parse(time.RFC3339, c.Query("until"))
+		if err != nil {
+			return presenter.BadRequest(c, "until must be RFC3339 for a custom range")
+		}
+		if !since.Before(until) {
+			return presenter.BadRequest(c, "since must be before until")
+		}
+		query.Since, query.Until = &since, &until
+	default:
+		return presenter.BadRequest(c, "range must be 1d, 7d, 30d, 90d, ytd, all, or custom")
+	}
+	buckets, err := a.UsageSvc.Activity(c.Context(), query, groupBy)
+	if err != nil {
+		return presenter.ServerError(c, "failed to load usage activity")
+	}
+	return responseapi.JSON(c, UsageActivityResponse{GroupBy: groupBy, Data: buckets})
+}
+
 // CacheStats returns safe prompt-cache counters.
 // @Summary Get cache statistics
 // @Tags cache

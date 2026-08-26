@@ -188,15 +188,31 @@ type RecentEvent struct {
 }
 
 type UsageSummary struct {
-	Requests     int64             `json:"requests"`
-	CacheHits    int64             `json:"cache_hits"`
-	CostUSD      float64           `json:"cost_usd"`
-	PromptTok    int64             `json:"prompt_tokens"`
-	CompletionTo int64             `json:"completion_tokens"`
-	CacheReadTok int64             `json:"cache_read_tokens"`
-	Unpriced     int64             `json:"unpriced_requests"`
-	ByModel      map[string]ModelU `json:"by_model"`
-	ByKey        map[string]KeyU   `json:"by_key"`
+	Requests      int64             `json:"requests"`
+	CacheHits     int64             `json:"cache_hits"`
+	CostUSD       float64           `json:"cost_usd"`
+	PromptTok     int64             `json:"prompt_tokens"`
+	CompletionTo  int64             `json:"completion_tokens"`
+	CacheReadTok  int64             `json:"cache_read_tokens"`
+	CacheWriteTok int64             `json:"cache_write_tokens"`
+	Unpriced      int64             `json:"unpriced_requests"`
+	ByModel       map[string]ModelU `json:"by_model"`
+	ByKey         map[string]KeyU   `json:"by_key"`
+}
+
+type UsageActivityBucket struct {
+	Start            time.Time `json:"start"`
+	Requests         int64     `json:"requests"`
+	PromptTokens     int64     `json:"prompt_tokens"`
+	CompletionTokens int64     `json:"completion_tokens"`
+	CacheReadTokens  int64     `json:"cache_read_tokens"`
+	CacheWriteTokens int64     `json:"cache_write_tokens"`
+	CostUSD          float64   `json:"cost_usd"`
+}
+
+type UsageActivity struct {
+	GroupBy string                `json:"group_by"`
+	Data    []UsageActivityBucket `json:"data"`
 }
 
 type ModelU struct {

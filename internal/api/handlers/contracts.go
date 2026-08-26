@@ -115,6 +115,10 @@ type UsageRecentResponse struct {
 	Data       []entities.RecentEvent `json:"data"`
 	NextCursor string                 `json:"next_cursor,omitempty"`
 }
+type UsageActivityResponse struct {
+	GroupBy string                         `json:"group_by"`
+	Data    []entities.UsageActivityBucket `json:"data"`
+}
 type UserListResponse struct {
 	Object     string          `json:"object"`
 	Data       []entities.User `json:"data"`
