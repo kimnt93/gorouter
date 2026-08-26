@@ -46,7 +46,7 @@ func Require(authSvc *auth.Service, scope string) fiber.Handler {
 			case c.Get("HX-Request") == "true":
 				c.Set("HX-Redirect", "/login")
 				return c.SendStatus(fiber.StatusUnauthorized)
-			case c.Path() == "/" || strings.HasPrefix(c.Path(), "/ui"):
+			case c.Path() == "/" || strings.HasPrefix(c.Path(), "/ui") || strings.HasPrefix(c.Path(), "/dashboard"):
 				return c.Redirect().To("/login")
 			default:
 				return presenter.Unauthorized(c, "authentication required")

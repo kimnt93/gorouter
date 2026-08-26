@@ -2,6 +2,7 @@ package routes
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/contrib/v3/swagger"
@@ -10,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
 	"github.com/kimnt93/gorouter/internal/api/handlers"
+	"github.com/kimnt93/gorouter/internal/api/spa"
 	"github.com/kimnt93/gorouter/internal/api/views"
 	"github.com/kimnt93/gorouter/internal/docs"
 	"github.com/kimnt93/gorouter/pkg/apikey"
@@ -65,13 +67,41 @@ func New(d Dependencies) *fiber.App {
 		}
 		return c.Send(body)
 	})
+	app.Get("/app-assets/*", func(c fiber.Ctx) error {
+		name := c.Params("*")
+		body, err := spa.Asset(name)
+		if err != nil {
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+		switch {
+		case strings.HasSuffix(name, ".css"):
+			c.Type("css")
+		case strings.HasSuffix(name, ".js"):
+			c.Type("js")
+		}
+		c.Set("Cache-Control", "public, max-age=31536000, immutable")
+		return c.Send(body)
+	})
 	app.Post("/login", (&handlers.Admin{Auth: d.Auth}).Verify)
 	app.Post("/logout", (&handlers.Admin{Auth: d.Auth}).Logout)
 	app.Get("/login", handlers.LoginPage)
 	ui := &handlers.UI{Cache: d.Cache, Usage: d.Usage, Keys: d.Keys, Tenants: d.Tenants, Credentials: d.Credentials, Models: d.Models, Identity: d.Identity, IdentityRepo: d.IdentityRepo, Audit: d.Audit}
-	app.Get("/", handlers.Require(d.Auth, ""), ui.DashboardPage)
+	spaPage := func(c fiber.Ctx) error {
+		body, err := spa.Index()
+		if err != nil {
+			return c.SendStatus(fiber.StatusInternalServerError)
+		}
+		c.Type("html")
+		c.Set("Cache-Control", "no-cache")
+		return c.Send(body)
+	}
+	app.Get("/", handlers.Require(d.Auth, ""), spaPage)
+	app.Get("/dashboard", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
+	app.Get("/dashboard/analysis", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
+	app.Get("/dashboard/logs", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
+	app.Get("/dashboard/cache", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
 	app.Get("/ui/cache", handlers.Require(d.Auth, entities.ScopeUsageRead), ui.CacheFragment)
-	app.Get("/ui/usage", handlers.Require(d.Auth, entities.ScopeUsageRead), ui.UsagePage)
+	app.Get("/ui/usage", handlers.Require(d.Auth, entities.ScopeUsageRead), func(c fiber.Ctx) error { return c.Redirect().To("/dashboard/logs") })
 	app.Get("/ui/users", handlers.Require(d.Auth, ""), ui.UsersPage)
 	app.Post("/ui/users", handlers.Require(d.Auth, ""), ui.UserCreate)
 	app.Get("/ui/users/:id", handlers.Require(d.Auth, ""), ui.UserPage)
@@ -99,7 +129,7 @@ func New(d Dependencies) *fiber.App {
 	app.Post("/ui/models", handlers.Require(d.Auth, entities.ScopeModelsManage), ui.ModelsCreate)
 	app.Post("/ui/models/:name/price", handlers.Require(d.Auth, entities.ScopeModelsManage), ui.ModelPriceSet)
 	app.Delete("/ui/models/:name", handlers.Require(d.Auth, entities.ScopeModelsManage), ui.ModelDelete)
-	app.Get("/ui/cache-page", handlers.Require(d.Auth, entities.ScopeCachePurge), ui.CachePage)
+	app.Get("/ui/cache-page", handlers.Require(d.Auth, entities.ScopeUsageRead), func(c fiber.Ctx) error { return c.Redirect().To("/dashboard/cache") })
 	app.Post("/ui/cache/flush", handlers.Require(d.Auth, entities.ScopeCachePurge), ui.CacheFlush)
 
 	app.Post("/v1/chat/completions", handlers.Require(d.Auth, "chat"), d.Gateway.Chat)
