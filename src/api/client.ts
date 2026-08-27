@@ -1,4 +1,5 @@
 import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import { groupByForUsageRange } from '../lib/usageResolution'
 
 export class APIError extends Error {
   constructor(readonly status: number, message: string) {
@@ -61,7 +62,7 @@ export async function requestStream(path: string, body: object, onText: (text: s
 
 function applyFilters(params: URLSearchParams, filters: UsageFilters): void {
   params.set('range', filters.range)
-  params.set('group_by', filters.groupBy)
+  params.set('group_by', groupByForUsageRange(filters))
   if (filters.userIds.length) params.set('user_id', filters.userIds.join(','))
   if (filters.apiKeyIds.length) params.set('api_key_id', filters.apiKeyIds.join(','))
   if (filters.organizationIds.length) params.set('organization_id', filters.organizationIds.join(','))

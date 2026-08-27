@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { UsageActivityBucket } from '../api/contracts'
+import type { GroupBy, UsageActivityBucket } from '../api/contracts'
 import { formatDateBucket, formatInteger, formatUSD } from '../lib/format'
 import { TruncatedText } from './SearchableSelect'
 
@@ -74,7 +74,7 @@ function aggregateCache(data: UsageActivityBucket[]): CacheBucket[] {
   })
 }
 
-export function CacheEfficiencyChart({ data }: { data: UsageActivityBucket[] }) {
+export function CacheEfficiencyChart({ data, groupBy }: { data: UsageActivityBucket[]; groupBy: GroupBy }) {
   const buckets = useMemo(() => aggregateCache(data), [data])
   const maxUsage = Math.max(1, ...buckets.map((bucket) => bucket.usage))
   if (buckets.length === 0) return <div className="empty-state"><strong>No cache activity in this range</strong><span>Try a wider range or clear the selected identity values.</span></div>
@@ -86,8 +86,8 @@ export function CacheEfficiencyChart({ data }: { data: UsageActivityBucket[] }) 
           {bucket.input > 0 && <i className="cache-uncached-segment" style={{ height: `${100 - bucket.rate}%` }} />}
           {bucket.read > 0 && <i className="cache-read-segment" style={{ height: `${bucket.rate}%` }} />}
         </div></div>
-        <time dateTime={bucket.start}>{formatDateBucket(bucket.start)}</time>
-        <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start)}</strong>
+        <time dateTime={bucket.start}>{formatDateBucket(bucket.start, groupBy)}</time>
+        <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start, groupBy)}</strong>
           <span><i className="cache-read-swatch" /><span>Cache read</span><b>{formatInteger(bucket.read)} · {bucket.rate.toFixed(1)}%</b></span>
           <span><i className="cache-uncached-swatch" /><span>Uncached input</span><b>{formatInteger(bucket.input)} · {(100 - bucket.rate).toFixed(1)}%</b></span>
           <span><i className="cache-write-swatch" /><span>Cache write</span><b>{formatInteger(bucket.write)}</b></span>
@@ -100,7 +100,7 @@ export function CacheEfficiencyChart({ data }: { data: UsageActivityBucket[] }) 
   </div>
 }
 
-export function VerticalUsageChart({ data, metric }: { data: UsageActivityBucket[]; metric: Metric }) {
+export function VerticalUsageChart({ data, metric, groupBy }: { data: UsageActivityBucket[]; metric: Metric; groupBy: GroupBy }) {
   const buckets = useMemo(() => aggregate(data, metric), [data, metric])
   const max = Math.max(1, ...buckets.map((bucket) => bucket.total))
   const legend = useMemo(() => {
@@ -119,8 +119,8 @@ export function VerticalUsageChart({ data, metric }: { data: UsageActivityBucket
           <div className="vertical-track"><div className="vertical-stack" style={{ height: `${height}%` }}>
             {bucket.segments.filter((segment) => segment.value > 0).map((segment) => <i key={segment.key} style={{ background: segment.color, height: `${bucket.total ? segment.value / bucket.total * 100 : 0}%` }} />)}
           </div></div>
-          <time dateTime={bucket.start}>{formatDateBucket(bucket.start)}</time>
-          <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></div>
+          <time dateTime={bucket.start}>{formatDateBucket(bucket.start, groupBy)}</time>
+          <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start, groupBy)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></div>
         </div>
       })}
     </div>
