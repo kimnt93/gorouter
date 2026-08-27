@@ -212,29 +212,43 @@ type ImportModelsResponse struct {
 	OK       bool     `json:"ok"`
 	Imported []string `json:"imported"`
 }
+type RefreshModelMetadataResponse struct {
+	OK        bool     `json:"ok"`
+	Refreshed []string `json:"refreshed"`
+	Missing   []string `json:"missing"`
+}
 type CredentialChatTestRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 }
 type ProviderModelResponse struct {
-	ID                 string            `json:"id"`
-	Object             string            `json:"object"`
-	PublicID           string            `json:"public_id"`
-	Default            bool              `json:"default,omitempty"`
-	Created            int64             `json:"created,omitempty"`
-	OwnedBy            string            `json:"owned_by,omitempty"`
-	Permission         []json.RawMessage `json:"permission"`
-	Root               string            `json:"root,omitempty"`
-	Parent             *string           `json:"parent"`
-	APIFormat          string            `json:"api_format,omitempty"`
-	ContextLength      int64             `json:"context_length,omitempty"`
-	MaxOutputTokens    int64             `json:"max_output_tokens,omitempty"`
-	SupportedEndpoints []string          `json:"supported_endpoints,omitempty"`
-	Capabilities       json.RawMessage   `json:"capabilities,omitempty"`
-	InputModalities    []string          `json:"input_modalities,omitempty"`
-	OutputModalities   []string          `json:"output_modalities,omitempty"`
-	MaxInputTokens     int64             `json:"max_input_tokens,omitempty"`
-	Name               string            `json:"name,omitempty"`
+	ID                       string                         `json:"id"`
+	Object                   string                         `json:"object"`
+	PublicID                 string                         `json:"public_id"`
+	Default                  bool                           `json:"default,omitempty"`
+	Created                  int64                          `json:"created,omitempty"`
+	OwnedBy                  string                         `json:"owned_by,omitempty"`
+	Permission               []json.RawMessage              `json:"permission"`
+	Root                     string                         `json:"root,omitempty"`
+	Parent                   *string                        `json:"parent"`
+	APIFormat                string                         `json:"api_format,omitempty"`
+	ContextLength            int64                          `json:"context_length,omitempty"`
+	MaxOutputTokens          int64                          `json:"max_output_tokens,omitempty"`
+	SupportedEndpoints       []string                       `json:"supported_endpoints,omitempty"`
+	Capabilities             json.RawMessage                `json:"capabilities,omitempty"`
+	InputModalities          []string                       `json:"input_modalities,omitempty"`
+	OutputModalities         []string                       `json:"output_modalities,omitempty"`
+	MaxInputTokens           int64                          `json:"max_input_tokens,omitempty"`
+	Name                     string                         `json:"name,omitempty"`
+	Description              string                         `json:"description,omitempty"`
+	MaxContextWindow         int64                          `json:"max_context_window,omitempty"`
+	DefaultReasoningLevel    string                         `json:"default_reasoning_level,omitempty"`
+	SupportedReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels,omitempty"`
+	SupportsOriginalImage    bool                           `json:"supports_image_detail_original,omitempty"`
+	SupportsReasoningSummary bool                           `json:"supports_reasoning_summary_parameter,omitempty"`
+	SupportsParallelTools    bool                           `json:"supports_parallel_tool_calls,omitempty"`
+	SupportsVerbosity        bool                           `json:"support_verbosity,omitempty"`
+	DefaultVerbosity         string                         `json:"default_verbosity,omitempty"`
 }
 type ProviderModelsResponse struct {
 	Object       string                  `json:"object"`

@@ -116,28 +116,32 @@ func TestCodexModelDiscoveryNormalizesOpenAIStyleCatalog(t *testing.T) {
 	}
 }
 
-func TestCodexModelDiscoveryNormalizesCamelCaseAndEnrichesCapabilities(t *testing.T) {
+func TestCodexModelDiscoveryUsesProviderReportedCapabilities(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-5.6-sol","contextWindow":272000,"maxInputTokens":872000,"maxOutputTokens":128000,"displayName":"GPT 5.6 Sol"},{"slug":"gpt-5.6-sol-medium","contextWindow":272000}]}`)
+		_, _ = io.WriteString(w, `{"models":[{"slug":"future-model","contextWindow":272000,"maxContextWindow":872000,"maxInputTokens":800000,"maxOutputTokens":128000,"displayName":"Future Model","description":"Provider description","inputModalities":["text","image"],"outputModalities":["text"],"defaultReasoningLevel":"high","supportedReasoningLevels":[{"effort":"low","description":"Fast"},{"effort":"high","description":"Deep"}]}]}`)
 	}))
 	defer server.Close()
-
 	models, err := (&CodexAdapter{HTTP: server.Client()}).DiscoverModels(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 1 {
-		t.Fatalf("models = %+v", models)
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
 	model := models[0]
-	if model.Created != 1787701071 || model.ContextLength != 272000 || model.MaxInputTokens != 872000 || model.APIFormat != "responses" || model.Root != model.ID || len(model.Permission) != 0 {
-		t.Fatalf("normalized model = %+v", model)
+	if model.Name != "Future Model" || model.Description != "Provider description" || model.ContextLength != 272000 || model.MaxContextWindow != 872000 || model.MaxInputTokens != 800000 || model.DefaultReasoningLevel != "high" || len(model.SupportedReasoningLevels) != 2 || len(model.InputModalities) != 2 {
+		t.Fatalf("model = %+v", model)
 	}
-	if model.Capabilities["supportsThinking"] != true || model.Capabilities["tool_calling"] != true {
-		t.Fatalf("capabilities = %+v", model.Capabilities)
+}
+
+func TestCodexModelDiscoveryFailsClosedWhenCapabilitiesAreAbsent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"slug":"unknown-future-model","contextWindow":100000}]}`)
+	}))
+	defer server.Close()
+	models, err := (&CodexAdapter{HTTP: server.Client()}).DiscoverModels(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL})
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
-	if got := model.Capabilities["effort_tiers"].([]string); len(got) != 6 || got[5] != "ultra" {
-		t.Fatalf("effort tiers = %#v", got)
+	if strings.Join(models[0].InputModalities, ",") != "text" || len(models[0].SupportedReasoningLevels) != 0 || models[0].SupportsOriginalImage {
+		t.Fatalf("unexpected inferred capabilities: %+v", models[0])
 	}
 }
 
@@ -179,6 +183,29 @@ func TestToCodexRequestTranslatesToolHistoryAndChoice(t *testing.T) {
 	}
 	if body.Input[3]["call_id"] != "call-2" || body.Input[4]["call_id"] != "call-2" || body.Input[4]["output"] != "" {
 		t.Fatalf("repaired function history = %#v", body.Input[3:])
+	}
+}
+
+func TestToCodexRequestPreservesImageInputs(t *testing.T) {
+	request := &ChatRequest{Messages: []Message{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"inspect"},{"type":"image_url","image_url":{"url":"data:image/png;base64,c3ludGhldGlj"}}]`)}}}
+	payload, err := json.Marshal(toCodexRequest(request, "gpt-5.6-luna"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Input []struct {
+			Content []struct {
+				Type     string         `json:"type"`
+				Text     string         `json:"text"`
+				ImageURL map[string]any `json:"image_url"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Input) != 1 || len(decoded.Input[0].Content) != 2 || decoded.Input[0].Content[0].Text != "inspect" || decoded.Input[0].Content[1].Type != "input_image" || decoded.Input[0].Content[1].ImageURL["url"] != "data:image/png;base64,c3ludGhldGlj" {
+		t.Fatalf("Codex image payload = %s", payload)
 	}
 }
 

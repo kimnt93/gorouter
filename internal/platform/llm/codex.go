@@ -28,8 +28,9 @@ type CodexAdapter struct {
 }
 
 type codexContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL any    `json:"image_url,omitempty"`
 }
 
 type codexInput struct {
@@ -115,6 +116,50 @@ func messageText(raw json.RawMessage) string {
 	return string(raw)
 }
 
+func codexMessageContent(raw json.RawMessage, role string) []codexContent {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		contentType := "input_text"
+		if role == "assistant" {
+			contentType = "output_text"
+		}
+		if text == "" {
+			return nil
+		}
+		return []codexContent{{Type: contentType, Text: text}}
+	}
+	var parts []struct {
+		Type     string          `json:"type"`
+		Text     string          `json:"text"`
+		ImageURL json.RawMessage `json:"image_url"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return nil
+	}
+	out := make([]codexContent, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text", "input_text", "output_text":
+			contentType := "input_text"
+			if role == "assistant" {
+				contentType = "output_text"
+			}
+			if part.Text != "" {
+				out = append(out, codexContent{Type: contentType, Text: part.Text})
+			}
+		case "image_url", "input_image":
+			if role == "assistant" || len(part.ImageURL) == 0 || string(part.ImageURL) == "null" {
+				continue
+			}
+			var imageURL any
+			if json.Unmarshal(part.ImageURL, &imageURL) == nil {
+				out = append(out, codexContent{Type: "input_image", ImageURL: imageURL})
+			}
+		}
+	}
+	return out
+}
+
 func toCodexRequest(request *ChatRequest, model string) codexRequest {
 	out := codexRequest{Model: model, Stream: true, Store: false, Reasoning: request.Reasoning}
 	out.ToolChoice = codexToolChoice(request.ToolChoice)
@@ -145,12 +190,9 @@ func toCodexRequest(request *ChatRequest, model string) codexRequest {
 		if role != "assistant" {
 			role = "user"
 		}
-		contentType := "input_text"
-		if role == "assistant" {
-			contentType = "output_text"
-		}
-		if text != "" {
-			out.Input = append(out.Input, codexInput{Type: "message", Role: role, Content: []codexContent{{Type: contentType, Text: text}}})
+		content := codexMessageContent(message.Content, role)
+		if len(content) > 0 {
+			out.Input = append(out.Input, codexInput{Type: "message", Role: role, Content: content})
 		}
 		if role == "assistant" {
 			for _, call := range message.ToolCalls {
@@ -674,40 +716,50 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 	seen := map[string]credential.ProviderModel{}
 	for _, item := range items {
 		var record struct {
-			Object             string         `json:"object"`
-			Created            int64          `json:"created"`
-			Slug               string         `json:"slug"`
-			ID                 string         `json:"id"`
-			Model              string         `json:"model"`
-			Name               string         `json:"name"`
-			DisplayName        string         `json:"display_name"`
-			DisplayNameCamel   string         `json:"displayName"`
-			OwnedBy            string         `json:"owned_by"`
-			OwnedByCamel       string         `json:"ownedBy"`
-			Permission         []any          `json:"permission"`
-			Root               string         `json:"root"`
-			Parent             *string        `json:"parent"`
-			APIFormat          string         `json:"api_format"`
-			APIFormatCamel     string         `json:"apiFormat"`
-			Visibility         string         `json:"visibility"`
-			Supported          *bool          `json:"supported_in_api"`
-			SupportedInAPI     *bool          `json:"supportedInApi"`
-			Context            int64          `json:"context_window"`
-			ContextCamel       int64          `json:"contextWindow"`
-			ContextLength      int64          `json:"context_length"`
-			MaxContextWindow   int64          `json:"max_context_window"`
-			MaxContextCamel    int64          `json:"maxContextWindow"`
-			MaxInputTokens     int64          `json:"max_input_tokens"`
-			MaxInputCamel      int64          `json:"maxInputTokens"`
-			MaxOutputTokens    int64          `json:"max_output_tokens"`
-			MaxOutputCamel     int64          `json:"maxOutputTokens"`
-			SupportedEndpoints []string       `json:"supported_endpoints"`
-			EndpointsCamel     []string       `json:"supportedEndpoints"`
-			Capabilities       map[string]any `json:"capabilities"`
-			InputModalities    []string       `json:"input_modalities"`
-			InputCamel         []string       `json:"inputModalities"`
-			OutputModalities   []string       `json:"output_modalities"`
-			OutputCamel        []string       `json:"outputModalities"`
+			Object                   string                         `json:"object"`
+			Created                  int64                          `json:"created"`
+			Slug                     string                         `json:"slug"`
+			ID                       string                         `json:"id"`
+			Model                    string                         `json:"model"`
+			Name                     string                         `json:"name"`
+			DisplayName              string                         `json:"display_name"`
+			DisplayNameCamel         string                         `json:"displayName"`
+			OwnedBy                  string                         `json:"owned_by"`
+			OwnedByCamel             string                         `json:"ownedBy"`
+			Permission               []any                          `json:"permission"`
+			Root                     string                         `json:"root"`
+			Parent                   *string                        `json:"parent"`
+			APIFormat                string                         `json:"api_format"`
+			APIFormatCamel           string                         `json:"apiFormat"`
+			Visibility               string                         `json:"visibility"`
+			Supported                *bool                          `json:"supported_in_api"`
+			SupportedInAPI           *bool                          `json:"supportedInApi"`
+			Context                  int64                          `json:"context_window"`
+			ContextCamel             int64                          `json:"contextWindow"`
+			ContextLength            int64                          `json:"context_length"`
+			MaxContextWindow         int64                          `json:"max_context_window"`
+			MaxContextCamel          int64                          `json:"maxContextWindow"`
+			MaxInputTokens           int64                          `json:"max_input_tokens"`
+			MaxInputCamel            int64                          `json:"maxInputTokens"`
+			MaxOutputTokens          int64                          `json:"max_output_tokens"`
+			MaxOutputCamel           int64                          `json:"maxOutputTokens"`
+			SupportedEndpoints       []string                       `json:"supported_endpoints"`
+			EndpointsCamel           []string                       `json:"supportedEndpoints"`
+			Capabilities             map[string]any                 `json:"capabilities"`
+			InputModalities          []string                       `json:"input_modalities"`
+			InputCamel               []string                       `json:"inputModalities"`
+			OutputModalities         []string                       `json:"output_modalities"`
+			OutputCamel              []string                       `json:"outputModalities"`
+			Description              string                         `json:"description"`
+			DefaultReasoning         string                         `json:"default_reasoning_level"`
+			DefaultReasoningCamel    string                         `json:"defaultReasoningLevel"`
+			ReasoningLevels          []entities.ModelReasoningLevel `json:"supported_reasoning_levels"`
+			ReasoningLevelsCamel     []entities.ModelReasoningLevel `json:"supportedReasoningLevels"`
+			SupportsOriginalImage    bool                           `json:"supports_image_detail_original"`
+			SupportsReasoningSummary bool                           `json:"supports_reasoning_summary_parameter"`
+			SupportsParallelTools    bool                           `json:"supports_parallel_tool_calls"`
+			SupportsVerbosity        bool                           `json:"support_verbosity"`
+			DefaultVerbosity         string                         `json:"default_verbosity"`
 		}
 		if json.Unmarshal(item, &record) != nil || strings.EqualFold(record.Visibility, "hide") || (record.Supported != nil && !*record.Supported) || (record.SupportedInAPI != nil && !*record.SupportedInAPI) {
 			continue
@@ -723,11 +775,6 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 			id = record.Name
 		}
 		if id == "" {
-			continue
-		}
-		upstreamID := id
-		id = canonicalCodexModelID(id)
-		if _, exists := seen[id]; exists && upstreamID != id {
 			continue
 		}
 		// Preserve the upstream context_length semantics in the public model
@@ -793,6 +840,18 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 		if len(outputModalities) == 0 {
 			outputModalities = record.OutputCamel
 		}
+		defaultReasoning := record.DefaultReasoning
+		if defaultReasoning == "" {
+			defaultReasoning = record.DefaultReasoningCamel
+		}
+		reasoningLevels := record.ReasoningLevels
+		if len(reasoningLevels) == 0 {
+			reasoningLevels = record.ReasoningLevelsCamel
+		}
+		maxContext := record.MaxContextWindow
+		if maxContext == 0 {
+			maxContext = record.MaxContextCamel
+		}
 		model := credential.ProviderModel{
 			ID:                 id,
 			Object:             object,
@@ -810,6 +869,10 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 			OutputModalities:   outputModalities,
 			MaxInputTokens:     maxInput,
 			Name:               name,
+			Description:        record.Description, MaxContextWindow: maxContext,
+			DefaultReasoningLevel: defaultReasoning, SupportedReasoningLevels: reasoningLevels,
+			SupportsOriginalImage: record.SupportsOriginalImage, SupportsReasoningSummary: record.SupportsReasoningSummary,
+			SupportsParallelTools: record.SupportsParallelTools, SupportsVerbosity: record.SupportsVerbosity, DefaultVerbosity: record.DefaultVerbosity,
 		}
 		enrichCodexModel(&model)
 		seen[id] = model
@@ -820,17 +883,6 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
-}
-
-func canonicalCodexModelID(id string) string {
-	for _, base := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
-		for _, effort := range []string{"low", "medium", "high", "xhigh", "max", "ultra"} {
-			if id == base+"-"+effort {
-				return base
-			}
-		}
-	}
-	return id
 }
 
 func enrichCodexModel(model *credential.ProviderModel) {
@@ -847,7 +899,7 @@ func enrichCodexModel(model *credential.ProviderModel) {
 		model.SupportedEndpoints = []string{"responses"}
 	}
 	if len(model.InputModalities) == 0 {
-		model.InputModalities = []string{"text", "image"}
+		model.InputModalities = []string{"text"}
 	}
 	if len(model.OutputModalities) == 0 {
 		model.OutputModalities = []string{"text"}
@@ -855,40 +907,6 @@ func enrichCodexModel(model *credential.ProviderModel) {
 	if model.MaxInputTokens == 0 {
 		model.MaxInputTokens = model.ContextLength
 	}
-	if strings.HasPrefix(model.ID, "gpt-5.6-") && model.MaxInputTokens == 872000 && model.ContextLength >= model.MaxInputTokens {
-		// Codex reports both the 272K first pricing tier and the larger usable
-		// input budget. Keep these as separate public fields.
-		model.ContextLength = 272000
-	}
-	if strings.HasPrefix(model.ID, "gpt-5.6-") && model.Created == 0 {
-		model.Created = 1787701071
-	}
-	if strings.HasPrefix(model.ID, "gpt-5.6-") && model.MaxOutputTokens == 0 {
-		model.MaxOutputTokens = 128000
-	}
-	if model.Capabilities == nil {
-		efforts := []string{"low", "medium", "high", "xhigh", "max"}
-		if model.ID == "gpt-5.6-sol" || model.ID == "gpt-5.6-terra" {
-			efforts = append(efforts, "ultra")
-		}
-		model.Capabilities = map[string]any{
-			"vision":           true,
-			"tool_calling":     true,
-			"reasoning":        true,
-			"thinking":         true,
-			"supportsThinking": true,
-			"effort_tiers":     efforts,
-		}
-	}
-	words := strings.FieldsFunc(model.ID, func(r rune) bool { return r == '-' || r == '_' })
-	for index := range words {
-		if strings.EqualFold(words[index], "gpt") {
-			words[index] = "GPT"
-		} else if len(words[index]) > 0 {
-			words[index] = strings.ToUpper(words[index][:1]) + words[index][1:]
-		}
-	}
-	model.Name = "cx/" + strings.Join(words, " ")
 }
 
 var _ entities.Upstream = (*CodexAdapter)(nil)

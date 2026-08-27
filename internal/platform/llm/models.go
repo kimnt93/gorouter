@@ -22,25 +22,47 @@ type upstreamModelList struct {
 }
 
 type upstreamModel struct {
-	ID                 string         `json:"id"`
-	Object             string         `json:"object"`
-	Created            int64          `json:"created"`
-	Model              string         `json:"model"`
-	Name               string         `json:"name"`
-	DisplayName        string         `json:"display_name"`
-	OwnedBy            string         `json:"owned_by"`
-	Provider           string         `json:"provider"`
-	Permission         []any          `json:"permission"`
-	Root               string         `json:"root"`
-	Parent             *string        `json:"parent"`
-	APIFormat          string         `json:"api_format"`
-	ContextLength      int64          `json:"context_length"`
-	MaxOutputTokens    int64          `json:"max_output_tokens"`
-	SupportedEndpoints []string       `json:"supported_endpoints"`
-	Capabilities       map[string]any `json:"capabilities"`
-	InputModalities    []string       `json:"input_modalities"`
-	OutputModalities   []string       `json:"output_modalities"`
-	MaxInputTokens     int64          `json:"max_input_tokens"`
+	ID                       string                         `json:"id"`
+	Object                   string                         `json:"object"`
+	Created                  int64                          `json:"created"`
+	Model                    string                         `json:"model"`
+	Name                     string                         `json:"name"`
+	DisplayName              string                         `json:"display_name"`
+	OwnedBy                  string                         `json:"owned_by"`
+	Provider                 string                         `json:"provider"`
+	Permission               []any                          `json:"permission"`
+	Root                     string                         `json:"root"`
+	Parent                   *string                        `json:"parent"`
+	APIFormat                string                         `json:"api_format"`
+	ContextLength            int64                          `json:"context_length"`
+	MaxOutputTokens          int64                          `json:"max_output_tokens"`
+	SupportedEndpoints       []string                       `json:"supported_endpoints"`
+	Capabilities             map[string]any                 `json:"capabilities"`
+	InputModalities          []string                       `json:"input_modalities"`
+	OutputModalities         []string                       `json:"output_modalities"`
+	MaxInputTokens           int64                          `json:"max_input_tokens"`
+	MaxInputTokensCamel      int64                          `json:"maxInputTokens"`
+	MaxContextWindow         int64                          `json:"max_context_window"`
+	MaxContextWindowCamel    int64                          `json:"maxContextWindow"`
+	Description              string                         `json:"description"`
+	DefaultReasoningLevel    string                         `json:"default_reasoning_level"`
+	DefaultReasoningCamel    string                         `json:"defaultReasoningLevel"`
+	SupportedReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels"`
+	ReasoningLevelsCamel     []entities.ModelReasoningLevel `json:"supportedReasoningLevels"`
+	SupportsOriginalImage    bool                           `json:"supports_image_detail_original"`
+	SupportsReasoningSummary bool                           `json:"supports_reasoning_summary_parameter"`
+	SupportsParallelTools    bool                           `json:"supports_parallel_tool_calls"`
+	SupportsVerbosity        bool                           `json:"support_verbosity"`
+	DefaultVerbosity         string                         `json:"default_verbosity"`
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
@@ -89,6 +111,22 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 		if object == "" {
 			object = "model"
 		}
+		maxInput := model.MaxInputTokens
+		if maxInput == 0 {
+			maxInput = model.MaxInputTokensCamel
+		}
+		maxContext := model.MaxContextWindow
+		if maxContext == 0 {
+			maxContext = model.MaxContextWindowCamel
+		}
+		defaultReasoning := model.DefaultReasoningLevel
+		if defaultReasoning == "" {
+			defaultReasoning = model.DefaultReasoningCamel
+		}
+		reasoningLevels := model.SupportedReasoningLevels
+		if len(reasoningLevels) == 0 {
+			reasoningLevels = model.ReasoningLevelsCamel
+		}
 		seen[id] = credential.ProviderModel{
 			ID:                 id,
 			Object:             object,
@@ -104,8 +142,12 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 			Capabilities:       model.Capabilities,
 			InputModalities:    model.InputModalities,
 			OutputModalities:   model.OutputModalities,
-			MaxInputTokens:     model.MaxInputTokens,
-			Name:               model.Name,
+			MaxInputTokens:     maxInput,
+			MaxContextWindow:   maxContext,
+			Name:               firstNonEmpty(model.DisplayName, model.Name),
+			Description:        model.Description, DefaultReasoningLevel: defaultReasoning, SupportedReasoningLevels: reasoningLevels,
+			SupportsOriginalImage: model.SupportsOriginalImage, SupportsReasoningSummary: model.SupportsReasoningSummary,
+			SupportsParallelTools: model.SupportsParallelTools, SupportsVerbosity: model.SupportsVerbosity, DefaultVerbosity: model.DefaultVerbosity,
 		}
 	}
 	models := make([]credential.ProviderModel, 0, len(seen))

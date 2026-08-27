@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
@@ -26,9 +27,16 @@ func (r *ModelRouteRepo) Upsert(ctx context.Context, m entities.ModelDef) error 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	createdAt := time.Now().UTC()
-	if _, err := tx.Exec(ctx, `INSERT INTO models (name,strategy,upstream_model,enabled,created_at) VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (name) DO UPDATE SET strategy=EXCLUDED.strategy, upstream_model=EXCLUDED.upstream_model, enabled=EXCLUDED.enabled`,
-		m.Name, strategy, up, m.Enabled, createdAt); err != nil {
+	var metadata []byte
+	if m.Metadata != nil {
+		metadata, err = json.Marshal(m.Metadata)
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO models (name,strategy,upstream_model,enabled,created_at,metadata) VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (name) DO UPDATE SET strategy=EXCLUDED.strategy, upstream_model=EXCLUDED.upstream_model, enabled=EXCLUDED.enabled, metadata=EXCLUDED.metadata`,
+		m.Name, strategy, up, m.Enabled, createdAt, metadata); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM model_routes WHERE model=$1`, m.Name); err != nil {
@@ -60,7 +68,7 @@ func (r *ModelRouteRepo) Delete(ctx context.Context, name string) error {
 }
 
 func (r *ModelRouteRepo) List(ctx context.Context) ([]entities.ModelDef, error) {
-	rows, err := r.db.Pool.Query(ctx, `SELECT name,strategy,upstream_model,enabled FROM models ORDER BY name`)
+	rows, err := r.db.Pool.Query(ctx, `SELECT name,strategy,upstream_model,enabled,metadata FROM models ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -68,8 +76,15 @@ func (r *ModelRouteRepo) List(ctx context.Context) ([]entities.ModelDef, error) 
 	var out []entities.ModelDef
 	for rows.Next() {
 		var m entities.ModelDef
-		if err := rows.Scan(&m.Name, &m.Strategy, &m.UpstreamModel, &m.Enabled); err != nil {
+		var metadata []byte
+		if err := rows.Scan(&m.Name, &m.Strategy, &m.UpstreamModel, &m.Enabled, &metadata); err != nil {
 			return nil, err
+		}
+		if len(metadata) != 0 {
+			m.Metadata = &entities.ModelMetadata{}
+			if err := json.Unmarshal(metadata, m.Metadata); err != nil {
+				return nil, err
+			}
 		}
 		m.Routes = []entities.ModelRoute{}
 		out = append(out, m)

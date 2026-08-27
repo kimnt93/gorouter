@@ -358,63 +358,10 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 				price = &resolved
 			}
 			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
-			out.Models = append(out.Models, codexModelInfo(model.Name, model.UpstreamModel))
+			out.Models = append(out.Models, codexModelInfo(model))
 		}
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
-}
-
-type codexCatalogProfile struct {
-	displayName      string
-	description      string
-	defaultReasoning string
-	efforts          []string
-	priority         int
-	contextWindow    int
-	maxContextWindow int
-	defaultVerbosity string
-}
-
-var codexCatalogProfiles = map[string]codexCatalogProfile{
-	"gpt-5.4": {
-		displayName: "GPT-5.4", description: "Strong model for everyday coding.",
-		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh"},
-		priority: 16, contextWindow: 272000, maxContextWindow: 1000000,
-	},
-	"gpt-5.4-mini": {
-		displayName: "GPT-5.4-Mini", description: "Small, fast, and cost-efficient model for simpler coding tasks.",
-		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh"},
-		priority: 23, contextWindow: 272000, maxContextWindow: 272000, defaultVerbosity: "medium",
-	},
-	"gpt-5.6-sol": {
-		displayName: "GPT-5.6-Sol", description: "Latest frontier agentic coding model.",
-		defaultReasoning: "low", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
-		priority: 1, contextWindow: 272000, maxContextWindow: 872000,
-	},
-	"gpt-5.6-terra": {
-		displayName: "GPT-5.6-Terra", description: "Balanced agentic coding model for everyday work.",
-		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
-		priority: 2, contextWindow: 272000, maxContextWindow: 872000,
-	},
-	"gpt-5.6-luna": {
-		displayName: "GPT-5.6-Luna", description: "Fast and affordable agentic coding model.",
-		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max"},
-		priority: 3, contextWindow: 272000, maxContextWindow: 872000,
-	},
-	"gpt-5.5": {
-		displayName: "GPT-5.5", description: "Frontier model for complex coding, research, and real-world work.",
-		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh"},
-		priority: 7, contextWindow: 272000, maxContextWindow: 272000,
-	},
-}
-
-var codexReasoningDescriptions = map[string]string{
-	"low":    "Fast responses with lighter reasoning",
-	"medium": "Balances speed and reasoning depth for everyday tasks",
-	"high":   "Greater reasoning depth for complex problems",
-	"xhigh":  "Extra high reasoning depth for complex problems",
-	"max":    "Maximum reasoning depth for the hardest problems",
-	"ultra":  "Maximum reasoning with automatic task delegation",
 }
 
 // agentHarnessInstructions is exposed through the Codex-compatible model
@@ -423,32 +370,63 @@ var codexReasoningDescriptions = map[string]string{
 // by general-purpose agent harnesses.
 const agentHarnessInstructions = "Follow the user's instructions and use the available tools to complete the task."
 
-func codexModelInfo(name, upstreamModel string) llm.CodexModelInfo {
-	profile, known := codexCatalogProfiles[upstreamModel]
-	if !known {
-		profile = codexCatalogProfile{
-			displayName: name, description: "Model routed through GoRouter",
-			defaultReasoning: "medium", efforts: []string{"medium"},
-			contextWindow: 128000, maxContextWindow: 128000,
+func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
+	displayName := model.Name
+	description := "Model routed through GoRouter"
+	contextWindow := int64(128000)
+	maxContextWindow := int64(128000)
+	defaultReasoning := "medium"
+	reasoning := []llm.ReasoningLevel{{Effort: "medium"}}
+	inputModalities := []string{"text"}
+	supportsOriginalImage := false
+	supportsReasoningSummary := false
+	supportsParallelTools := false
+	supportVerbosity := false
+	defaultVerbosity := ""
+	if metadata := model.Metadata; metadata != nil {
+		if metadata.DisplayName != "" {
+			displayName = metadata.DisplayName
 		}
-	}
-	if profile.defaultVerbosity == "" {
-		profile.defaultVerbosity = "low"
-	}
-	reasoning := make([]llm.ReasoningLevel, 0, len(profile.efforts))
-	for _, effort := range profile.efforts {
-		reasoning = append(reasoning, llm.ReasoningLevel{Effort: effort, Description: codexReasoningDescriptions[effort]})
+		if metadata.Description != "" {
+			description = metadata.Description
+		}
+		if metadata.ContextWindow > 0 {
+			contextWindow = metadata.ContextWindow
+		}
+		if metadata.MaxContextWindow > 0 {
+			maxContextWindow = metadata.MaxContextWindow
+		} else {
+			maxContextWindow = contextWindow
+		}
+		if metadata.DefaultReasoningLevel != "" {
+			defaultReasoning = metadata.DefaultReasoningLevel
+		}
+		if len(metadata.SupportedReasoningLevels) > 0 {
+			reasoning = make([]llm.ReasoningLevel, 0, len(metadata.SupportedReasoningLevels))
+			for _, level := range metadata.SupportedReasoningLevels {
+				reasoning = append(reasoning, llm.ReasoningLevel{Effort: level.Effort, Description: level.Description})
+			}
+		}
+		if len(metadata.InputModalities) > 0 {
+			inputModalities = append([]string(nil), metadata.InputModalities...)
+		}
+		supportsOriginalImage = metadata.SupportsOriginalImage
+		supportsReasoningSummary = metadata.SupportsReasoningSummary
+		supportsParallelTools = metadata.SupportsParallelTools
+		supportVerbosity = metadata.SupportsVerbosity
+		defaultVerbosity = metadata.DefaultVerbosity
 	}
 	return llm.CodexModelInfo{
-		Slug: name, DisplayName: profile.displayName, Description: profile.description,
+		Slug: model.Name, DisplayName: displayName, Description: description,
 		ModelMessages:         llm.CodexModelMessages{InstructionsTemplate: agentHarnessInstructions},
-		DefaultReasoningLevel: profile.defaultReasoning, SupportedReasoningLevels: reasoning,
+		DefaultReasoningLevel: defaultReasoning, SupportedReasoningLevels: reasoning,
 		ShellType: "unified_exec", Visibility: "list", SupportedInAPI: true,
-		Priority: profile.priority, ContextWindow: profile.contextWindow, MaxContextWindow: profile.maxContextWindow,
+		ContextWindow: int(contextWindow), MaxContextWindow: int(maxContextWindow),
 		DefaultReasoningSummary: "none", ApplyPatchToolType: "freeform", WebSearchToolType: "text",
-		TruncationPolicy: llm.TruncationPolicy{Mode: "tokens", Limit: 10000}, EffectiveContextPercent: 95,
-		ExperimentalTools: []string{}, InputModalities: []string{"text"}, NodeReplDisabled: true,
-		SupportVerbosity: true, DefaultVerbosity: profile.defaultVerbosity,
+		TruncationPolicy: llm.TruncationPolicy{Mode: "tokens", Limit: 10000}, SupportsOriginalImage: supportsOriginalImage, EffectiveContextPercent: 95,
+		ExperimentalTools: []string{}, InputModalities: inputModalities, NodeReplDisabled: true,
+		SupportsReasoningSummary: supportsReasoningSummary, SupportsParallelTools: supportsParallelTools,
+		SupportVerbosity: supportVerbosity, DefaultVerbosity: defaultVerbosity,
 	}
 }
 

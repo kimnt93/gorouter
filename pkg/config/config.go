@@ -33,6 +33,7 @@ type Config struct {
 	Cache                        CacheConfig
 	Quota                        QuotaConfig
 	Pricing                      PricingConfig
+	ModelCatalog                 ModelCatalogConfig
 	OAuthClientID                string
 	OAuthTokenURL                string
 	CodexOAuthClientID           string
@@ -55,6 +56,11 @@ type CacheConfig struct {
 
 type QuotaConfig struct {
 	RedisPolicy string
+}
+
+type ModelCatalogConfig struct {
+	Enabled      bool
+	SyncInterval time.Duration
 }
 
 type PricingConfig struct {
@@ -94,6 +100,7 @@ func Load() (*Config, error) {
 		WeekStart:             time.Sunday,
 		UsageWriteConcurrency: 4,
 		UsageWriteQueueSize:   100000,
+		ModelCatalog:          ModelCatalogConfig{Enabled: true, SyncInterval: 6 * time.Hour},
 		Pricing: PricingConfig{
 			Enabled:      true,
 			CatalogURL:   "https://openrouter.ai/api/frontend/v1/catalog/models",
@@ -235,6 +242,16 @@ func Load() (*Config, error) {
 		cfg.Cache.Scope = "global"
 	default:
 		return nil, errors.New("CACHE_SCOPE must be key, tenant, or global")
+	}
+	if v := os.Getenv("MODEL_CATALOG_SYNC_ENABLED"); v != "" {
+		cfg.ModelCatalog.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("MODEL_CATALOG_SYNC_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.New("MODEL_CATALOG_SYNC_INTERVAL must be a positive duration")
+		}
+		cfg.ModelCatalog.SyncInterval = d
 	}
 	if v := os.Getenv("OPENROUTER_CATALOG_ENABLED"); v != "" {
 		cfg.Pricing.Enabled = strings.EqualFold(v, "true") || v == "1"

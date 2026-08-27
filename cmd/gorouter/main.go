@@ -40,6 +40,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 	"github.com/kimnt93/gorouter/pkg/pricing"
+	"github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
@@ -215,6 +216,25 @@ func main() {
 		"kimi-code": kimiCode, "cursor": cursor, "kiro": kiro, "amazon-q": amazonQ, "antigravity": antigravity,
 		"opencode-go":  opencodeGo,
 		"opencode-zen": opencodeZen,
+	}
+	if cfg.ModelCatalog.Enabled {
+		catalogSync := &modelroute.CatalogSync{Credentials: credSvc, Models: modelSvc, Discoverer: func(providerID string) credential.ModelDiscoverer {
+			if adapter := providerProbes[providerID]; adapter != nil {
+				discoverer, _ := adapter.(credential.ModelDiscoverer)
+				return discoverer
+			}
+			switch provider.ProtocolFor(providerID) {
+			case provider.ProtocolOpenAI:
+				return openai
+			case provider.ProtocolAnthropic:
+				return anthropic
+			case provider.ProtocolCodex:
+				return codex
+			default:
+				return nil
+			}
+		}}
+		catalogSync.Start(ctx, cfg.ModelCatalog.SyncInterval, func(err error) { log.Printf("sync provider model catalogs: %v", err) })
 	}
 	providerUpstreams := make(map[string]entities.Upstream, len(providerProbes))
 	for id, adapter := range providerProbes {

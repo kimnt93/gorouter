@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -77,7 +78,7 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 // @Param id path string true "Credential ID"
 // @Param request body ImportModelsRequest true "Models to import"
 // @Success 200 {object} ImportModelsResponse
-// @Failure 400,401,403,404,500 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,404,500,502 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/models/import [post]
 func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
@@ -96,6 +97,15 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	runtime, err := h.Credentials.Runtime(c.Context(), c.Params("id"))
 	if err != nil {
 		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	_, discoverer, _ := h.adapter(runtime.Provider)
+	discovered, err := h.Credentials.DiscoverModels(c.Context(), runtime.ID, discoverer)
+	if err != nil {
+		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
+	}
+	byUpstream := make(map[string]credential.ProviderModel, len(discovered))
+	for _, model := range discovered {
+		byUpstream[model.ID] = model
 	}
 	metadata, err := h.credential(c, runtime.ID)
 	if err != nil {
@@ -128,6 +138,10 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 			continue
 		}
 		seen[upstream] = true
+		discoveredModel, exists := byUpstream[upstream]
+		if !exists {
+			return responseapi.For(c).BadRequest(fmt.Sprintf("model %s was not reported by the provider", upstream)).Send()
+		}
 		name := providerpkg.PublicModelID(runtime.Provider, upstream)
 		if organizationName != "" {
 			name = providerpkg.OrganizationModelID(organizationName, runtime.Provider, upstream)
@@ -150,12 +164,76 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 		if !hasRoute {
 			model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: runtime.ID, Priority: nextPriority, Weight: 1, Enabled: true})
 		}
+		model.Metadata = credential.MetadataSnapshot(runtime.Provider, runtime.ID, discoveredModel, time.Now())
 		if err := h.ModelRoutes.Upsert(c.Context(), model); err != nil {
 			return responseapi.For(c).BadRequest(fmt.Sprintf("import %s: %v", upstream, err)).Send()
 		}
 		imported = append(imported, name)
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(ImportModelsResponse{OK: true, Imported: imported}).Send()
+}
+
+// RefreshModelMetadata refreshes provider-reported metadata for configured models.
+// @Summary Refresh imported model metadata
+// @Description Discovers the provider catalog and refreshes metadata for existing model routes that use this credential. It does not import newly discovered models.
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Success 200 {object} RefreshModelMetadataResponse
+// @Failure 401,403,404,500,502 {object} responseapi.ErrorResponse
+// @Router /admin/credentials/{id}/models/refresh [post]
+func (h *CredentialConnectivity) RefreshModelMetadata(c fiber.Ctx) error {
+	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
+		return responseapi.For(c).Forbidden("only the master session can refresh model metadata").Send()
+	}
+	if !h.authorize(c) {
+		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	if h.ModelRoutes == nil {
+		return responseapi.For(c).InternalError("model service is unavailable").Send()
+	}
+	runtime, err := h.Credentials.Runtime(c.Context(), c.Params("id"))
+	if err != nil {
+		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	_, discoverer, _ := h.adapter(runtime.Provider)
+	discovered, err := h.Credentials.DiscoverModels(c.Context(), runtime.ID, discoverer)
+	if err != nil {
+		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
+	}
+	byID := make(map[string]credential.ProviderModel, len(discovered))
+	for _, model := range discovered {
+		byID[model.ID] = model
+	}
+	models, err := h.ModelRoutes.List(c.Context())
+	if err != nil {
+		return responseapi.For(c).InternalError("failed to load models").Send()
+	}
+	result := RefreshModelMetadataResponse{OK: true, Refreshed: []string{}, Missing: []string{}}
+	now := time.Now()
+	for _, model := range models {
+		usesCredential := false
+		for _, route := range model.Routes {
+			if route.CredentialID == runtime.ID {
+				usesCredential = true
+				break
+			}
+		}
+		if !usesCredential {
+			continue
+		}
+		reported, ok := byID[model.UpstreamModel]
+		if !ok {
+			result.Missing = append(result.Missing, model.Name)
+			continue
+		}
+		model.Metadata = credential.MetadataSnapshot(runtime.Provider, runtime.ID, reported, now)
+		if err := h.ModelRoutes.Upsert(c.Context(), model); err != nil {
+			return responseapi.For(c).InternalError("failed to refresh model metadata").Send()
+		}
+		result.Refreshed = append(result.Refreshed, model.Name)
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(result).Send()
 }
 
 func (h *CredentialConnectivity) credential(c fiber.Ctx, id string) (*entities.Credential, error) {
@@ -309,7 +387,10 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 			InputModalities:    model.InputModalities,
 			OutputModalities:   model.OutputModalities,
 			MaxInputTokens:     model.MaxInputTokens,
-			Name:               model.Name,
+			Name:               model.Name, Description: model.Description, MaxContextWindow: model.MaxContextWindow,
+			DefaultReasoningLevel: model.DefaultReasoningLevel, SupportedReasoningLevels: model.SupportedReasoningLevels,
+			SupportsOriginalImage: model.SupportsOriginalImage, SupportsReasoningSummary: model.SupportsReasoningSummary,
+			SupportsParallelTools: model.SupportsParallelTools, SupportsVerbosity: model.SupportsVerbosity, DefaultVerbosity: model.DefaultVerbosity,
 		})
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()

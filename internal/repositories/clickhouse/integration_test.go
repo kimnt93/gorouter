@@ -65,7 +65,7 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	}
 	modelName := "model-" + suffix
 	models := NewModelRouteRepo(s)
-	err = models.Upsert(ctx, entities.ModelDef{Name: modelName, Enabled: true, Routes: []entities.ModelRoute{{CredentialID: cred.ID, Priority: 2, Weight: 1, Enabled: true}}})
+	err = models.Upsert(ctx, entities.ModelDef{Name: modelName, Enabled: true, Metadata: &entities.ModelMetadata{Provider: "test-provider", SourceCredentialID: cred.ID, InputModalities: []string{"text", "image"}}, Routes: []entities.ModelRoute{{CredentialID: cred.ID, Priority: 2, Weight: 1, Enabled: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +73,20 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	routes, err := credRepo.RoutesForModel(ctx, modelName)
 	if err != nil || len(routes) != 1 || routes[0].CredentialID != cred.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	loadedModels, err := models.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loadedModel *entities.ModelDef
+	for i := range loadedModels {
+		if loadedModels[i].Name == modelName {
+			loadedModel = &loadedModels[i]
+			break
+		}
+	}
+	if loadedModel == nil || loadedModel.Metadata == nil || loadedModel.Metadata.SourceCredentialID != cred.ID || len(loadedModel.Metadata.InputModalities) != 2 {
+		t.Fatalf("model metadata round trip=%+v", loadedModel)
 	}
 	if err = models.SetPrice(ctx, modelName, entities.Price{InputPerM: 1, OutputPerM: 2}); err != nil {
 		t.Fatal(err)

@@ -34,7 +34,7 @@ func TestOpenAIModelDiscoveryAcceptsFullChatEndpointAndOpenAILikeVariants(t *tes
 		if r.URL.Path != "/api/v1/models" {
 			t.Fatalf("unexpected request path %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.6-sol","object":"model","created":1787701071,"owned_by":"codex","context_length":272000,"max_output_tokens":128000,"supported_endpoints":["responses"],"capabilities":{"vision":true,"effort_tiers":["low","high"]},"input_modalities":["text","image"],"output_modalities":["text"],"max_input_tokens":872000,"name":"cx/GPT 5.6 Sol"},{"model":"fallback-model","provider":"test"}]}`))
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.6-sol","object":"model","created":1787701071,"owned_by":"codex","context_length":272000,"max_output_tokens":128000,"supported_endpoints":["responses"],"capabilities":{"vision":true,"effort_tiers":["low","high"]},"input_modalities":["text","image"],"output_modalities":["text"],"max_input_tokens":872000,"max_context_window":1000000,"name":"cx/GPT 5.6 Sol","description":"dynamic","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],"supports_image_detail_original":true},{"model":"fallback-model","provider":"test"}]}`))
 	}))
 	defer server.Close()
 
@@ -45,7 +45,7 @@ func TestOpenAIModelDiscoveryAcceptsFullChatEndpointAndOpenAILikeVariants(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 2 || models[0].ID != "fallback-model" || models[1].ID != "gpt-5.6-sol" || models[1].Object != "model" || models[1].Created != 1787701071 || models[1].ContextLength != 272000 || models[1].MaxOutputTokens != 128000 || models[1].MaxInputTokens != 872000 || models[1].OwnedBy != "codex" || models[1].Name != "cx/GPT 5.6 Sol" || len(models[1].SupportedEndpoints) != 1 || models[1].Capabilities["vision"] != true {
+	if len(models) != 2 || models[0].ID != "fallback-model" || models[1].ID != "gpt-5.6-sol" || models[1].Object != "model" || models[1].Created != 1787701071 || models[1].ContextLength != 272000 || models[1].MaxOutputTokens != 128000 || models[1].MaxInputTokens != 872000 || models[1].OwnedBy != "codex" || models[1].Name != "cx/GPT 5.6 Sol" || len(models[1].SupportedEndpoints) != 1 || models[1].Capabilities["vision"] != true || models[1].MaxContextWindow != 1000000 || models[1].Description != "dynamic" || models[1].DefaultReasoningLevel != "high" || len(models[1].SupportedReasoningLevels) != 2 || !models[1].SupportsOriginalImage {
 		t.Fatalf("models = %+v", models)
 	}
 }

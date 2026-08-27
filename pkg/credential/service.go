@@ -28,22 +28,31 @@ type ConnectivityProber interface {
 }
 
 type ProviderModel struct {
-	ID                 string         `json:"id"`
-	Object             string         `json:"object,omitempty"`
-	Created            int64          `json:"created,omitempty"`
-	OwnedBy            string         `json:"owned_by,omitempty"`
-	Permission         []any          `json:"permission,omitempty"`
-	Root               string         `json:"root,omitempty"`
-	Parent             *string        `json:"parent,omitempty"`
-	APIFormat          string         `json:"api_format,omitempty"`
-	ContextLength      int64          `json:"context_length,omitempty"`
-	MaxOutputTokens    int64          `json:"max_output_tokens,omitempty"`
-	SupportedEndpoints []string       `json:"supported_endpoints,omitempty"`
-	Capabilities       map[string]any `json:"capabilities,omitempty"`
-	InputModalities    []string       `json:"input_modalities,omitempty"`
-	OutputModalities   []string       `json:"output_modalities,omitempty"`
-	MaxInputTokens     int64          `json:"max_input_tokens,omitempty"`
-	Name               string         `json:"name,omitempty"`
+	ID                       string                         `json:"id"`
+	Object                   string                         `json:"object,omitempty"`
+	Created                  int64                          `json:"created,omitempty"`
+	OwnedBy                  string                         `json:"owned_by,omitempty"`
+	Permission               []any                          `json:"permission,omitempty"`
+	Root                     string                         `json:"root,omitempty"`
+	Parent                   *string                        `json:"parent,omitempty"`
+	APIFormat                string                         `json:"api_format,omitempty"`
+	ContextLength            int64                          `json:"context_length,omitempty"`
+	MaxOutputTokens          int64                          `json:"max_output_tokens,omitempty"`
+	SupportedEndpoints       []string                       `json:"supported_endpoints,omitempty"`
+	Capabilities             map[string]any                 `json:"capabilities,omitempty"`
+	InputModalities          []string                       `json:"input_modalities,omitempty"`
+	OutputModalities         []string                       `json:"output_modalities,omitempty"`
+	MaxInputTokens           int64                          `json:"max_input_tokens,omitempty"`
+	MaxContextWindow         int64                          `json:"max_context_window,omitempty"`
+	Name                     string                         `json:"name,omitempty"`
+	Description              string                         `json:"description,omitempty"`
+	DefaultReasoningLevel    string                         `json:"default_reasoning_level,omitempty"`
+	SupportedReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels,omitempty"`
+	SupportsOriginalImage    bool                           `json:"supports_image_detail_original,omitempty"`
+	SupportsReasoningSummary bool                           `json:"supports_reasoning_summary_parameter,omitempty"`
+	SupportsParallelTools    bool                           `json:"supports_parallel_tool_calls,omitempty"`
+	SupportsVerbosity        bool                           `json:"support_verbosity,omitempty"`
+	DefaultVerbosity         string                         `json:"default_verbosity,omitempty"`
 }
 
 type ModelDiscoverer interface {

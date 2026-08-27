@@ -1057,6 +1057,73 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/credentials/{id}/models/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Discovers the provider catalog and refreshes metadata for existing model routes that use this credential. It does not import newly discovered models.",
+                "tags": [
+                    "credentials"
+                ],
+                "summary": "Refresh imported model metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Credential ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.RefreshModelMetadataResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -4523,6 +4590,9 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "metadata": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelMetadata"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -4539,6 +4609,85 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "upstream_model": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.ModelMetadata": {
+            "type": "object",
+            "properties": {
+                "context_window": {
+                    "type": "integer"
+                },
+                "default_reasoning_level": {
+                    "type": "string"
+                },
+                "default_verbosity": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "input_modalities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "max_context_window": {
+                    "type": "integer"
+                },
+                "max_input_tokens": {
+                    "type": "integer"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
+                },
+                "output_modalities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "refreshed_at": {
+                    "type": "string"
+                },
+                "source_credential_id": {
+                    "type": "string"
+                },
+                "support_verbosity": {
+                    "type": "boolean"
+                },
+                "supported_reasoning_levels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel"
+                    }
+                },
+                "supports_image_detail_original": {
+                    "type": "boolean"
+                },
+                "supports_parallel_tool_calls": {
+                    "type": "boolean"
+                },
+                "supports_reasoning_summary_parameter": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "effort": {
                     "type": "string"
                 }
             }
@@ -5820,6 +5969,15 @@ const docTemplate = `{
                 "default": {
                     "type": "boolean"
                 },
+                "default_reasoning_level": {
+                    "type": "string"
+                },
+                "default_verbosity": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -5828,6 +5986,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "max_context_window": {
+                    "type": "integer"
                 },
                 "max_input_tokens": {
                     "type": "integer"
@@ -5868,11 +6029,29 @@ const docTemplate = `{
                 "root": {
                     "type": "string"
                 },
+                "support_verbosity": {
+                    "type": "boolean"
+                },
                 "supported_endpoints": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "supported_reasoning_levels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel"
+                    }
+                },
+                "supports_image_detail_original": {
+                    "type": "boolean"
+                },
+                "supports_parallel_tool_calls": {
+                    "type": "boolean"
+                },
+                "supports_reasoning_summary_parameter": {
+                    "type": "boolean"
                 }
             }
         },
@@ -5893,6 +6072,26 @@ const docTemplate = `{
                 },
                 "provider": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.RefreshModelMetadataResponse": {
+            "type": "object",
+            "properties": {
+                "missing": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "refreshed": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

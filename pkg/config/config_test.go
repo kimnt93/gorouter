@@ -32,6 +32,8 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("WEEK_START", "")
 	t.Setenv("USAGE_WRITE_CONCURRENCY", "")
 	t.Setenv("USAGE_WRITE_QUEUE_SIZE", "")
+	t.Setenv("MODEL_CATALOG_SYNC_ENABLED", "")
+	t.Setenv("MODEL_CATALOG_SYNC_INTERVAL", "")
 	t.Setenv("OPENROUTER_CATALOG_ENABLED", "")
 	t.Setenv("OPENROUTER_CATALOG_URL", "")
 	t.Setenv("OPENROUTER_SYNC_INTERVAL", "")

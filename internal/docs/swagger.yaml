@@ -479,6 +479,8 @@ definitions:
     properties:
       enabled:
         type: boolean
+      metadata:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelMetadata'
       name:
         type: string
       price:
@@ -490,6 +492,58 @@ definitions:
       strategy:
         type: string
       upstream_model:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.ModelMetadata:
+    properties:
+      context_window:
+        type: integer
+      default_reasoning_level:
+        type: string
+      default_verbosity:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      input_modalities:
+        items:
+          type: string
+        type: array
+      max_context_window:
+        type: integer
+      max_input_tokens:
+        type: integer
+      max_output_tokens:
+        type: integer
+      output_modalities:
+        items:
+          type: string
+        type: array
+      provider:
+        type: string
+      refreshed_at:
+        type: string
+      source_credential_id:
+        type: string
+      support_verbosity:
+        type: boolean
+      supported_reasoning_levels:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel'
+        type: array
+      supports_image_detail_original:
+        type: boolean
+      supports_parallel_tool_calls:
+        type: boolean
+      supports_reasoning_summary_parameter:
+        type: boolean
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel:
+    properties:
+      description:
+        type: string
+      effort:
         type: string
     type: object
   github_com_kimnt93_gorouter_pkg_entities.ModelRoute:
@@ -1325,12 +1379,20 @@ definitions:
         type: integer
       default:
         type: boolean
+      default_reasoning_level:
+        type: string
+      default_verbosity:
+        type: string
+      description:
+        type: string
       id:
         type: string
       input_modalities:
         items:
           type: string
         type: array
+      max_context_window:
+        type: integer
       max_input_tokens:
         type: integer
       max_output_tokens:
@@ -1357,10 +1419,22 @@ definitions:
         type: string
       root:
         type: string
+      support_verbosity:
+        type: boolean
       supported_endpoints:
         items:
           type: string
         type: array
+      supported_reasoning_levels:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel'
+        type: array
+      supports_image_detail_original:
+        type: boolean
+      supports_parallel_tool_calls:
+        type: boolean
+      supports_reasoning_summary_parameter:
+        type: boolean
     type: object
   internal_api_handlers.ProviderModelsResponse:
     properties:
@@ -1374,6 +1448,19 @@ definitions:
         type: string
       provider:
         type: string
+    type: object
+  internal_api_handlers.RefreshModelMetadataResponse:
+    properties:
+      missing:
+        items:
+          type: string
+        type: array
+      ok:
+        type: boolean
+      refreshed:
+        items:
+          type: string
+        type: array
     type: object
   internal_api_handlers.ResponsesContent:
     properties:
@@ -2273,9 +2360,54 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Import provider models
+      tags:
+      - credentials
+  /admin/credentials/{id}/models/refresh:
+    post:
+      description: Discovers the provider catalog and refreshes metadata for existing
+        model routes that use this credential. It does not import newly discovered
+        models.
+      parameters:
+      - description: Credential ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.RefreshModelMetadataResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Refresh imported model metadata
       tags:
       - credentials
   /admin/credentials/{id}/quota:

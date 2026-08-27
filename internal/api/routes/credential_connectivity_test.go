@@ -64,8 +64,11 @@ func (r *connectivityRouteModelRepo) Upsert(_ context.Context, model entities.Mo
 
 func (*connectivityRouteModelRepo) Delete(context.Context, string) error { return nil }
 
-func (*connectivityRouteModelRepo) List(context.Context) ([]entities.ModelDef, error) {
-	return nil, nil
+func (r *connectivityRouteModelRepo) List(context.Context) ([]entities.ModelDef, error) {
+	if len(r.upserts) == 0 {
+		return nil, nil
+	}
+	return append([]entities.ModelDef(nil), r.upserts...), nil
 }
 
 func (*connectivityRouteModelRepo) SetPrice(context.Context, string, entities.Price) error {
@@ -85,7 +88,7 @@ func (connectivityRouteProvider) Probe(context.Context, *entities.CredentialRunt
 }
 
 func (connectivityRouteProvider) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
-	return []credential.ProviderModel{{ID: "provider-model", OwnedBy: "test-provider"}}, nil
+	return []credential.ProviderModel{{ID: "provider-model", OwnedBy: "test-provider", Name: "Provider Model", ContextLength: 200000, InputModalities: []string{"text", "image"}, DefaultReasoningLevel: "high", SupportedReasoningLevels: []entities.ModelReasoningLevel{{Effort: "high"}}}}, nil
 }
 
 func (connectivityRouteProvider) Send(context.Context, *entities.CredentialRuntime, string, []byte) (*entities.UpstreamResult, error) {
@@ -173,8 +176,12 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 		t.Fatalf("non-master import mutated model routes: %+v", models.upserts)
 	}
 	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "shared", "master-secret", http.StatusOK, importBody)
-	if len(models.upserts) != 1 || models.upserts[0].Name != "custom/provider-model" || len(models.upserts[0].Routes) != 1 || models.upserts[0].Routes[0].CredentialID != "shared" {
+	if len(models.upserts) != 1 || models.upserts[0].Name != "custom/provider-model" || len(models.upserts[0].Routes) != 1 || models.upserts[0].Routes[0].CredentialID != "shared" || models.upserts[0].Metadata == nil || models.upserts[0].Metadata.DisplayName != "Provider Model" || strings.Join(models.upserts[0].Metadata.InputModalities, ",") != "text,image" {
 		t.Fatalf("master import did not create the expected model route: %+v", models.upserts)
+	}
+	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/refresh", "shared", "master-secret", http.StatusOK, nil)
+	if len(models.upserts) != 2 || models.upserts[1].Metadata == nil || models.upserts[1].Metadata.SourceCredentialID != "shared" {
+		t.Fatalf("refresh did not update existing model metadata: %+v", models.upserts)
 	}
 }
 

@@ -191,40 +191,30 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	}
 }
 
-func TestCodexModelInfoUsesExactBundledReasoningProfiles(t *testing.T) {
-	tests := []struct {
-		model         string
-		defaultEffort string
-		efforts       []string
-		context       int
-		maxContext    int
-	}{
-		{model: "gpt-5.4", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh"}, context: 272000, maxContext: 1000000},
-		{model: "gpt-5.4-mini", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh"}, context: 272000, maxContext: 272000},
-		{model: "gpt-5.6-sol", defaultEffort: "low", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, context: 272000, maxContext: 872000},
-		{model: "gpt-5.6-terra", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, context: 272000, maxContext: 872000},
-		{model: "gpt-5.6-luna", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max"}, context: 272000, maxContext: 872000},
-		{model: "gpt-5.5", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh"}, context: 272000, maxContext: 272000},
+func TestCodexModelInfoUsesPersistedProviderMetadata(t *testing.T) {
+	model := entities.ModelDef{Name: "cx/future-model", UpstreamModel: "future-model", Metadata: &entities.ModelMetadata{
+		DisplayName: "Future Model", Description: "Provider description", ContextWindow: 272000, MaxContextWindow: 872000,
+		DefaultReasoningLevel: "high", SupportedReasoningLevels: []entities.ModelReasoningLevel{{Effort: "low", Description: "Fast"}, {Effort: "high", Description: "Deep"}},
+		InputModalities: []string{"text", "image"}, SupportsOriginalImage: true, SupportsReasoningSummary: true, SupportsParallelTools: true, SupportsVerbosity: true, DefaultVerbosity: "medium",
+	}}
+	info := codexModelInfo(model)
+	if info.Slug != model.Name || info.DisplayName != "Future Model" || info.Description != "Provider description" || info.DefaultReasoningLevel != "high" || info.ContextWindow != 272000 || info.MaxContextWindow != 872000 || strings.Join(info.InputModalities, ",") != "text,image" || !info.SupportsOriginalImage || !info.SupportsReasoningSummary || !info.SupportsParallelTools || !info.SupportVerbosity || info.DefaultVerbosity != "medium" {
+		t.Fatalf("model info = %+v", info)
 	}
-	for _, test := range tests {
-		t.Run(test.model, func(t *testing.T) {
-			info := codexModelInfo("cx/"+test.model, test.model)
-			if info.Slug != "cx/"+test.model || info.DefaultReasoningLevel != test.defaultEffort || info.ContextWindow != test.context || info.MaxContextWindow != test.maxContext || !info.SupportedInAPI {
-				t.Fatalf("model info = %+v", info)
-			}
-			got := make([]string, 0, len(info.SupportedReasoningLevels))
-			for _, level := range info.SupportedReasoningLevels {
-				got = append(got, level.Effort)
-			}
-			if strings.Join(got, ",") != strings.Join(test.efforts, ",") {
-				t.Fatalf("efforts = %v, want %v", got, test.efforts)
-			}
-		})
+	if len(info.SupportedReasoningLevels) != 2 || info.SupportedReasoningLevels[1].Effort != "high" || info.SupportedReasoningLevels[1].Description != "Deep" {
+		t.Fatalf("reasoning levels = %+v", info.SupportedReasoningLevels)
+	}
+}
+
+func TestCodexModelInfoFailsClosedWithoutMetadata(t *testing.T) {
+	info := codexModelInfo(entities.ModelDef{Name: "custom/model", UpstreamModel: "unknown-model"})
+	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || len(info.SupportedReasoningLevels) != 1 || info.SupportedReasoningLevels[0].Effort != "medium" {
+		t.Fatalf("fallback info = %+v", info)
 	}
 }
 
 func TestCodexModelInfoUsesClientNeutralAgentInstructions(t *testing.T) {
-	info := codexModelInfo("apollo-guidance/gemini/gemini-2.5-flash", "gemini-2.5-flash")
+	info := codexModelInfo(entities.ModelDef{Name: "apollo-guidance/gemini/gemini-2.5-flash", UpstreamModel: "gemini-2.5-flash"})
 	instructions := info.ModelMessages.InstructionsTemplate
 	if instructions != agentHarnessInstructions {
 		t.Fatalf("instructions = %q, want %q", instructions, agentHarnessInstructions)

@@ -131,13 +131,43 @@ type ModelRoute struct {
 	Enabled      bool   `json:"enabled"`
 }
 
+type ModelReasoningLevel struct {
+	Effort      string `json:"effort"`
+	Description string `json:"description,omitempty"`
+}
+
+// ModelMetadata is a safe snapshot of capabilities reported by the original
+// provider. It is refreshed independently from route configuration so provider
+// catalog changes do not require a GoRouter release.
+type ModelMetadata struct {
+	Provider                 string                `json:"provider,omitempty"`
+	SourceCredentialID       string                `json:"source_credential_id,omitempty"`
+	DisplayName              string                `json:"display_name,omitempty"`
+	Description              string                `json:"description,omitempty"`
+	ContextWindow            int64                 `json:"context_window,omitempty"`
+	MaxContextWindow         int64                 `json:"max_context_window,omitempty"`
+	MaxInputTokens           int64                 `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens          int64                 `json:"max_output_tokens,omitempty"`
+	InputModalities          []string              `json:"input_modalities,omitempty"`
+	OutputModalities         []string              `json:"output_modalities,omitempty"`
+	DefaultReasoningLevel    string                `json:"default_reasoning_level,omitempty"`
+	SupportedReasoningLevels []ModelReasoningLevel `json:"supported_reasoning_levels,omitempty"`
+	SupportsOriginalImage    bool                  `json:"supports_image_detail_original,omitempty"`
+	SupportsReasoningSummary bool                  `json:"supports_reasoning_summary_parameter,omitempty"`
+	SupportsParallelTools    bool                  `json:"supports_parallel_tool_calls,omitempty"`
+	SupportsVerbosity        bool                  `json:"support_verbosity,omitempty"`
+	DefaultVerbosity         string                `json:"default_verbosity,omitempty"`
+	RefreshedAt              time.Time             `json:"refreshed_at,omitempty"`
+}
+
 type ModelDef struct {
-	Name          string       `json:"name"`
-	Strategy      string       `json:"strategy"`
-	UpstreamModel string       `json:"upstream_model"`
-	Enabled       bool         `json:"enabled"`
-	Routes        []ModelRoute `json:"routes"`
-	Price         *Price       `json:"price,omitempty"`
+	Name          string         `json:"name"`
+	Strategy      string         `json:"strategy"`
+	UpstreamModel string         `json:"upstream_model"`
+	Enabled       bool           `json:"enabled"`
+	Routes        []ModelRoute   `json:"routes"`
+	Price         *Price         `json:"price,omitempty"`
+	Metadata      *ModelMetadata `json:"metadata,omitempty"`
 }
 
 type UsageEvent struct {
