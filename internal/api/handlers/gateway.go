@@ -235,7 +235,17 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if fillFirst && fillFirstProvider != "" {
 		strategy = chat.StrategyPriority
 	}
-	candidates = g.Selector.Order(strategy, candidates)
+	affinityValue := req.ExplicitRouteAffinity()
+	if affinityValue == "" {
+		for _, header := range []string{"X-Codex-Session-Id", "X-Session-Id", "X-OpenCode-Session", "Session-Id"} {
+			if value := strings.TrimSpace(c.Get(header)); value != "" && len(value) <= 512 {
+				affinityValue = value
+				break
+			}
+		}
+	}
+	routeAffinity := chat.RouteAffinity{ScopeID: key.ID, TenantID: key.TenantID, Model: model.Name, Value: affinityValue}
+	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
 	if len(candidates) == 0 {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials").Send()
@@ -281,6 +291,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			continue
 		}
 		g.Health.Report(candidate.ID, true)
+		if strategy == chat.StrategyRoundRobin {
+			g.Selector.BindAffinity(c.Context(), routeAffinity, candidate.ID)
+		}
 		if g.ProviderQuotas != nil {
 			g.ProviderQuotas.MarkInUse(candidate.ID)
 		}

@@ -43,3 +43,18 @@ func TestStablePromptCacheKeyUsesOnlyReusablePrefix(t *testing.T) {
 		t.Fatalf("unstable cache keys: %q %q", key, StablePromptCacheKey(changed))
 	}
 }
+
+func TestExplicitRouteAffinityUsesOnlyCallerSessionIdentity(t *testing.T) {
+	request := &ChatRequest{PromptCacheKey: " cache-key ", SessionID: "session-id", ConversationID: "conversation-id"}
+	if got := request.ExplicitRouteAffinity(); got != "cache-key" {
+		t.Fatalf("affinity=%q", got)
+	}
+	request.PromptCacheKey = ""
+	if got := request.ExplicitRouteAffinity(); got != "session-id" {
+		t.Fatalf("session affinity=%q", got)
+	}
+	request.SessionID = strings.Repeat("x", 513)
+	if got := request.ExplicitRouteAffinity(); got != "conversation-id" {
+		t.Fatalf("bounded affinity=%q", got)
+	}
+}

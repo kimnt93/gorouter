@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gofiber/fiber/v3"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/pkg/apikey"
@@ -380,6 +382,10 @@ func testGatewayApp(statuses map[string]int) (*fiber.App, *gatewayUpstream) {
 }
 
 func testGatewayAppWithStrategy(statuses map[string]int, strategy string) (*fiber.App, *gatewayUpstream) {
+	return testGatewayAppWithSelector(statuses, strategy, &chat.Selector{})
+}
+
+func testGatewayAppWithSelector(statuses map[string]int, strategy string, selector *chat.Selector) (*fiber.App, *gatewayUpstream) {
 	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 10}, {CredentialID: "cred-b", Priority: 5}}
 	runtimes := map[string]*entities.CredentialRuntime{
@@ -391,7 +397,7 @@ func testGatewayAppWithStrategy(statuses map[string]int, strategy string) (*fibe
 		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
 		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
 		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: strategy, Enabled: true}}),
-		OpenAI: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(),
+		OpenAI: upstream, Selector: selector, Health: chat.NewHealth(),
 	}
 	app := fiber.New()
 	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
@@ -399,6 +405,41 @@ func testGatewayAppWithStrategy(statuses map[string]int, strategy string) (*fibe
 		return gateway.Chat(c)
 	})
 	return app, upstream
+}
+
+func TestGatewayRoundRobinPreservesExplicitCacheAffinityAcrossReplicas(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	firstSelector, secondSelector := &chat.Selector{}, &chat.Selector{}
+	firstSelector.SetRedis(client)
+	secondSelector.SetRedis(client)
+	firstApp, firstUpstream := testGatewayAppWithSelector(map[string]int{"cred-a": http.StatusOK, "cred-b": http.StatusOK}, chat.StrategyRoundRobin, firstSelector)
+	secondApp, secondUpstream := testGatewayAppWithSelector(map[string]int{"cred-a": http.StatusOK, "cred-b": http.StatusOK}, chat.StrategyRoundRobin, secondSelector)
+
+	request := func(app *fiber.App, body string, header string) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		if header != "" {
+			req.Header.Set("X-Codex-Session-Id", header)
+		}
+		res, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d", res.StatusCode)
+		}
+	}
+	request(firstApp, `{"model":"model-a","messages":[{"role":"user","content":"one"}],"prompt_cache_key":"session-a","temperature":0.7}`, "")
+	request(secondApp, `{"model":"model-a","messages":[{"role":"user","content":"two"}],"prompt_cache_key":"session-a","temperature":0.7}`, "")
+	request(secondApp, `{"model":"model-a","messages":[{"role":"user","content":"three"}],"temperature":0.7}`, "session-b")
+	if got := strings.Join(firstUpstream.calls, ","); got != "cred-a" {
+		t.Fatalf("first replica calls=%s", got)
+	}
+	if got := strings.Join(secondUpstream.calls, ","); got != "cred-a,cred-b" {
+		t.Fatalf("second replica calls=%s", got)
+	}
 }
 
 func TestGatewayRoundRobinDistributesRequests(t *testing.T) {

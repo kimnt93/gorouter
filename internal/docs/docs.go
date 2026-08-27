@@ -3893,6 +3893,9 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_internal_platform_llm.ChatRequest": {
             "type": "object",
             "properties": {
+                "conversation_id": {
+                    "type": "string"
+                },
                 "frequency_penalty": {
                     "type": "number"
                 },
@@ -3925,6 +3928,9 @@ const docTemplate = `{
                 },
                 "seed": {
                     "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
                 },
                 "stop": {
                     "type": "array",

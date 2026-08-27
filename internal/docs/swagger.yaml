@@ -23,6 +23,8 @@ definitions:
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.ChatRequest:
     properties:
+      conversation_id:
+        type: string
       frequency_penalty:
         type: number
       max_completion_tokens:
@@ -45,6 +47,8 @@ definitions:
         $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.Reasoning'
       seed:
         type: integer
+      session_id:
+        type: string
       stop:
         items:
           type: integer

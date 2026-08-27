@@ -60,6 +60,8 @@ type ChatRequest struct {
 	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
 	User                string          `json:"user,omitempty"`
 	PromptCacheKey      string          `json:"prompt_cache_key,omitempty"`
+	SessionID           string          `json:"session_id,omitempty"`
+	ConversationID      string          `json:"conversation_id,omitempty"`
 	Reasoning           *Reasoning      `json:"reasoning,omitempty"`
 }
 
@@ -91,6 +93,22 @@ func StablePromptCacheKey(req *ChatRequest) string {
 	}
 	sum := sha256.Sum256([]byte(prefix.String()))
 	return fmt.Sprintf("gorouter-%x", sum[:16])
+}
+
+// ExplicitRouteAffinity returns only caller-supplied conversation identity.
+// The automatically derived prompt-cache key is intentionally excluded: a
+// common system/tool prefix can be shared by many independent conversations
+// and must not collapse round-robin distribution onto one credential.
+func (req *ChatRequest) ExplicitRouteAffinity() string {
+	if req == nil {
+		return ""
+	}
+	for _, value := range []string{req.PromptCacheKey, req.SessionID, req.ConversationID} {
+		if value = strings.TrimSpace(value); value != "" && len(value) <= 512 {
+			return value
+		}
+	}
+	return ""
 }
 
 // Reasoning stays request-scoped. It is never encoded in a public model ID.
