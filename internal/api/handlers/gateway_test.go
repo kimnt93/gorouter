@@ -229,7 +229,7 @@ func TestListModelsHidesModelsWithoutActiveCredentialRoutes(t *testing.T) {
 			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if response.StatusCode != http.StatusOK || len(body.Data) != 0 || len(body.Models) != 0 {
+			if response.StatusCode != http.StatusOK || body.Data == nil || body.Models == nil || len(body.Data) != 0 || len(body.Models) != 0 {
 				t.Fatalf("status=%d body=%+v", response.StatusCode, body)
 			}
 		})

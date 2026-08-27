@@ -374,7 +374,7 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 		}
 		callableCredentials[credential.ID] = true
 	}
-	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}}
+	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}, Models: []llm.CodexModelInfo{}}
 	for _, model := range models {
 		if !model.Enabled || !key.Master && !contains(key.Models, model.Name) || !hasCallableRoute(model.Routes, callableCredentials) {
 			continue
