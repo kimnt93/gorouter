@@ -188,7 +188,7 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != "model-a" || body.Data[0].UpstreamModel != "openai/model-a" || body.Data[0].Pricing == nil || body.Data[0].Pricing.InputPerM != 0.2 {
 		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
 	}
-	if len(body.Models) != 1 || body.Models[0].Slug != "model-a" || body.Models[0].DisplayName == "" || body.Models[0].Description == "" || len(body.Models[0].SupportedReasoningLevels) != 1 || body.Models[0].SupportedReasoningLevels[0].Effort != "medium" {
+	if len(body.Models) != 1 || body.Models[0].Slug != "model-a" || body.Models[0].DisplayName == "" || body.Models[0].Description == "" || len(body.Models[0].SupportedReasoningLevels) != 1 || body.Models[0].SupportedReasoningLevels[0].Effort != "medium" || body.Models[0].SupportedReasoningLevels[0].Description == "" {
 		t.Fatalf("Codex models = %+v", body.Models)
 	}
 }
@@ -210,8 +210,22 @@ func TestCodexModelInfoUsesPersistedProviderMetadata(t *testing.T) {
 
 func TestCodexModelInfoFailsClosedWithoutMetadata(t *testing.T) {
 	info := codexModelInfo(entities.ModelDef{Name: "custom/model", UpstreamModel: "unknown-model"})
-	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || len(info.SupportedReasoningLevels) != 1 || info.SupportedReasoningLevels[0].Effort != "medium" {
+	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || len(info.SupportedReasoningLevels) != 1 || info.SupportedReasoningLevels[0].Effort != "medium" || info.SupportedReasoningLevels[0].Description == "" {
 		t.Fatalf("fallback info = %+v", info)
+	}
+}
+
+func TestCodexModelInfoFillsMissingReasoningDescriptions(t *testing.T) {
+	info := codexModelInfo(entities.ModelDef{Name: "cx/model", Metadata: &entities.ModelMetadata{
+		DefaultReasoningLevel: "high",
+		SupportedReasoningLevels: []entities.ModelReasoningLevel{
+			{Effort: ""},
+			{Effort: "high"},
+			{Effort: "custom", Description: "Provider description"},
+		},
+	}})
+	if len(info.SupportedReasoningLevels) != 2 || info.SupportedReasoningLevels[0].Description == "" || info.SupportedReasoningLevels[1].Description != "Provider description" {
+		t.Fatalf("reasoning levels = %+v", info.SupportedReasoningLevels)
 	}
 }
 

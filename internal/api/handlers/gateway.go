@@ -389,7 +389,7 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 	contextWindow := int64(128000)
 	maxContextWindow := int64(128000)
 	defaultReasoning := "medium"
-	reasoning := []llm.ReasoningLevel{{Effort: "medium"}}
+	reasoning := []llm.ReasoningLevel{{Effort: "medium", Description: codexReasoningDescription("medium")}}
 	inputModalities := []string{"text"}
 	supportsOriginalImage := false
 	supportsReasoningSummary := false
@@ -417,7 +417,18 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 		if len(metadata.SupportedReasoningLevels) > 0 {
 			reasoning = make([]llm.ReasoningLevel, 0, len(metadata.SupportedReasoningLevels))
 			for _, level := range metadata.SupportedReasoningLevels {
-				reasoning = append(reasoning, llm.ReasoningLevel{Effort: level.Effort, Description: level.Description})
+				effort := strings.TrimSpace(level.Effort)
+				if effort == "" {
+					continue
+				}
+				description := strings.TrimSpace(level.Description)
+				if description == "" {
+					description = codexReasoningDescription(effort)
+				}
+				reasoning = append(reasoning, llm.ReasoningLevel{Effort: effort, Description: description})
+			}
+			if len(reasoning) == 0 {
+				reasoning = []llm.ReasoningLevel{{Effort: defaultReasoning, Description: codexReasoningDescription(defaultReasoning)}}
 			}
 		}
 		if len(metadata.InputModalities) > 0 {
@@ -440,6 +451,29 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 		ExperimentalTools: []string{}, InputModalities: inputModalities, NodeReplDisabled: true,
 		SupportsReasoningSummary: supportsReasoningSummary, SupportsParallelTools: supportsParallelTools,
 		SupportVerbosity: supportVerbosity, DefaultVerbosity: defaultVerbosity,
+	}
+}
+
+func codexReasoningDescription(effort string) string {
+	switch effort {
+	case "none":
+		return "No additional reasoning"
+	case "minimal":
+		return "Minimal reasoning for the fastest response"
+	case "low":
+		return "Fast responses with lighter reasoning"
+	case "medium":
+		return "Balanced speed and reasoning depth"
+	case "high":
+		return "Greater reasoning depth for complex problems"
+	case "xhigh":
+		return "Extra reasoning depth for harder problems"
+	case "max":
+		return "Maximum reasoning depth"
+	case "ultra":
+		return "Maximum reasoning with automatic delegation"
+	default:
+		return effort + " reasoning effort"
 	}
 }
 

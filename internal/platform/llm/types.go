@@ -332,7 +332,7 @@ type TruncationPolicy struct {
 
 type ReasoningLevel struct {
 	Effort      string `json:"effort"`
-	Description string `json:"description,omitempty"`
+	Description string `json:"description"`
 }
 
 type AnthropicRequest struct {
