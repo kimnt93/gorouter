@@ -47,6 +47,122 @@ Useful pages:
 - `/dashboard/audit` — administrative audit events
 - `/docs` — API documentation
 
+## API endpoints
+
+Set the gateway URL, a GoRouter API key, and a model that the key is allowed to
+use:
+
+```bash
+export GOROUTER_BASE_URL=http://localhost:8090
+export GOROUTER_API_KEY='replace-with-a-gorouter-key'
+export GOROUTER_MODEL='cx/gpt-5.6-luna'
+```
+
+The public runtime endpoints are:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions, including streaming. |
+| `GET` | `/v1/models` | Models visible to and allowed for the supplied API key. |
+| `GET` | `/healthz` | Service health check. |
+
+Dashboard management APIs live under `/admin`. See the interactive API
+documentation at `/docs` for their request and response contracts.
+
+List the models available to a key:
+
+```bash
+curl "$GOROUTER_BASE_URL/v1/models" \
+  -H "Authorization: Bearer $GOROUTER_API_KEY"
+```
+
+Create a chat completion:
+
+```bash
+curl "$GOROUTER_BASE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $GOROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"$GOROUTER_MODEL\",
+    \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
+    \"stream\": false
+  }"
+```
+
+## Coding clients
+
+| Client | Status | Required protocol |
+|---|---|---|
+| OpenCode | Supported | OpenAI-compatible `/v1/chat/completions` |
+| Codex CLI | Not yet supported | OpenAI `/v1/responses` |
+| Claude Code | Not yet supported | Anthropic `/v1/messages` |
+
+### OpenCode
+
+Set `GOROUTER_API_KEY`, then add a GoRouter provider to `opencode.json`. Replace
+the example model with one returned by `/v1/models`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "gorouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GoRouter",
+      "options": {
+        "baseURL": "http://localhost:8090/v1",
+        "apiKey": "{env:GOROUTER_API_KEY}"
+      },
+      "models": {
+        "cx/gpt-5.6-luna": {
+          "name": "GPT through GoRouter"
+        }
+      }
+    }
+  },
+  "model": "gorouter/cx/gpt-5.6-luna"
+}
+```
+
+See the [OpenCode provider documentation](https://opencode.ai/docs/providers/)
+for configuration precedence and additional provider options.
+
+### Codex CLI
+
+Current Codex custom providers use the Responses API. GoRouter does not yet
+implement `POST /v1/responses`, so a Codex provider pointed at GoRouter will not
+work yet. After Responses API compatibility is added, the provider shape will
+be:
+
+```toml
+model_provider = "gorouter"
+model = "cx/gpt-5.6-luna"
+
+[model_providers.gorouter]
+name = "GoRouter"
+base_url = "http://localhost:8090/v1"
+env_key = "GOROUTER_API_KEY"
+wire_api = "responses"
+```
+
+See the [Codex configuration reference](https://developers.openai.com/codex/config-reference/)
+for the current custom-provider contract.
+
+### Claude Code
+
+Claude Code connects to LLM gateways through the Anthropic Messages protocol.
+GoRouter does not yet implement `POST /v1/messages`, so setting
+`ANTHROPIC_BASE_URL` to GoRouter will not work yet. After Messages API
+compatibility is added, the connection environment will be:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8090
+export ANTHROPIC_AUTH_TOKEN="$GOROUTER_API_KEY"
+```
+
+See the [Claude Code gateway documentation](https://code.claude.com/docs/en/llm-gateway)
+for the current gateway requirements.
+
 ## Environment configuration
 
 Required settings:

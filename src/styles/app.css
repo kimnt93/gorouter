@@ -417,6 +417,10 @@ h2 { font-size: 19px; }
 .searchable-select-list { max-height: 280px; overflow-y: auto; padding: 0 7px 7px; }
 .searchable-select-list > button { width: 100%; min-width: 0; display: grid; grid-template-columns: 30px minmax(0,1fr) 18px; align-items: center; gap: 8px; border: 0; border-radius: 6px; padding: 9px 8px; color: #d4d4d4; background: transparent; cursor: pointer; text-align: left; }
 .searchable-select-list > button:hover, .searchable-select-list > button.selected { background: #303030; }
+.searchable-select-list > button.tone-admin { box-shadow: inset 3px 0 #b98cff; }
+.searchable-select-list > button.tone-member { box-shadow: inset 3px 0 #64b5f6; }
+.searchable-select-list > button.tone-personal { box-shadow: inset 3px 0 #62c996; }
+.searchable-select-list > button.tone-master { box-shadow: inset 3px 0 #e8c36b; }
 .searchable-select-list > button > b { color: #858585; font: 600 11px ui-monospace,monospace; }
 .searchable-select-list > button > span { min-width: 0; }
 .searchable-select-list strong, .searchable-select-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -431,6 +435,26 @@ h2 { font-size: 19px; }
 .view-as-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 20px; padding: 12px 14px; border: 1px solid #514876; border-radius: 9px; color: #cfc7f3; background: #28243a; font-size: 13px; }
 .view-as-notice strong { color: #fff; }
 .view-as-notice button { border: 1px solid #62598a; border-radius: 6px; padding: 6px 9px; color: #eee; background: #35304b; cursor: pointer; white-space: nowrap; }
+.view-as-notice.user-view { border-color: #3e617a; background: #1d303d; color: #c2ddec; }
+.role-chip { display: inline-flex; margin-left: 4px; padding: 2px 7px; border: 1px solid; border-radius: 99px; font: 700 10px ui-monospace, monospace; font-style: normal; text-transform: uppercase; }
+.role-chip.admin { color: #d4b1ff; border-color: #76549d; background: rgba(185,140,255,.12); }
+.role-chip.member { color: #9cd1fa; border-color: #42749b; background: rgba(100,181,246,.1); }
+.role-select.admin .searchable-select-trigger { border-color: #76549d; color: #d4b1ff; background: rgba(185,140,255,.08); }
+.role-select.member .searchable-select-trigger { border-color: #42749b; color: #9cd1fa; background: rgba(100,181,246,.08); }
+.member-remove { min-height: 36px; border: 1px solid #79464a; border-radius: 6px; padding: 0 11px; color: #ff9da3; background: #382326; cursor: pointer; font-weight: 650; }
+.member-remove:hover { border-color: #a85a60; background: #4a292d; }
+.add-member-section { margin-top: 22px; padding-top: 2px; border-top: 1px solid #3a3a3a; }
+.member-lookup-result { min-height: 46px; display: grid; gap: 10px; padding: 11px 12px; border: 1px dashed #464646; border-radius: 8px; color: #aaa; background: #191919; font-size: 13px; }
+.member-lookup-result.idle:empty { display: none; }
+.member-lookup-result.missing { border-color: #70464a; color: #f08c93; background: rgba(112,50,56,.12); }
+.member-lookup-result.found { border-style: solid; border-color: #3e6d58; background: rgba(61,116,87,.1); }
+.found-user strong, .found-user small { display: block; }
+.found-user strong { color: #eee; font-size: 14px; }
+.found-user small { margin-top: 3px; color: #929292; font: 11px ui-monospace, monospace; }
+.joined-organizations { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.joined-organizations > span { color: #999; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.joined-organizations em { padding: 3px 7px; border: 1px solid #4a4a4a; border-radius: 99px; color: #c9c9c9; background: #252525; font-size: 11px; font-style: normal; }
+.already-member { color: #e2b76d; }
 .organization-member-total { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 0 0; padding: 12px; border: 1px solid #383838; border-radius: 8px; background: #191919; }
 .organization-member-total span { color: #aaa; font-size: 12px; }
 .organization-member-total strong { color: #eee; font: 650 20px ui-monospace,monospace; }

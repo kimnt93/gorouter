@@ -4,6 +4,7 @@ export interface SelectOption {
   value: string
   label: string
   meta?: string
+	 tone?: 'admin' | 'member' | 'personal' | 'master'
 }
 
 interface Props {
@@ -47,7 +48,7 @@ export function SearchableSelect({ value, options, onChange, placeholder = 'Sele
       <div className="searchable-select-list" role="listbox">
         {filtered.length === 0 ? <div className="select-empty">No matching options</div> : filtered.map((option) => {
           const number = options.findIndex((candidate) => candidate.value === option.value) + 1
-          return <button type="button" role="option" aria-selected={option.value === value} className={option.value === value ? 'selected' : ''} key={option.value} title={[option.label, option.meta].filter(Boolean).join(' · ')} onClick={() => choose(option.value)}>
+          return <button type="button" role="option" aria-selected={option.value === value} className={[option.value === value ? 'selected' : '', option.tone ? `tone-${option.tone}` : ''].filter(Boolean).join(' ')} key={option.value} title={[option.label, option.meta].filter(Boolean).join(' · ')} onClick={() => choose(option.value)}>
             <b>{String(number).padStart(2, '0')}</b><span><strong>{option.label}</strong>{option.meta && <small>{option.meta}</small>}</span><i aria-hidden="true">{option.value === value ? '✓' : ''}</i>
           </button>
         })}

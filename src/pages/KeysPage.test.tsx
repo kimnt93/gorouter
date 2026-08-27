@@ -23,6 +23,7 @@ test('creates a chat-only key for a selected organization member and priced mode
   fireEvent.click(await screen.findByRole('button', { name: 'Create API key' }))
 
   expect(await screen.findByText('cx/gpt-5.6-luna')).toBeInTheDocument()
+  expect(screen.queryByLabelText('Requests/minute')).not.toBeInTheDocument()
   expect(screen.getByText('$0.2000 input · $1.2000 output · $0.0200 cache read · $0.2500 cache write / 1M')).toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Luna key' } })
   fireEvent.click(screen.getByRole('checkbox'))
@@ -31,5 +32,6 @@ test('creates a chat-only key for a selected organization member and priced mode
   await waitFor(() => expect(api.createAPIKey).toHaveBeenCalledWith(expect.objectContaining({
     name: 'Luna key', owner_type: 'user', owner_user_id: 'user-1', context_organization_id: 'org-1', scopes: ['chat'], models: ['cx/gpt-5.6-luna'],
   })))
+  expect(api.createAPIKey.mock.calls[0][0]).not.toHaveProperty('rpm')
   expect(await screen.findByText('secret-once')).toBeInTheDocument()
 })

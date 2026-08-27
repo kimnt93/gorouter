@@ -38,7 +38,7 @@ export function KeysPage() {
   return <>
     <header className="page-header"><div><span className="eyebrow">Manage / Access</span><h1>API keys</h1><p>Create chat-only keys for a member of an organization, with explicit model and spending limits.</p></div><button className="button" onClick={() => setCreating(true)}>Create API key</button></header>
     <ErrorBanner message={error} />
-    {loading ? <PageLoading /> : keys.length === 0 ? <Empty title="No visible API keys" detail="Create a key for an organization member." /> : <section className="panel table-panel"><div className="table-scroll"><table className="management-table"><thead><tr><th>Name</th><th>User</th><th>Organization</th><th>Allowed models</th><th>Limits</th><th>Status</th><th /></tr></thead><tbody>{keys.map((key) => { const keyUser = userNames.get(key.owner_user_id ?? '') ?? key.owner_user_id ?? '—'; const keyOrganization = organizationNames.get(key.context_organization_id ?? '') ?? key.context_organization_id ?? '—'; const modelList = key.models.join(', ') || 'none'; return <tr key={key.id}><td><strong><TruncatedText>{key.name}</TruncatedText></strong><small title={`${key.key_prefix} · ${formatDateTime(key.created_at)}`}>{key.key_prefix} · {formatDateTime(key.created_at)}</small></td><td title={keyUser}>{keyUser}</td><td title={keyOrganization}>{keyOrganization}</td><td className="wrap-cell" title={modelList}>{modelList}</td><td>{key.quota_usd == null ? 'No spending limit' : `$${key.quota_usd}/${key.quota_period}`}<small>{key.rpm ? `${key.rpm} RPM` : 'No RPM limit'}</small></td><td><Badge tone={key.enabled ? 'good' : ''}>{key.enabled ? 'enabled' : 'disabled'}</Badge></td><td><div className="compact-actions"><button onClick={() => setEditing(key)}>Edit</button><button onClick={() => void toggle(key)}>{key.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => void rotate(key)}>Rotate</button><button className="danger-text" onClick={() => void remove(key)}>Delete</button></div></td></tr> })}</tbody></table></div></section>}
+    {loading ? <PageLoading /> : keys.length === 0 ? <Empty title="No visible API keys" detail="Create a key for an organization member." /> : <section className="panel table-panel"><div className="table-scroll"><table className="management-table"><thead><tr><th>Name</th><th>User</th><th>Organization</th><th>Allowed models</th><th>Spending limit</th><th>Status</th><th /></tr></thead><tbody>{keys.map((key) => { const keyUser = userNames.get(key.owner_user_id ?? '') ?? key.owner_user_id ?? '—'; const keyOrganization = organizationNames.get(key.context_organization_id ?? '') ?? key.context_organization_id ?? '—'; const modelList = key.models.join(', ') || 'none'; return <tr key={key.id}><td><strong><TruncatedText>{key.name}</TruncatedText></strong><small title={`${key.key_prefix} · ${formatDateTime(key.created_at)}`}>{key.key_prefix} · {formatDateTime(key.created_at)}</small></td><td title={keyUser}>{keyUser}</td><td title={keyOrganization}>{keyOrganization}</td><td className="wrap-cell" title={modelList}>{modelList}</td><td>{key.quota_usd == null ? 'Uses allocated quota' : `$${key.quota_usd}/${key.quota_period}`}</td><td><Badge tone={key.enabled ? 'good' : ''}>{key.enabled ? 'enabled' : 'disabled'}</Badge></td><td><div className="compact-actions"><button onClick={() => setEditing(key)}>Edit</button><button onClick={() => void toggle(key)}>{key.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => void rotate(key)}>Rotate</button><button className="danger-text" onClick={() => void remove(key)}>Delete</button></div></td></tr> })}</tbody></table></div></section>}
     {(creating || editing) && <KeyModal existing={editing} organizations={organizations} users={users} session={session} onClose={() => { setCreating(false); setEditing(null) }} onSaved={(plaintext) => { setCreating(false); setEditing(null); if (plaintext) setSecret(plaintext); void load() }} />}
     {secret && <SecretModal secret={secret} title="One-time API key" onClose={() => setSecret('')} />}
   </>
@@ -53,7 +53,6 @@ function KeyModal({ existing, organizations, users, session, onClose, onSaved }:
   const [selectedModels, setSelectedModels] = useState(existing?.models ?? [])
   const [quota, setQuota] = useState(existing?.quota_usd?.toString() ?? '')
   const [quotaPeriod, setQuotaPeriod] = useState(existing?.quota_period === 'week' ? 'week' : 'none')
-  const [rpm, setRPM] = useState(existing?.rpm?.toString() ?? '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [loadingOptions, setLoadingOptions] = useState(true)
@@ -74,11 +73,10 @@ function KeyModal({ existing, organizations, users, session, onClose, onSaved }:
     setBusy(true); setError('')
     try {
       const quotaValue = quotaPeriod === 'none' || !quota ? null : Number(quota)
-      const rpmValue = rpm ? Number(rpm) : null
       if (existing) {
-        await patchAPIKey(existing.id, { models: selectedModels, scopes: ['chat'], quota_usd: quotaValue, quota_period: quotaPeriod, rpm: rpmValue }); onSaved('')
+        await patchAPIKey(existing.id, { models: selectedModels, scopes: ['chat'], quota_usd: quotaValue, quota_period: quotaPeriod }); onSaved('')
       } else {
-        const response = await createAPIKey({ name, models: selectedModels, scopes: ['chat'], quota_usd: quotaValue, quota_period: quotaPeriod, rpm: rpmValue, owner_type: 'user', owner_user_id: ownerUserID, context_organization_id: organizationID })
+        const response = await createAPIKey({ name, models: selectedModels, scopes: ['chat'], quota_usd: quotaValue, quota_period: quotaPeriod, owner_type: 'user', owner_user_id: ownerUserID, context_organization_id: organizationID })
         onSaved(response.plaintext)
       }
     } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) }
@@ -90,7 +88,6 @@ function KeyModal({ existing, organizations, users, session, onClose, onSaved }:
       <Field label="Name"><input value={name} disabled={Boolean(existing)} placeholder="Development key" onChange={(event) => setName(event.target.value)} /></Field>
       <Field label="Organization"><SearchableSelect value={organizationID} disabled={Boolean(existing)} onChange={setOrganizationID} placeholder="Choose organization" searchPlaceholder="Search organizations" options={organizations.map((organization) => ({ value: organization.id, label: organization.name, meta: `${organization.member_count ?? 0} members` }))} /></Field>
       <Field label="User in organization"><SearchableSelect value={ownerUserID} disabled={Boolean(existing) || loadingOptions} onChange={setOwnerUserID} placeholder="Choose member" searchPlaceholder="Search members" options={memberships.map((membership) => ({ value: membership.user_id, label: membership.username ?? userNames.get(membership.user_id) ?? membership.user_id, meta: `${membership.role} · ${membership.user_id}` }))} /></Field>
-      <Field label="Requests/minute"><input type="number" min="1" placeholder="No limit" value={rpm} onChange={(event) => setRPM(event.target.value)} /></Field>
       <Field label="Spending period"><SearchableSelect value={quotaPeriod} onChange={setQuotaPeriod} options={[{ value: 'none', label: 'No spending limit' }, { value: 'week', label: 'Weekly' }]} /></Field>
       <Field label="Spending limit (USD)"><input type="number" min="0" step="0.0001" value={quota} disabled={quotaPeriod === 'none'} onChange={(event) => setQuota(event.target.value)} /></Field>
     </div>

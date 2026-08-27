@@ -68,6 +68,7 @@ export interface User {
   status: string
   created_at: string
   updated_at: string
+	 memberships?: Membership[]
 }
 
 export interface APIKey {
@@ -79,7 +80,6 @@ export interface APIKey {
   scopes: string[]
   quota_usd: number | null
   quota_period: string
-  rpm: number | null
   owner_type: string
   owner_user_id?: string
   owner_organization_id?: string

@@ -8,10 +8,14 @@ export class APIError extends Error {
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase()
-  const viewOrganization = new URLSearchParams(window.location.search).get('organization_id') ?? ''
-  if (method === 'GET' && viewOrganization && ['/admin/api-keys', '/admin/credentials', '/admin/models', '/admin/audit/'].some((prefix) => path.startsWith(prefix))) {
+  const pageParams = new URLSearchParams(window.location.search)
+  const viewOrganization = pageParams.get('organization_id') ?? ''
+  const viewUser = pageParams.get('view_user_id') ?? ''
+  const viewSensitive = ['/admin/api-keys', '/admin/credentials', '/admin/models', '/admin/audit/', '/admin/organizations', '/admin/usage/']
+  if (method === 'GET' && !path.includes('view_catalog=1') && (viewOrganization || viewUser) && viewSensitive.some((prefix) => path.startsWith(prefix))) {
     const url = new URL(path, window.location.origin)
     if (!url.searchParams.has('organization_id')) url.searchParams.set('organization_id', viewOrganization)
+    if (viewUser && !url.searchParams.has('view_user_id')) url.searchParams.set('view_user_id', viewUser)
     path = `${url.pathname}${url.search}`
   }
   const headers = new Headers(init.headers)
@@ -99,7 +103,12 @@ export const getUsageDetail = (id: string, organizationId = ''): Promise<UsageDe
 }
 
 const normalizeList = <T>(response: ListResponse<T>): ListResponse<T> => ({ ...response, data: response.data ?? [] })
-export const getUsers = (): Promise<ListResponse<User>> => request<ListResponse<User>>('/admin/users?limit=500').then(normalizeList)
+export const getUsers = (email = '', organizationId = ''): Promise<ListResponse<User>> => {
+  const params = new URLSearchParams({ limit: '500' })
+  if (email.trim()) params.set('q', email.trim())
+  if (organizationId) params.set('organization_id', organizationId)
+  return request<ListResponse<User>>(`/admin/users?${params}`).then(normalizeList)
+}
 export const getAPIKeys = (): Promise<ListResponse<APIKey>> => request<ListResponse<APIKey>>('/admin/api-keys?limit=500').then(normalizeList)
 export const getAPIKeyModels = (organizationId = ''): Promise<ListResponse<APIKeyModelOption>> => {
   const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : ''
@@ -107,7 +116,7 @@ export const getAPIKeyModels = (organizationId = ''): Promise<ListResponse<APIKe
 }
 export const getRouterCacheStats = (): Promise<RouterCacheStats> => request('/admin/cache/stats')
 export const getSession = (): Promise<Session> => request('/admin/session')
-export const getOrganizations = (): Promise<ListResponse<Organization>> => request<ListResponse<Organization>>('/admin/organizations?limit=500').then(normalizeList)
+export const getOrganizations = (viewCatalog = false): Promise<ListResponse<Organization>> => request<ListResponse<Organization>>(`/admin/organizations?limit=500${viewCatalog ? '&view_catalog=1' : ''}`).then(normalizeList)
 export const createOrganization = (name: string): Promise<Organization> => request('/admin/organizations', { method: 'POST', body: JSON.stringify({ name }) })
 export const updateOrganization = (id: string, name: string, status: string): Promise<Organization> => request(`/admin/organizations/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name, status }) })
 export const getMembers = (id: string): Promise<ListResponse<Membership>> => request(`/admin/organizations/${encodeURIComponent(id)}/members`)
