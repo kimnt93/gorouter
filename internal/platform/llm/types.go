@@ -149,6 +149,9 @@ type ModelInfo struct {
 type ModelList struct {
 	Object string      `json:"object"`
 	Data   []ModelInfo `json:"data"`
+	// Models is the Codex CLI-compatible alias for Data. OpenAI-compatible
+	// clients continue to consume the standard data field.
+	Models []ModelInfo `json:"models"`
 }
 
 type AnthropicRequest struct {

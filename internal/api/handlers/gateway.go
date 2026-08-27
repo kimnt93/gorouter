@@ -358,6 +358,7 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
 		}
 	}
+	out.Models = out.Data
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
 }
 
