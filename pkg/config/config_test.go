@@ -34,6 +34,7 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("USAGE_WRITE_QUEUE_SIZE", "")
 	t.Setenv("MODEL_CATALOG_SYNC_ENABLED", "")
 	t.Setenv("MODEL_CATALOG_SYNC_INTERVAL", "")
+	t.Setenv("MODEL_CATALOG_CACHE_TTL", "")
 	t.Setenv("OPENROUTER_CATALOG_ENABLED", "")
 	t.Setenv("OPENROUTER_CATALOG_URL", "")
 	t.Setenv("OPENROUTER_SYNC_INTERVAL", "")
@@ -83,6 +84,26 @@ func TestPricingCatalogDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.Pricing.Enabled || cfg.Pricing.CatalogURL != "https://catalog.example/models" || cfg.Pricing.SyncInterval != 15*time.Minute || cfg.Pricing.HTTPTimeout != 5*time.Second {
 		t.Fatalf("pricing overrides = %+v", cfg.Pricing)
+	}
+}
+
+func TestModelCatalogDefaultsAndOverrides(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ModelCatalog.Enabled || cfg.ModelCatalog.SyncInterval != 5*time.Minute || cfg.ModelCatalog.CacheTTL != 5*time.Minute {
+		t.Fatalf("model catalog defaults=%+v", cfg.ModelCatalog)
+	}
+	t.Setenv("MODEL_CATALOG_SYNC_INTERVAL", "2m")
+	t.Setenv("MODEL_CATALOG_CACHE_TTL", "3m")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ModelCatalog.SyncInterval != 2*time.Minute || cfg.ModelCatalog.CacheTTL != 3*time.Minute {
+		t.Fatalf("model catalog overrides=%+v", cfg.ModelCatalog)
 	}
 }
 

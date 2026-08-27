@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
@@ -33,14 +34,39 @@ type connectivityProbeStub struct {
 	err    error
 }
 
-type modelDiscovererProbeStub struct{ model string }
+type modelDiscovererProbeStub struct {
+	model string
+	calls *int
+}
 
 func (p modelDiscovererProbeStub) Probe(context.Context, *entities.CredentialRuntime) (int, error) {
 	return 200, nil
 }
 
 func (p modelDiscovererProbeStub) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]ProviderModel, error) {
+	if p.calls != nil {
+		*p.calls++
+	}
 	return []ProviderModel{{ID: p.model}}, nil
+}
+
+type discoveryCacheStub struct {
+	models  []ProviderModel
+	present bool
+	deleted int
+}
+
+func (c *discoveryCacheStub) Get(context.Context, string) ([]ProviderModel, bool, error) {
+	return c.models, c.present, nil
+}
+func (c *discoveryCacheStub) Set(_ context.Context, _ string, models []ProviderModel, _ time.Duration) error {
+	c.models, c.present = models, true
+	return nil
+}
+func (c *discoveryCacheStub) Delete(context.Context, string) error {
+	c.present = false
+	c.deleted++
+	return nil
 }
 
 func (p connectivityProbeStub) Probe(context.Context, *entities.CredentialRuntime) (int, error) {
@@ -112,5 +138,37 @@ func TestResolveModelDiscovererUsesSpecificAdapterThenProtocolFallback(t *testin
 	}
 	if discoverer := ResolveModelDiscoverer("unknown", nil, generic, nil, nil); discoverer != nil {
 		t.Fatalf("unknown provider resolved to %T", discoverer)
+	}
+}
+
+func TestDiscoverModelsUsesCacheAndMutationInvalidatesIt(t *testing.T) {
+	cache := &discoveryCacheStub{}
+	service := NewService(credentialRepoStub{runtime: &entities.CredentialRuntime{ID: "cred"}}, nil)
+	service.SetModelDiscoveryCache(cache, time.Minute)
+	calls := 0
+	discoverer := modelDiscovererProbeStub{model: "fresh", calls: &calls}
+
+	for range 2 {
+		models, err := service.DiscoverModels(context.Background(), "cred", discoverer)
+		if err != nil || len(models) != 1 || models[0].ID != "fresh" {
+			t.Fatalf("models=%+v err=%v", models, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("provider discovery calls=%d", calls)
+	}
+	notified := 0
+	service.SetCredentialsChanged(func() { notified++ })
+	if _, err := service.Update(context.Background(), "cred", entities.CredentialUpdate{Name: "updated", Status: entities.StatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	if cache.deleted != 1 || notified != 1 {
+		t.Fatalf("deleted=%d notified=%d", cache.deleted, notified)
+	}
+	if _, err := service.DiscoverModels(context.Background(), "cred", discoverer); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("provider discovery after invalidation calls=%d", calls)
 	}
 }

@@ -59,6 +59,14 @@ type ModelDiscoverer interface {
 	DiscoverModels(ctx context.Context, runtime *entities.CredentialRuntime) ([]ProviderModel, error)
 }
 
+// ModelDiscoveryCache stores only provider-reported, non-secret model metadata.
+// Implementations must namespace entries by credential ID.
+type ModelDiscoveryCache interface {
+	Get(ctx context.Context, credentialID string) ([]ProviderModel, bool, error)
+	Set(ctx context.Context, credentialID string, models []ProviderModel, ttl time.Duration) error
+	Delete(ctx context.Context, credentialID string) error
+}
+
 // ResolveModelDiscoverer prefers a provider-specific adapter and falls back to
 // the provider's wire protocol. Keeping this resolution in one place prevents
 // automatic catalog refresh and the management API from drifting apart when a
@@ -92,12 +100,33 @@ type Repository interface {
 }
 
 type Service struct {
-	repo Repository
-	box  entities.SecretBox
+	repo               Repository
+	box                entities.SecretBox
+	discoveryCache     ModelDiscoveryCache
+	discoveryTTL       time.Duration
+	credentialsChanged func()
 }
 
 func NewService(repo Repository, box entities.SecretBox) *Service {
 	return &Service{repo: repo, box: box}
+}
+
+func (s *Service) SetModelDiscoveryCache(cache ModelDiscoveryCache, ttl time.Duration) {
+	s.discoveryCache = cache
+	s.discoveryTTL = ttl
+}
+
+// SetCredentialsChanged registers a lightweight notifier. Callers should use
+// it to wake background reconciliation, not perform provider I/O inline.
+func (s *Service) SetCredentialsChanged(notify func()) { s.credentialsChanged = notify }
+
+func (s *Service) changed(ctx context.Context, id string) {
+	if s.discoveryCache != nil && id != "" {
+		_ = s.discoveryCache.Delete(ctx, id)
+	}
+	if s.credentialsChanged != nil {
+		s.credentialsChanged()
+	}
 }
 
 type CreateInput = entities.CredentialInput
@@ -113,7 +142,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.Credent
 	if err := validate(in); err != nil {
 		return nil, err
 	}
-	return s.repo.Create(ctx, in, s.box)
+	created, err := s.repo.Create(ctx, in, s.box)
+	if err == nil && created != nil {
+		s.changed(ctx, created.ID)
+	}
+	return created, err
 }
 
 func validate(in CreateInput) error {
@@ -171,10 +204,20 @@ func (s *Service) Update(ctx context.Context, id string, in entities.CredentialU
 			return nil, fmt.Errorf("%w: base_url must be an absolute HTTP(S) URL", ErrInvalidCredential)
 		}
 	}
-	return s.repo.Update(ctx, s.box, id, in)
+	updated, err := s.repo.Update(ctx, s.box, id, in)
+	if err == nil {
+		s.changed(ctx, id)
+	}
+	return updated, err
 }
 
-func (s *Service) Delete(ctx context.Context, id string) error { return s.repo.Delete(ctx, id) }
+func (s *Service) Delete(ctx context.Context, id string) error {
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.changed(ctx, id)
+	return nil
+}
 
 func (s *Service) Runtime(ctx context.Context, id string) (*entities.CredentialRuntime, error) {
 	return s.repo.Runtime(ctx, s.box, id)
@@ -214,9 +257,17 @@ func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer Mode
 	if err != nil {
 		return nil, err
 	}
+	if s.discoveryCache != nil && s.discoveryTTL > 0 {
+		if cached, ok, cacheErr := s.discoveryCache.Get(ctx, id); cacheErr == nil && ok {
+			return cached, nil
+		}
+	}
 	models, err := discoverer.DiscoverModels(ctx, runtime)
 	if err != nil {
 		return nil, err
+	}
+	if s.discoveryCache != nil && s.discoveryTTL > 0 {
+		_ = s.discoveryCache.Set(ctx, id, models, s.discoveryTTL)
 	}
 	return models, nil
 }

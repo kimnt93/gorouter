@@ -61,6 +61,7 @@ type QuotaConfig struct {
 type ModelCatalogConfig struct {
 	Enabled      bool
 	SyncInterval time.Duration
+	CacheTTL     time.Duration
 }
 
 type PricingConfig struct {
@@ -100,7 +101,7 @@ func Load() (*Config, error) {
 		WeekStart:             time.Sunday,
 		UsageWriteConcurrency: 4,
 		UsageWriteQueueSize:   100000,
-		ModelCatalog:          ModelCatalogConfig{Enabled: true, SyncInterval: 6 * time.Hour},
+		ModelCatalog:          ModelCatalogConfig{Enabled: true, SyncInterval: 5 * time.Minute, CacheTTL: 5 * time.Minute},
 		Pricing: PricingConfig{
 			Enabled:      true,
 			CatalogURL:   "https://openrouter.ai/api/frontend/v1/catalog/models",
@@ -252,6 +253,13 @@ func Load() (*Config, error) {
 			return nil, errors.New("MODEL_CATALOG_SYNC_INTERVAL must be a positive duration")
 		}
 		cfg.ModelCatalog.SyncInterval = d
+	}
+	if v := os.Getenv("MODEL_CATALOG_CACHE_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.New("MODEL_CATALOG_CACHE_TTL must be a positive duration")
+		}
+		cfg.ModelCatalog.CacheTTL = d
 	}
 	if v := os.Getenv("OPENROUTER_CATALOG_ENABLED"); v != "" {
 		cfg.Pricing.Enabled = strings.EqualFold(v, "true") || v == "1"

@@ -26,6 +26,7 @@ import (
 	"github.com/kimnt93/gorouter/internal/api/routes"
 	"github.com/kimnt93/gorouter/internal/platform/database"
 	"github.com/kimnt93/gorouter/internal/platform/llm"
+	"github.com/kimnt93/gorouter/internal/platform/modeldiscovery"
 	platformpricing "github.com/kimnt93/gorouter/internal/platform/pricing"
 	"github.com/kimnt93/gorouter/internal/platform/promptcache"
 	clickhouserepo "github.com/kimnt93/gorouter/internal/repositories/clickhouse"
@@ -217,10 +218,20 @@ func main() {
 		"opencode-zen": opencodeZen,
 	}
 	if cfg.ModelCatalog.Enabled {
+		if redisClient != nil {
+			credSvc.SetModelDiscoveryCache(modeldiscovery.NewRedis(redisClient), cfg.ModelCatalog.CacheTTL)
+		}
 		catalogSync := &modelroute.CatalogSync{Credentials: credSvc, Models: modelSvc, Discoverer: func(providerID string) credential.ModelDiscoverer {
 			return credential.ResolveModelDiscoverer(providerID, providerProbes, openai, anthropic, codex)
+		}, OrganizationName: func(ctx context.Context, id string) (string, error) {
+			organization, err := identityRepo.OrganizationByID(ctx, id)
+			if err != nil {
+				return "", err
+			}
+			return organization.Name, nil
 		}}
 		catalogSync.Start(ctx, cfg.ModelCatalog.SyncInterval, func(err error) { log.Printf("sync provider model catalogs: %v", err) })
+		credSvc.SetCredentialsChanged(catalogSync.Trigger)
 	}
 	providerUpstreams := make(map[string]entities.Upstream, len(providerProbes))
 	for id, adapter := range providerProbes {
