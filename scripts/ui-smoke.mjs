@@ -37,6 +37,22 @@ async function assertLayout(name, path, viewport) {
 
 try {
   await assertLayout('analysis-desktop', '/dashboard/analysis', { width: 1440, height: 900 })
+  if (await page.$('[aria-label="Resolution"]')) throw new Error('manual usage resolution filter is still visible')
+  const resolutionCases = [['1D', 'hour'], ['7D', 'hour'], ['30D', 'day'], ['90D', 'day'], ['YTD', 'week'], ['All', 'week']]
+  for (const [range, resolution] of resolutionCases) {
+    const button = await page.$(`.segmented[aria-label="Date range"] button:nth-child(${resolutionCases.findIndex(([label]) => label === range) + 1})`)
+    if (!button) throw new Error(`${range} range button is missing`)
+    await button.click()
+    await page.waitForFunction((expected) => [...document.querySelectorAll('.panel h2')].some((heading) => heading.textContent?.toLowerCase().includes(`by ${expected}`)), {}, resolution)
+  }
+  const chartFit = await page.$eval('.vertical-chart', (chart) => {
+    const chartBounds = chart.getBoundingClientRect()
+    const columns = [...chart.querySelectorAll('.vertical-column')]
+    const first = columns[0]?.getBoundingClientRect()
+    const last = columns.at(-1)?.getBoundingClientRect()
+    return { fits: chart.scrollWidth <= chart.clientWidth + 1, rightAligned: !last || Math.abs(last.right - chartBounds.right) <= 5, chronological: !first || !last || first.left <= last.left }
+  })
+  if (!chartFit.fits || !chartFit.rightAligned || !chartFit.chronological) throw new Error(`usage chart layout is invalid: ${JSON.stringify(chartFit)}`)
   await assertLayout('logs-desktop', '/dashboard/logs', { width: 1440, height: 900 })
   const order = await page.$eval('.token-order', (element) => element.textContent ?? '')
   if (!order.includes('[in / out / cache read / cache write]')) throw new Error('token order legend is missing')

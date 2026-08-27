@@ -475,7 +475,7 @@ h2 { font-size: 19px; }
 .model-breakdown td { padding: 13px; border-top: 1px solid #303030; color: #ccc; text-align: right; white-space: nowrap; }
 .model-breakdown td strong { color: #eee; }
 .share-cell { min-width: 130px; display: grid; grid-template-columns: minmax(70px, 1fr) 43px; align-items: center; gap: 8px; }
-.share-cell > span { height: 7px; overflow: hidden; border-radius: 99px; background: #303030; }
+.share-cell > span { height: 7px; display: flex; justify-content: flex-end; overflow: hidden; border-radius: 99px; background: #303030; }
 .share-cell > span i { height: 100%; display: block; border-radius: inherit; background: var(--purple); }
 .share-cell > strong { text-align: right; font-size: 11px; }
 

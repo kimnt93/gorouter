@@ -39,6 +39,8 @@ test('supports a filter dimension and multiple values without a manual resolutio
   const onChange = vi.fn()
   render(<RangeSelector filters={filters} onChange={onChange} users={[{ id: 'a', username: 'Alice', status: 'active', created_at: '', updated_at: '' }, { id: 'b', username: 'Bob', status: 'active', created_at: '', updated_at: '' }]} apiKeys={[]} organizations={[]} />)
   expect(screen.queryByLabelText('Resolution')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '30D' }))
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ range: '30d', groupBy: 'day' }))
   fireEvent.click(screen.getByText('All users'))
   fireEvent.click(screen.getByLabelText('Alice'))
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ userIds: ['a'] }))
