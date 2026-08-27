@@ -50,6 +50,22 @@ func TestOpenAIModelDiscoveryAcceptsFullChatEndpointAndOpenAILikeVariants(t *tes
 	}
 }
 
+func TestOpenAIModelDiscoveryAcceptsProviderCamelCaseMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"slug":"future-model","displayName":"Future Model","ownedBy":"provider","apiFormat":"responses","contextWindow":272000,"maxContextWindow":872000,"maxInputTokens":800000,"maxOutputTokens":128000,"supportedEndpoints":["responses"],"inputModalities":["text","image"],"outputModalities":["text"],"defaultReasoningLevel":"high","supportedReasoningLevels":[{"effort":"high"}],"supportsImageDetailOriginal":true,"supportsReasoningSummaryParameter":true,"supportsParallelToolCalls":true,"supportVerbosity":true,"defaultVerbosity":"medium"}]}`)
+	}))
+	defer server.Close()
+
+	models, err := (&OpenAIAdapter{HTTP: server.Client()}).DiscoverModels(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL, APIKey: "secret"})
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	model := models[0]
+	if model.Name != "Future Model" || model.OwnedBy != "provider" || model.APIFormat != "responses" || model.ContextLength != 272000 || model.MaxContextWindow != 872000 || model.MaxInputTokens != 800000 || model.MaxOutputTokens != 128000 || len(model.SupportedEndpoints) != 1 || len(model.InputModalities) != 2 || model.DefaultReasoningLevel != "high" || len(model.SupportedReasoningLevels) != 1 || !model.SupportsOriginalImage || !model.SupportsReasoningSummary || !model.SupportsParallelTools || !model.SupportsVerbosity || model.DefaultVerbosity != "medium" {
+		t.Fatalf("model=%+v", model)
+	}
+}
+
 func TestGeminiModelDiscoveryRemovesNativeResourcePrefix(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"models/gemini-2.5-flash","root":"models/gemini-2.5-flash"}]}`))

@@ -23,23 +23,33 @@ type upstreamModelList struct {
 
 type upstreamModel struct {
 	ID                       string                         `json:"id"`
+	Slug                     string                         `json:"slug"`
 	Object                   string                         `json:"object"`
 	Created                  int64                          `json:"created"`
 	Model                    string                         `json:"model"`
 	Name                     string                         `json:"name"`
 	DisplayName              string                         `json:"display_name"`
+	DisplayNameCamel         string                         `json:"displayName"`
 	OwnedBy                  string                         `json:"owned_by"`
+	OwnedByCamel             string                         `json:"ownedBy"`
 	Provider                 string                         `json:"provider"`
 	Permission               []any                          `json:"permission"`
 	Root                     string                         `json:"root"`
 	Parent                   *string                        `json:"parent"`
 	APIFormat                string                         `json:"api_format"`
+	APIFormatCamel           string                         `json:"apiFormat"`
 	ContextLength            int64                          `json:"context_length"`
+	ContextLengthCamel       int64                          `json:"contextLength"`
+	ContextWindowCamel       int64                          `json:"contextWindow"`
 	MaxOutputTokens          int64                          `json:"max_output_tokens"`
+	MaxOutputTokensCamel     int64                          `json:"maxOutputTokens"`
 	SupportedEndpoints       []string                       `json:"supported_endpoints"`
+	SupportedEndpointsCamel  []string                       `json:"supportedEndpoints"`
 	Capabilities             map[string]any                 `json:"capabilities"`
 	InputModalities          []string                       `json:"input_modalities"`
+	InputModalitiesCamel     []string                       `json:"inputModalities"`
 	OutputModalities         []string                       `json:"output_modalities"`
+	OutputModalitiesCamel    []string                       `json:"outputModalities"`
 	MaxInputTokens           int64                          `json:"max_input_tokens"`
 	MaxInputTokensCamel      int64                          `json:"maxInputTokens"`
 	MaxContextWindow         int64                          `json:"max_context_window"`
@@ -50,10 +60,15 @@ type upstreamModel struct {
 	SupportedReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels"`
 	ReasoningLevelsCamel     []entities.ModelReasoningLevel `json:"supportedReasoningLevels"`
 	SupportsOriginalImage    bool                           `json:"supports_image_detail_original"`
+	SupportsOriginalCamel    bool                           `json:"supportsImageDetailOriginal"`
 	SupportsReasoningSummary bool                           `json:"supports_reasoning_summary_parameter"`
+	SupportsReasoningCamel   bool                           `json:"supportsReasoningSummaryParameter"`
 	SupportsParallelTools    bool                           `json:"supports_parallel_tool_calls"`
+	SupportsParallelCamel    bool                           `json:"supportsParallelToolCalls"`
 	SupportsVerbosity        bool                           `json:"support_verbosity"`
+	SupportsVerbosityCamel   bool                           `json:"supportVerbosity"`
 	DefaultVerbosity         string                         `json:"default_verbosity"`
+	DefaultVerbosityCamel    string                         `json:"defaultVerbosity"`
 }
 
 func firstNonEmpty(values ...string) string {
@@ -95,6 +110,9 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 	for _, model := range document.Data {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
+			id = strings.TrimSpace(model.Slug)
+		}
+		if id == "" {
 			id = strings.TrimSpace(model.Model)
 		}
 		if id == "" {
@@ -103,7 +121,7 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 		if id == "" {
 			continue
 		}
-		ownedBy := strings.TrimSpace(model.OwnedBy)
+		ownedBy := strings.TrimSpace(firstNonEmpty(model.OwnedBy, model.OwnedByCamel))
 		if ownedBy == "" {
 			ownedBy = strings.TrimSpace(model.Provider)
 		}
@@ -127,6 +145,29 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 		if len(reasoningLevels) == 0 {
 			reasoningLevels = model.ReasoningLevelsCamel
 		}
+		contextLength := model.ContextLength
+		if contextLength == 0 {
+			contextLength = model.ContextLengthCamel
+		}
+		if contextLength == 0 {
+			contextLength = model.ContextWindowCamel
+		}
+		maxOutput := model.MaxOutputTokens
+		if maxOutput == 0 {
+			maxOutput = model.MaxOutputTokensCamel
+		}
+		supportedEndpoints := model.SupportedEndpoints
+		if len(supportedEndpoints) == 0 {
+			supportedEndpoints = model.SupportedEndpointsCamel
+		}
+		inputModalities := model.InputModalities
+		if len(inputModalities) == 0 {
+			inputModalities = model.InputModalitiesCamel
+		}
+		outputModalities := model.OutputModalities
+		if len(outputModalities) == 0 {
+			outputModalities = model.OutputModalitiesCamel
+		}
 		seen[id] = credential.ProviderModel{
 			ID:                 id,
 			Object:             object,
@@ -135,19 +176,22 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 			Permission:         model.Permission,
 			Root:               model.Root,
 			Parent:             model.Parent,
-			APIFormat:          model.APIFormat,
-			ContextLength:      model.ContextLength,
-			MaxOutputTokens:    model.MaxOutputTokens,
-			SupportedEndpoints: model.SupportedEndpoints,
+			APIFormat:          firstNonEmpty(model.APIFormat, model.APIFormatCamel),
+			ContextLength:      contextLength,
+			MaxOutputTokens:    maxOutput,
+			SupportedEndpoints: supportedEndpoints,
 			Capabilities:       model.Capabilities,
-			InputModalities:    model.InputModalities,
-			OutputModalities:   model.OutputModalities,
+			InputModalities:    inputModalities,
+			OutputModalities:   outputModalities,
 			MaxInputTokens:     maxInput,
 			MaxContextWindow:   maxContext,
-			Name:               firstNonEmpty(model.DisplayName, model.Name),
+			Name:               firstNonEmpty(model.DisplayName, model.DisplayNameCamel, model.Name),
 			Description:        model.Description, DefaultReasoningLevel: defaultReasoning, SupportedReasoningLevels: reasoningLevels,
-			SupportsOriginalImage: model.SupportsOriginalImage, SupportsReasoningSummary: model.SupportsReasoningSummary,
-			SupportsParallelTools: model.SupportsParallelTools, SupportsVerbosity: model.SupportsVerbosity, DefaultVerbosity: model.DefaultVerbosity,
+			SupportsOriginalImage:    model.SupportsOriginalImage || model.SupportsOriginalCamel,
+			SupportsReasoningSummary: model.SupportsReasoningSummary || model.SupportsReasoningCamel,
+			SupportsParallelTools:    model.SupportsParallelTools || model.SupportsParallelCamel,
+			SupportsVerbosity:        model.SupportsVerbosity || model.SupportsVerbosityCamel,
+			DefaultVerbosity:         firstNonEmpty(model.DefaultVerbosity, model.DefaultVerbosityCamel),
 		}
 	}
 	models := make([]credential.ProviderModel, 0, len(seen))

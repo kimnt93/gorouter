@@ -8,20 +8,43 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-type syncCredentialRepo struct{}
+type syncCredentialRepo struct {
+	credentials  []entities.Credential
+	runtimeCalls *int
+}
 
 func (syncCredentialRepo) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
 	return nil, nil
 }
-func (syncCredentialRepo) List(context.Context) ([]entities.Credential, error) {
-	return []entities.Credential{{ID: "cred"}}, nil
+func (r syncCredentialRepo) List(context.Context) ([]entities.Credential, error) {
+	if r.credentials != nil {
+		return r.credentials, nil
+	}
+	return []entities.Credential{{ID: "cred", Status: entities.StatusActive}}, nil
 }
 func (syncCredentialRepo) Update(context.Context, entities.SecretBox, string, entities.CredentialUpdate) (*entities.Credential, error) {
 	return nil, nil
 }
 func (syncCredentialRepo) Delete(context.Context, string) error { return nil }
-func (syncCredentialRepo) Runtime(context.Context, entities.SecretBox, string) (*entities.CredentialRuntime, error) {
+
+func (r syncCredentialRepo) Runtime(context.Context, entities.SecretBox, string) (*entities.CredentialRuntime, error) {
+	if r.runtimeCalls != nil {
+		*r.runtimeCalls++
+	}
 	return &entities.CredentialRuntime{ID: "cred", Provider: "openai"}, nil
+}
+
+func TestCatalogSyncSkipsDisabledCredentials(t *testing.T) {
+	runtimeCalls := 0
+	credentialRepo := syncCredentialRepo{credentials: []entities.Credential{{ID: "cred", Status: entities.StatusDisabled}}, runtimeCalls: &runtimeCalls}
+	repo := &syncModelRepo{models: []entities.ModelDef{{Name: "openai/existing", UpstreamModel: "existing", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred", Weight: 1, Enabled: true}}}}}
+	sync := &CatalogSync{Credentials: credential.NewService(credentialRepo, nil), Models: NewService(repo), Discoverer: func(string) credential.ModelDiscoverer { return syncDiscoverer{} }}
+	if err := sync.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeCalls != 0 || len(repo.upserts) != 0 {
+		t.Fatalf("runtime calls=%d upserts=%+v", runtimeCalls, repo.upserts)
+	}
 }
 func (syncCredentialRepo) UpdateOAuthTokens(context.Context, entities.SecretBox, string, string, string) error {
 	return nil

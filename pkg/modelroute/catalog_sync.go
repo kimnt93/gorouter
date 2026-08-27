@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/credential"
+	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
 type CatalogDiscoverer func(providerID string) credential.ModelDiscoverer
@@ -32,6 +33,9 @@ func (s *CatalogSync) Refresh(ctx context.Context) error {
 	}
 	failures := 0
 	for _, connection := range credentials {
+		if connection.Status != "" && connection.Status != entities.StatusActive {
+			continue
+		}
 		runtime, runtimeErr := s.Credentials.Runtime(ctx, connection.ID)
 		if runtimeErr != nil {
 			failures++
@@ -50,7 +54,7 @@ func (s *CatalogSync) Refresh(ctx context.Context) error {
 		for _, item := range discovered {
 			byID[item.ID] = item
 		}
-		now := time.Now()
+		now := time.Now().UTC()
 		for index := range models {
 			model := &models[index]
 			if model.Metadata != nil && model.Metadata.SourceCredentialID != "" && model.Metadata.SourceCredentialID != runtime.ID {

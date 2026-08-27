@@ -275,7 +275,7 @@ func (h *CredentialConnectivity) adapter(providerID string) (credential.Connecti
 		value = h.Providers[providerID]
 	}
 	if value != nil {
-		discoverer, _ := value.(credential.ModelDiscoverer)
+		discoverer := credential.ResolveModelDiscoverer(providerID, h.Providers, modelDiscoverer(h.OpenAI), modelDiscoverer(h.Anthropic), modelDiscoverer(h.Codex))
 		upstream, _ := value.(entities.Upstream)
 		return value, discoverer, upstream
 	}
@@ -292,6 +292,11 @@ func (h *CredentialConnectivity) adapter(providerID string) (credential.Connecti
 	discoverer, _ := value.(credential.ModelDiscoverer)
 	upstream, _ := value.(entities.Upstream)
 	return value, discoverer, upstream
+}
+
+func modelDiscoverer(value credential.ConnectivityProber) credential.ModelDiscoverer {
+	discoverer, _ := value.(credential.ModelDiscoverer)
+	return discoverer
 }
 
 // Test probes a credential without exposing its secret.

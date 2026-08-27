@@ -59,6 +59,28 @@ type ModelDiscoverer interface {
 	DiscoverModels(ctx context.Context, runtime *entities.CredentialRuntime) ([]ProviderModel, error)
 }
 
+// ResolveModelDiscoverer prefers a provider-specific adapter and falls back to
+// the provider's wire protocol. Keeping this resolution in one place prevents
+// automatic catalog refresh and the management API from drifting apart when a
+// provider is added or its adapter changes.
+func ResolveModelDiscoverer(providerID string, adapters map[string]ConnectivityProber, openAI, anthropic, codex ModelDiscoverer) ModelDiscoverer {
+	if adapter := adapters[providerID]; adapter != nil {
+		if discoverer, ok := adapter.(ModelDiscoverer); ok {
+			return discoverer
+		}
+	}
+	switch provider.ProtocolFor(providerID) {
+	case provider.ProtocolOpenAI:
+		return openAI
+	case provider.ProtocolAnthropic:
+		return anthropic
+	case provider.ProtocolCodex:
+		return codex
+	default:
+		return nil
+	}
+}
+
 type Repository interface {
 	Create(ctx context.Context, in entities.CredentialInput, box entities.SecretBox) (*entities.Credential, error)
 	List(ctx context.Context) ([]entities.Credential, error)
