@@ -35,6 +35,7 @@ type CredentialConnectivity struct {
 
 // Quota returns the cached provider quota or refreshes it on explicit POST.
 // @Summary Get or refresh credential quota
+// @Description Returns the latest provider-account quota snapshot, optionally refreshing it from the provider.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
@@ -70,6 +71,7 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 
 // ImportModels imports selected upstream models into ownership-aware routes.
 // @Summary Import provider models
+// @Description Imports selected models discovered from a provider credential into model route definitions.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
@@ -216,6 +218,7 @@ func (h *CredentialConnectivity) adapter(providerID string) (credential.Connecti
 
 // Test probes a credential without exposing its secret.
 // @Summary Test credential connectivity
+// @Description Probes a credential without exposing its secret or provider error body.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
@@ -246,6 +249,7 @@ func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
 
 // Models discovers safe model metadata through a credential.
 // @Summary Discover provider models
+// @Description Discovers safe model metadata through a provider credential.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
@@ -313,6 +317,7 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 
 // Chat streams a bounded connectivity test through one credential.
 // @Summary Run credential chat test
+// @Description Runs a bounded streaming chat test through one credential without recording a normal gateway request.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"

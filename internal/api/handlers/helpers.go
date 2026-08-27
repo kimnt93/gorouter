@@ -8,6 +8,7 @@ import (
 
 // Health reports process liveness.
 // @Summary Health check
+// @Description Reports whether the gateway process is alive. This endpoint does not perform an upstream provider check.
 // @Tags system
 // @Success 200 {object} HealthResponse
 // @Router /healthz [get]

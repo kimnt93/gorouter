@@ -22,6 +22,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists API-key metadata after applying principal ownership, organization context, status, and pagination filters.",
                 "tags": [
                     "api-keys"
                 ],
@@ -105,6 +106,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Creates an owned API key and returns its plaintext secret exactly once in the response.",
                 "tags": [
                     "api-keys"
                 ],
@@ -167,6 +169,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists models that the current principal may assign to an API key, including effective pricing.",
                 "tags": [
                     "api-keys"
                 ],
@@ -214,6 +217,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Permanently deletes an API key after checking ownership and management permission.",
                 "tags": [
                     "api-keys"
                 ],
@@ -266,6 +270,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Changes mutable API-key policy fields such as enabled state, model allowlist, scopes, quota, and RPM.",
                 "tags": [
                     "api-keys"
                 ],
@@ -335,6 +340,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Replaces an API key secret and returns the new plaintext secret exactly once.",
                 "tags": [
                     "api-keys"
                 ],
@@ -389,6 +395,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns policy-constrained, cursor-paginated administrative audit events.",
                 "tags": [
                     "audit"
                 ],
@@ -498,6 +505,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Purges deterministic router response-cache entries.",
                 "tags": [
                     "cache"
                 ],
@@ -531,6 +539,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns deterministic router response-cache counters without exposing cache contents.",
                 "tags": [
                     "cache"
                 ],
@@ -564,6 +573,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists safe credential metadata or creates an encrypted provider credential for the authorized owner or organization.",
                 "tags": [
                     "credentials"
                 ],
@@ -638,6 +648,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists safe credential metadata or creates an encrypted provider credential for the authorized owner or organization.",
                 "tags": [
                     "credentials"
                 ],
@@ -714,6 +725,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Updates safe credential metadata, rotates its secret when supplied, or deletes the authorized credential.",
                 "tags": [
                     "credentials"
                 ],
@@ -780,6 +792,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Updates safe credential metadata, rotates its secret when supplied, or deletes the authorized credential.",
                 "tags": [
                     "credentials"
                 ],
@@ -848,6 +861,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Runs a bounded streaming chat test through one credential without recording a normal gateway request.",
                 "tags": [
                     "credentials"
                 ],
@@ -923,6 +937,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Discovers safe model metadata through a provider credential.",
                 "tags": [
                     "credentials"
                 ],
@@ -983,6 +998,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Imports selected models discovered from a provider credential into model route definitions.",
                 "tags": [
                     "credentials"
                 ],
@@ -1052,6 +1068,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns the latest provider-account quota snapshot, optionally refreshing it from the provider.",
                 "tags": [
                     "credentials"
                 ],
@@ -1110,6 +1127,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns the latest provider-account quota snapshot, optionally refreshing it from the provider.",
                 "tags": [
                     "credentials"
                 ],
@@ -1170,6 +1188,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Probes a credential without exposing its secret or provider error body.",
                 "tags": [
                     "credentials"
                 ],
@@ -1230,6 +1249,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists configured model routes visible in the current organization or user context.",
                 "tags": [
                     "models"
                 ],
@@ -1286,6 +1306,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Creates or replaces a model route definition. Global model route changes require the master principal.",
                 "tags": [
                     "models"
                 ],
@@ -1347,6 +1368,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Removes a configured model route after checking model-management permission.",
                 "tags": [
                     "models"
                 ],
@@ -1401,6 +1423,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Completes a pending OAuth flow and persists the resulting credential with encrypted tokens.",
                 "tags": [
                     "oauth"
                 ],
@@ -1476,6 +1499,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Starts a provider-specific OAuth or device authorization flow bound to the current session.",
                 "tags": [
                     "oauth"
                 ],
@@ -1530,6 +1554,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists visible organizations or creates an organization.",
                 "tags": [
                     "organizations"
                 ],
@@ -1633,6 +1658,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists visible organizations or creates an organization.",
                 "tags": [
                     "organizations"
                 ],
@@ -1738,6 +1764,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns organization details or updates its name and status.",
                 "tags": [
                     "organizations"
                 ],
@@ -1810,6 +1837,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns organization details or updates its name and status.",
                 "tags": [
                     "organizations"
                 ],
@@ -1884,6 +1912,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists organization members or adds an active user with the requested membership role.",
                 "tags": [
                     "memberships"
                 ],
@@ -1962,6 +1991,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists organization members or adds an active user with the requested membership role.",
                 "tags": [
                     "memberships"
                 ],
@@ -2042,6 +2072,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Changes a membership role or removes a member from an organization.",
                 "tags": [
                     "memberships"
                 ],
@@ -2121,6 +2152,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Changes a membership role or removes a member from an organization.",
                 "tags": [
                     "memberships"
                 ],
@@ -2202,6 +2234,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns manually configured model prices.",
                 "tags": [
                     "pricing"
                 ],
@@ -2241,6 +2274,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Creates or removes the manual price for a public model. Manual prices override catalog fallback prices.",
                 "tags": [
                     "pricing"
                 ],
@@ -2307,6 +2341,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Creates or removes the manual price for a public model. Manual prices override catalog fallback prices.",
                 "tags": [
                     "pricing"
                 ],
@@ -2375,6 +2410,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns imported catalog prices with optional text filtering and offset pagination.",
                 "tags": [
                     "pricing"
                 ],
@@ -2435,6 +2471,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Calculates an estimated cost from a public or upstream model and token counts using the effective price.",
                 "tags": [
                     "pricing"
                 ],
@@ -2508,6 +2545,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns the static provider catalog, including supported protocols, authentication methods, and model prefixes.",
                 "tags": [
                     "providers"
                 ],
@@ -2541,6 +2579,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns safe metadata for the current authenticated browser or bearer session.",
                 "tags": [
                     "authentication"
                 ],
@@ -2568,6 +2607,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Maintains the legacy tenant endpoint while directing clients to the organization API.",
                 "tags": [
                     "organizations"
                 ],
@@ -2628,6 +2668,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Maintains the legacy tenant endpoint while directing clients to the organization API.",
                 "tags": [
                     "organizations"
                 ],
@@ -2690,6 +2731,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns time-bucketed usage activity and its aggregate summary for the analysis dashboard.",
                 "tags": [
                     "usage"
                 ],
@@ -2786,6 +2828,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns one visible usage event, including bounded captured conversation content when available.",
                 "tags": [
                     "usage"
                 ],
@@ -2852,6 +2895,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns cursor-paginated usage events filtered by time, principal, organization, model, key, or status.",
                 "tags": [
                     "usage"
                 ],
@@ -2961,6 +3005,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns policy-constrained aggregate request, token, cache, and cost metrics.",
                 "tags": [
                     "usage"
                 ],
@@ -3032,6 +3077,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists users visible to the current principal or creates a new user and optional initial API key.",
                 "tags": [
                     "users"
                 ],
@@ -3129,6 +3175,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists users visible to the current principal or creates a new user and optional initial API key.",
                 "tags": [
                     "users"
                 ],
@@ -3228,6 +3275,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns a user detail record or updates the user status.",
                 "tags": [
                     "users"
                 ],
@@ -3294,6 +3342,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Returns a user detail record or updates the user status.",
                 "tags": [
                     "users"
                 ],
@@ -3357,6 +3406,7 @@ const docTemplate = `{
         },
         "/healthz": {
             "get": {
+                "description": "Reports whether the gateway process is alive. This endpoint does not perform an upstream provider check.",
                 "tags": [
                     "system"
                 ],
@@ -3373,6 +3423,7 @@ const docTemplate = `{
         },
         "/login": {
             "post": {
+                "description": "Authenticates a master secret or API key and issues a signed browser session.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3424,6 +3475,7 @@ const docTemplate = `{
         },
         "/logout": {
             "post": {
+                "description": "Clears the current browser session cookie and redirects to the login page.",
                 "tags": [
                     "authentication"
                 ],
@@ -3442,6 +3494,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Accepts an OpenAI-compatible chat request, applies authentication, model policy, quota, cache, routing, and usage accounting, then returns a provider response or stream.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3528,6 +3581,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Accepts an Anthropic Messages request and translates it through the gateway chat pipeline.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3614,6 +3668,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Lists the public models available to the authenticated principal and API key.",
                 "tags": [
                     "gateway"
                 ],
@@ -3653,6 +3708,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Accepts an OpenAI Responses API request and translates it through the gateway chat pipeline.",
                 "consumes": [
                     "application/json"
                 ],

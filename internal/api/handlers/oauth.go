@@ -28,6 +28,7 @@ func oauthSessionBinding(session *entities.Session) string {
 
 // Start begins a provider OAuth flow bound to the current session.
 // @Summary Start OAuth connection
+// @Description Starts a provider-specific OAuth or device authorization flow bound to the current session.
 // @Tags oauth
 // @Security BearerAuth
 // @Param provider path string true "Provider ID"
@@ -50,6 +51,7 @@ func (h *OAuthConnector) Start(c fiber.Ctx) error {
 
 // Complete exchanges an OAuth callback/device result and creates a credential.
 // @Summary Complete OAuth connection
+// @Description Completes a pending OAuth flow and persists the resulting credential with encrypted tokens.
 // @Tags oauth
 // @Security BearerAuth
 // @Param provider path string true "Provider ID"

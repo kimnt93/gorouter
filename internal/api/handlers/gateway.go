@@ -70,6 +70,7 @@ type PriceCatalog interface {
 
 // Chat proxies an OpenAI-compatible chat completion with principal policy and attribution.
 // @Summary Create a chat completion
+// @Description Accepts an OpenAI-compatible chat request, applies authentication, model policy, quota, cache, routing, and usage accounting, then returns a provider response or stream.
 // @Tags gateway
 // @Security BearerAuth
 // @Accept json
@@ -333,6 +334,7 @@ func drainAndClose(body io.ReadCloser) {
 
 // ListModels returns enabled models allowed by the access context.
 // @Summary List available models
+// @Description Lists the public models available to the authenticated principal and API key.
 // @Tags gateway
 // @Security BearerAuth
 // @Success 200 {object} llm.ModelList

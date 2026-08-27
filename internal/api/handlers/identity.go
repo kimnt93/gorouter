@@ -72,6 +72,7 @@ func pageQuery(c fiber.Ctx) entities.PageQuery {
 
 // Users lists or creates users.
 // @Summary List or create users
+// @Description Lists users visible to the current principal or creates a new user and optional initial API key.
 // @Tags users
 // @Security BearerAuth
 // @Param cursor query string false "Opaque cursor"
@@ -181,6 +182,7 @@ func (a *Admin) Users(c fiber.Ctx) error {
 
 // UserByID returns user detail or changes user status.
 // @Summary Get or update a user
+// @Description Returns a user detail record or updates the user status.
 // @Tags users
 // @Security BearerAuth
 // @Param id path string true "User ID"
@@ -237,6 +239,7 @@ func (a *Admin) UserByID(c fiber.Ctx) error {
 
 // Organizations lists visible organizations or creates one as master.
 // @Summary List or create organizations
+// @Description Lists visible organizations or creates an organization.
 // @Tags organizations
 // @Security BearerAuth
 // @Param cursor query string false "Opaque cursor"
@@ -321,6 +324,7 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 
 // OrganizationByID returns or updates an organization.
 // @Summary Get or update an organization
+// @Description Returns organization details or updates its name and status.
 // @Tags organizations
 // @Security BearerAuth
 // @Param id path string true "Organization ID"
@@ -369,6 +373,7 @@ func (a *Admin) OrganizationByID(c fiber.Ctx) error {
 
 // Members lists or adds organization memberships.
 // @Summary List or add organization members
+// @Description Lists organization members or adds an active user with the requested membership role.
 // @Tags memberships
 // @Security BearerAuth
 // @Param id path string true "Organization ID"
@@ -422,6 +427,7 @@ func (a *Admin) Members(c fiber.Ctx) error {
 
 // MemberByID changes a membership role or removes it.
 // @Summary Update or remove an organization member
+// @Description Changes a membership role or removes a member from an organization.
 // @Tags memberships
 // @Security BearerAuth
 // @Param id path string true "Organization ID"
@@ -455,6 +461,7 @@ func (a *Admin) MemberByID(c fiber.Ctx) error {
 
 // AuditEvents returns principal-filtered administrative audit history.
 // @Summary List audit events
+// @Description Returns policy-constrained, cursor-paginated administrative audit events.
 // @Tags audit
 // @Security BearerAuth
 // @Param cursor query string false "Opaque cursor"

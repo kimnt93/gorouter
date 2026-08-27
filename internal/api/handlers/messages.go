@@ -80,6 +80,7 @@ type MessagesUsage struct {
 // them through the same authorization, quota, credential, and usage lifecycle
 // as OpenAI-compatible chat requests.
 // @Summary Create an Anthropic message
+// @Description Accepts an Anthropic Messages request and translates it through the gateway chat pipeline.
 // @Tags gateway
 // @Security BearerAuth
 // @Accept json

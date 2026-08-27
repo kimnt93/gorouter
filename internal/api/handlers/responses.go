@@ -38,6 +38,7 @@ type ResponsesTool struct {
 // Responses accepts OpenAI Responses API requests and routes them through the
 // same authentication, quota, ownership, credential and usage path as chat.
 // @Summary Create a response
+// @Description Accepts an OpenAI Responses API request and translates it through the gateway chat pipeline.
 // @Tags gateway
 // @Security BearerAuth
 // @Accept json

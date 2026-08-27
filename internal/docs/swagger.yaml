@@ -1596,6 +1596,8 @@ info:
 paths:
   /admin/api-keys:
     get:
+      description: Lists API-key metadata after applying principal ownership, organization
+        context, status, and pagination filters.
       parameters:
       - description: user or organization
         in: query
@@ -1650,6 +1652,8 @@ paths:
       tags:
       - api-keys
     post:
+      description: Creates an owned API key and returns its plaintext secret exactly
+        once in the response.
       parameters:
       - description: Key configuration
         in: body
@@ -1689,6 +1693,8 @@ paths:
       - api-keys
   /admin/api-keys/{id}:
     delete:
+      description: Permanently deletes an API key after checking ownership and management
+        permission.
       parameters:
       - description: API key ID
         in: path
@@ -1722,6 +1728,8 @@ paths:
       tags:
       - api-keys
     patch:
+      description: Changes mutable API-key policy fields such as enabled state, model
+        allowlist, scopes, quota, and RPM.
       parameters:
       - description: API key ID
         in: path
@@ -1766,6 +1774,8 @@ paths:
       - api-keys
   /admin/api-keys/{id}/rotate:
     post:
+      description: Replaces an API key secret and returns the new plaintext secret
+        exactly once.
       parameters:
       - description: API key ID
         in: path
@@ -1800,6 +1810,8 @@ paths:
       - api-keys
   /admin/api-keys/models:
     get:
+      description: Lists models that the current principal may assign to an API key,
+        including effective pricing.
       parameters:
       - description: Target organization
         in: query
@@ -1829,6 +1841,8 @@ paths:
       - api-keys
   /admin/audit/events:
     get:
+      description: Returns policy-constrained, cursor-paginated administrative audit
+        events.
       parameters:
       - description: Opaque cursor
         in: query
@@ -1900,6 +1914,7 @@ paths:
       - audit
   /admin/cache/flush:
     post:
+      description: Purges deterministic router response-cache entries.
       responses:
         "200":
           description: OK
@@ -1920,6 +1935,8 @@ paths:
       - cache
   /admin/cache/stats:
     get:
+      description: Returns deterministic router response-cache counters without exposing
+        cache contents.
       responses:
         "200":
           description: OK
@@ -1940,6 +1957,8 @@ paths:
       - cache
   /admin/credentials:
     get:
+      description: Lists safe credential metadata or creates an encrypted provider
+        credential for the authorized owner or organization.
       parameters:
       - description: Organization context
         in: query
@@ -1987,6 +2006,8 @@ paths:
       tags:
       - credentials
     post:
+      description: Lists safe credential metadata or creates an encrypted provider
+        credential for the authorized owner or organization.
       parameters:
       - description: Organization context
         in: query
@@ -2035,6 +2056,8 @@ paths:
       - credentials
   /admin/credentials/{id}:
     delete:
+      description: Updates safe credential metadata, rotates its secret when supplied,
+        or deletes the authorized credential.
       parameters:
       - description: Credential ID
         in: path
@@ -2077,6 +2100,8 @@ paths:
       tags:
       - credentials
     put:
+      description: Updates safe credential metadata, rotates its secret when supplied,
+        or deletes the authorized credential.
       parameters:
       - description: Credential ID
         in: path
@@ -2120,6 +2145,8 @@ paths:
       - credentials
   /admin/credentials/{id}/chat-tests:
     post:
+      description: Runs a bounded streaming chat test through one credential without
+        recording a normal gateway request.
       parameters:
       - description: Credential ID
         in: path
@@ -2168,6 +2195,7 @@ paths:
       - credentials
   /admin/credentials/{id}/models:
     get:
+      description: Discovers safe model metadata through a provider credential.
       parameters:
       - description: Credential ID
         in: path
@@ -2206,6 +2234,8 @@ paths:
       - credentials
   /admin/credentials/{id}/models/import:
     post:
+      description: Imports selected models discovered from a provider credential into
+        model route definitions.
       parameters:
       - description: Credential ID
         in: path
@@ -2250,6 +2280,8 @@ paths:
       - credentials
   /admin/credentials/{id}/quota:
     get:
+      description: Returns the latest provider-account quota snapshot, optionally
+        refreshing it from the provider.
       parameters:
       - description: Credential ID
         in: path
@@ -2287,6 +2319,8 @@ paths:
       tags:
       - credentials
     post:
+      description: Returns the latest provider-account quota snapshot, optionally
+        refreshing it from the provider.
       parameters:
       - description: Credential ID
         in: path
@@ -2325,6 +2359,8 @@ paths:
       - credentials
   /admin/credentials/{id}/test:
     post:
+      description: Probes a credential without exposing its secret or provider error
+        body.
       parameters:
       - description: Credential ID
         in: path
@@ -2363,6 +2399,8 @@ paths:
       - credentials
   /admin/models:
     get:
+      description: Lists configured model routes visible in the current organization
+        or user context.
       parameters:
       - description: Organization context
         in: query
@@ -2398,6 +2436,8 @@ paths:
       - models
   /admin/models/{name}:
     delete:
+      description: Removes a configured model route after checking model-management
+        permission.
       parameters:
       - description: Public model name
         in: path
@@ -2431,6 +2471,8 @@ paths:
       tags:
       - models
     put:
+      description: Creates or replaces a model route definition. Global model route
+        changes require the master principal.
       parameters:
       - description: Public model name
         in: path
@@ -2471,6 +2513,8 @@ paths:
       - models
   /admin/oauth/{provider}/complete:
     post:
+      description: Completes a pending OAuth flow and persists the resulting credential
+        with encrypted tokens.
       parameters:
       - description: Provider ID
         in: path
@@ -2519,6 +2563,8 @@ paths:
       - oauth
   /admin/oauth/{provider}/start:
     post:
+      description: Starts a provider-specific OAuth or device authorization flow bound
+        to the current session.
       parameters:
       - description: Provider ID
         in: path
@@ -2553,6 +2599,7 @@ paths:
       - oauth
   /admin/organizations:
     get:
+      description: Lists visible organizations or creates an organization.
       parameters:
       - description: Opaque cursor
         in: query
@@ -2620,6 +2667,7 @@ paths:
       tags:
       - organizations
     post:
+      description: Lists visible organizations or creates an organization.
       parameters:
       - description: Opaque cursor
         in: query
@@ -2688,6 +2736,7 @@ paths:
       - organizations
   /admin/organizations/{id}:
     get:
+      description: Returns organization details or updates its name and status.
       parameters:
       - description: Organization ID
         in: path
@@ -2734,6 +2783,7 @@ paths:
       tags:
       - organizations
     patch:
+      description: Returns organization details or updates its name and status.
       parameters:
       - description: Organization ID
         in: path
@@ -2781,6 +2831,8 @@ paths:
       - organizations
   /admin/organizations/{id}/members:
     get:
+      description: Lists organization members or adds an active user with the requested
+        membership role.
       parameters:
       - description: Organization ID
         in: path
@@ -2831,6 +2883,8 @@ paths:
       tags:
       - memberships
     post:
+      description: Lists organization members or adds an active user with the requested
+        membership role.
       parameters:
       - description: Organization ID
         in: path
@@ -2882,6 +2936,7 @@ paths:
       - memberships
   /admin/organizations/{id}/members/{user_id}:
     delete:
+      description: Changes a membership role or removes a member from an organization.
       parameters:
       - description: Organization ID
         in: path
@@ -2933,6 +2988,7 @@ paths:
       tags:
       - memberships
     patch:
+      description: Changes a membership role or removes a member from an organization.
       parameters:
       - description: Organization ID
         in: path
@@ -2985,6 +3041,7 @@ paths:
       - memberships
   /admin/prices:
     get:
+      description: Returns manually configured model prices.
       responses:
         "200":
           description: OK
@@ -3009,6 +3066,8 @@ paths:
       - pricing
   /admin/prices/{model}:
     delete:
+      description: Creates or removes the manual price for a public model. Manual
+        prices override catalog fallback prices.
       parameters:
       - description: Public model name
         in: path
@@ -3051,6 +3110,8 @@ paths:
       tags:
       - pricing
     put:
+      description: Creates or removes the manual price for a public model. Manual
+        prices override catalog fallback prices.
       parameters:
       - description: Public model name
         in: path
@@ -3094,6 +3155,8 @@ paths:
       - pricing
   /admin/pricing/catalog:
     get:
+      description: Returns imported catalog prices with optional text filtering and
+        offset pagination.
       parameters:
       - description: Search
         in: query
@@ -3132,6 +3195,8 @@ paths:
       - pricing
   /admin/pricing/estimate:
     get:
+      description: Calculates an estimated cost from a public or upstream model and
+        token counts using the effective price.
       parameters:
       - description: Public model
         in: query
@@ -3179,6 +3244,8 @@ paths:
       - pricing
   /admin/providers:
     get:
+      description: Returns the static provider catalog, including supported protocols,
+        authentication methods, and model prefixes.
       responses:
         "200":
           description: OK
@@ -3199,6 +3266,8 @@ paths:
       - providers
   /admin/session:
     get:
+      description: Returns safe metadata for the current authenticated browser or
+        bearer session.
       responses:
         "200":
           description: OK
@@ -3216,6 +3285,8 @@ paths:
   /admin/tenants:
     get:
       deprecated: true
+      description: Maintains the legacy tenant endpoint while directing clients to
+        the organization API.
       parameters:
       - description: Required for POST
         in: body
@@ -3254,6 +3325,8 @@ paths:
       - organizations
     post:
       deprecated: true
+      description: Maintains the legacy tenant endpoint while directing clients to
+        the organization API.
       parameters:
       - description: Required for POST
         in: body
@@ -3292,6 +3365,8 @@ paths:
       - organizations
   /admin/usage/activity:
     get:
+      description: Returns time-bucketed usage activity and its aggregate summary
+        for the analysis dashboard.
       parameters:
       - description: 1d, 7d, 30d, 90d, ytd, or all
         in: query
@@ -3354,6 +3429,8 @@ paths:
       - usage
   /admin/usage/events/{id}:
     get:
+      description: Returns one visible usage event, including bounded captured conversation
+        content when available.
       parameters:
       - description: Usage event ID
         in: path
@@ -3396,6 +3473,8 @@ paths:
       - usage
   /admin/usage/recent:
     get:
+      description: Returns cursor-paginated usage events filtered by time, principal,
+        organization, model, key, or status.
       parameters:
       - description: Opaque cursor
         in: query
@@ -3467,6 +3546,8 @@ paths:
       - usage
   /admin/usage/summary:
     get:
+      description: Returns policy-constrained aggregate request, token, cache, and
+        cost metrics.
       parameters:
       - description: 24h, 7d, or 30d
         in: query
@@ -3512,6 +3593,8 @@ paths:
       - usage
   /admin/users:
     get:
+      description: Lists users visible to the current principal or creates a new user
+        and optional initial API key.
       parameters:
       - description: Opaque cursor
         in: query
@@ -3575,6 +3658,8 @@ paths:
       tags:
       - users
     post:
+      description: Lists users visible to the current principal or creates a new user
+        and optional initial API key.
       parameters:
       - description: Opaque cursor
         in: query
@@ -3639,6 +3724,7 @@ paths:
       - users
   /admin/users/{id}:
     get:
+      description: Returns a user detail record or updates the user status.
       parameters:
       - description: User ID
         in: path
@@ -3681,6 +3767,7 @@ paths:
       tags:
       - users
     patch:
+      description: Returns a user detail record or updates the user status.
       parameters:
       - description: User ID
         in: path
@@ -3724,6 +3811,8 @@ paths:
       - users
   /healthz:
     get:
+      description: Reports whether the gateway process is alive. This endpoint does
+        not perform an upstream provider check.
       responses:
         "200":
           description: OK
@@ -3736,6 +3825,8 @@ paths:
     post:
       consumes:
       - application/json
+      description: Authenticates a master secret or API key and issues a signed browser
+        session.
       parameters:
       - description: Login key
         in: body
@@ -3767,6 +3858,8 @@ paths:
       - authentication
   /logout:
     post:
+      description: Clears the current browser session cookie and redirects to the
+        login page.
       responses:
         "302":
           description: Found
@@ -3777,6 +3870,9 @@ paths:
     post:
       consumes:
       - application/json
+      description: Accepts an OpenAI-compatible chat request, applies authentication,
+        model policy, quota, cache, routing, and usage accounting, then returns a
+        provider response or stream.
       parameters:
       - description: Chat request
         in: body
@@ -3832,6 +3928,8 @@ paths:
     post:
       consumes:
       - application/json
+      description: Accepts an Anthropic Messages request and translates it through
+        the gateway chat pipeline.
       parameters:
       - description: Messages request
         in: body
@@ -3885,6 +3983,8 @@ paths:
       - gateway
   /v1/models:
     get:
+      description: Lists the public models available to the authenticated principal
+        and API key.
       responses:
         "200":
           description: OK
@@ -3911,6 +4011,8 @@ paths:
     post:
       consumes:
       - application/json
+      description: Accepts an OpenAI Responses API request and translates it through
+        the gateway chat pipeline.
       parameters:
       - description: Responses request
         in: body

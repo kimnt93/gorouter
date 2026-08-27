@@ -30,6 +30,7 @@ type okResponse = OKResponse
 
 // Providers returns the built-in provider catalog.
 // @Summary List providers
+// @Description Returns the static provider catalog, including supported protocols, authentication methods, and model prefixes.
 // @Tags providers
 // @Security BearerAuth
 // @Success 200 {object} ProviderListResponse
@@ -60,6 +61,7 @@ type priceEstimateResponse = PricingEstimateResponse
 
 // PricingEstimate calculates typed cost estimates for token counts.
 // @Summary Estimate model cost
+// @Description Calculates an estimated cost from a public or upstream model and token counts using the effective price.
 // @Tags pricing
 // @Security BearerAuth
 // @Param model query string false "Public model"
@@ -100,6 +102,7 @@ func (a *Admin) PricingEstimate(c fiber.Ctx) error {
 
 // PricingCatalog returns the imported price catalog.
 // @Summary List catalog prices
+// @Description Returns imported catalog prices with optional text filtering and offset pagination.
 // @Tags pricing
 // @Security BearerAuth
 // @Param q query string false "Search"
@@ -156,6 +159,7 @@ func nonNegativeInt64(value string) (int64, error) {
 
 // Verify authenticates a master or API key and issues a signed session cookie.
 // @Summary Log in
+// @Description Authenticates a master secret or API key and issues a signed browser session.
 // @Tags authentication
 // @Accept json
 // @Produce json
@@ -189,6 +193,7 @@ func (a *Admin) Verify(c fiber.Ctx) error {
 
 // Session returns safe metadata for the current browser or bearer session.
 // @Summary Get current session
+// @Description Returns safe metadata for the current authenticated browser or bearer session.
 // @Tags authentication
 // @Security BearerAuth
 // @Success 200 {object} LoginResponse
@@ -207,6 +212,7 @@ func sessionResponse(sess *entities.Session) loginResponse {
 
 // Logout clears the signed session cookie.
 // @Summary Log out
+// @Description Clears the current browser session cookie and redirects to the login page.
 // @Tags authentication
 // @Success 302
 // @Router /logout [post]
@@ -217,6 +223,7 @@ func (a *Admin) Logout(c fiber.Ctx) error {
 
 // Tenants is the deprecated organization list/create compatibility alias.
 // @Summary Deprecated organization alias
+// @Description Maintains the legacy tenant endpoint while directing clients to the organization API.
 // @Tags organizations
 // @Deprecated
 // @Security BearerAuth
@@ -259,6 +266,7 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 
 // Credentials lists safe metadata or creates an encrypted credential.
 // @Summary List or create credentials
+// @Description Lists safe credential metadata or creates an encrypted provider credential for the authorized owner or organization.
 // @Tags credentials
 // @Security BearerAuth
 // @Param organization_id query string false "Organization context"
@@ -401,6 +409,7 @@ func credentialOwner(ctx context.Context, session *entities.Session, ownerType, 
 
 // CredentialByID updates or deletes a credential.
 // @Summary Update or delete a credential
+// @Description Updates safe credential metadata, rotates its secret when supplied, or deletes the authorized credential.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
@@ -443,6 +452,7 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 
 // KeysList returns safe key metadata constrained by principal policy.
 // @Summary List API keys
+// @Description Lists API-key metadata after applying principal ownership, organization context, status, and pagination filters.
 // @Tags api-keys
 // @Security BearerAuth
 // @Param owner_type query string false "user or organization"
@@ -551,6 +561,7 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 // KeyModelOptions lists callable models that the current principal may grant
 // to an API key, including the effective per-million-token price.
 // @Summary List grantable API-key models
+// @Description Lists models that the current principal may assign to an API key, including effective pricing.
 // @Tags api-keys
 // @Security BearerAuth
 // @Param organization_id query string false "Target organization"
@@ -623,6 +634,7 @@ func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
 
 // KeysCreate creates a principal-owned key and returns plaintext once.
 // @Summary Create an API key
+// @Description Creates an owned API key and returns its plaintext secret exactly once in the response.
 // @Tags api-keys
 // @Security BearerAuth
 // @Param request body APIKeyCreateRequest true "Key configuration"
@@ -717,6 +729,7 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 
 // KeysPatch changes mutable API-key policy fields.
 // @Summary Update an API key
+// @Description Changes mutable API-key policy fields such as enabled state, model allowlist, scopes, quota, and RPM.
 // @Tags api-keys
 // @Security BearerAuth
 // @Param id path string true "API key ID"
@@ -770,6 +783,7 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 
 // KeysDelete revokes and deletes an API key.
 // @Summary Delete an API key
+// @Description Permanently deletes an API key after checking ownership and management permission.
 // @Tags api-keys
 // @Security BearerAuth
 // @Param id path string true "API key ID"
@@ -800,6 +814,7 @@ func (a *Admin) KeysDelete(c fiber.Ctx) error {
 
 // KeysRotate atomically invalidates the old secret and returns a new one once.
 // @Summary Rotate an API key
+// @Description Replaces an API key secret and returns the new plaintext secret exactly once.
 // @Tags api-keys
 // @Security BearerAuth
 // @Param id path string true "API key ID"
@@ -845,6 +860,7 @@ func keyCreatedResponse(v *entities.ApiKey) createdAPIKeyResponse {
 
 // ModelsList returns models visible to the principal.
 // @Summary List configured models
+// @Description Lists configured model routes visible in the current organization or user context.
 // @Tags models
 // @Security BearerAuth
 // @Param organization_id query string false "Organization context"
@@ -917,6 +933,7 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 
 // ModelUpsert creates or replaces a model route definition.
 // @Summary Upsert a model
+// @Description Creates or replaces a model route definition. Global model route changes require the master principal.
 // @Tags models
 // @Security BearerAuth
 // @Param name path string true "Public model name"
@@ -941,6 +958,7 @@ func (a *Admin) ModelUpsert(c fiber.Ctx) error {
 
 // ModelDelete removes a model route.
 // @Summary Delete a model
+// @Description Removes a configured model route after checking model-management permission.
 // @Tags models
 // @Security BearerAuth
 // @Param name path string true "Public model name"
@@ -959,6 +977,7 @@ func (a *Admin) ModelDelete(c fiber.Ctx) error {
 
 // Price sets or deletes a manual model price.
 // @Summary Set or delete a model price
+// @Description Creates or removes the manual price for a public model. Manual prices override catalog fallback prices.
 // @Tags pricing
 // @Security BearerAuth
 // @Param model path string true "Public model name"
@@ -1000,6 +1019,7 @@ func decodedPathParam(c fiber.Ctx, name string) string {
 
 // Prices returns manual model prices.
 // @Summary List model prices
+// @Description Returns manually configured model prices.
 // @Tags pricing
 // @Security BearerAuth
 // @Success 200 {object} PriceListResponse
@@ -1015,6 +1035,7 @@ func (a *Admin) Prices(c fiber.Ctx) error {
 
 // UsageSummary returns a policy-constrained usage aggregate.
 // @Summary Get usage summary
+// @Description Returns policy-constrained aggregate request, token, cache, and cost metrics.
 // @Tags usage
 // @Security BearerAuth
 // @Param range query string false "24h, 7d, or 30d"
@@ -1060,6 +1081,7 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 
 // UsageRecent returns cursor-paginated actor snapshot events.
 // @Summary List recent usage
+// @Description Returns cursor-paginated usage events filtered by time, principal, organization, model, key, or status.
 // @Tags usage
 // @Security BearerAuth
 // @Param cursor query string false "Opaque cursor"
@@ -1132,6 +1154,7 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 // UsageDetail returns one policy-constrained request, including its captured
 // conversation bodies. Secrets and credential material are never captured.
 // @Summary Get usage request detail
+// @Description Returns one visible usage event, including bounded captured conversation content when available.
 // @Tags usage
 // @Security BearerAuth
 // @Param id path string true "Usage event ID"
@@ -1171,6 +1194,7 @@ func (a *Admin) UsageDetail(c fiber.Ctx) error {
 
 // UsageActivity returns policy-constrained time buckets for the analysis UI.
 // @Summary Get usage activity
+// @Description Returns time-bucketed usage activity and its aggregate summary for the analysis dashboard.
 // @Tags usage
 // @Security BearerAuth
 // @Param range query string false "1d, 7d, 30d, 90d, ytd, or all"
@@ -1255,6 +1279,7 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 
 // CacheStats returns safe prompt-cache counters.
 // @Summary Get cache statistics
+// @Description Returns deterministic router response-cache counters without exposing cache contents.
 // @Tags cache
 // @Security BearerAuth
 // @Success 200 {object} chat.CacheStats
@@ -1269,6 +1294,7 @@ func (a *Admin) CacheStats(c fiber.Ctx) error {
 
 // CacheFlush purges prompt-cache entries.
 // @Summary Flush prompt cache
+// @Description Purges deterministic router response-cache entries.
 // @Tags cache
 // @Security BearerAuth
 // @Success 200 {object} OKResponse
