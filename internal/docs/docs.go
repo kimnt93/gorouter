@@ -3559,6 +3559,92 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/v1/responses": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gateway"
+                ],
+                "summary": "Create a response",
+                "parameters": [
+                    {
+                        "description": "Responses request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.ResponsesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.ResponsesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3669,6 +3755,130 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_kimnt93_gorouter_internal_platform_llm.CodexModelInfo": {
+            "type": "object",
+            "properties": {
+                "apply_patch_tool_type": {
+                    "type": "string"
+                },
+                "comp_hash": {
+                    "type": "string"
+                },
+                "context_window": {
+                    "type": "integer"
+                },
+                "default_reasoning_level": {
+                    "type": "string"
+                },
+                "default_reasoning_summary": {
+                    "type": "string"
+                },
+                "default_verbosity": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "effective_context_window_percent": {
+                    "type": "integer"
+                },
+                "experimental_supported_tools": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "include_apps_usage_instructions": {
+                    "type": "boolean"
+                },
+                "include_plugin_usage_instructions": {
+                    "type": "boolean"
+                },
+                "include_skills_usage_instructions": {
+                    "type": "boolean"
+                },
+                "input_modalities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "max_context_window": {
+                    "type": "integer"
+                },
+                "model_messages": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CodexModelMessages"
+                },
+                "multi_agent_version": {
+                    "type": "string"
+                },
+                "node_repl_auto_review_required": {
+                    "type": "boolean"
+                },
+                "node_repl_disabled": {
+                    "type": "boolean"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "shell_type": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "support_verbosity": {
+                    "type": "boolean"
+                },
+                "supported_in_api": {
+                    "type": "boolean"
+                },
+                "supported_reasoning_levels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ReasoningLevel"
+                    }
+                },
+                "supports_image_detail_original": {
+                    "type": "boolean"
+                },
+                "supports_parallel_tool_calls": {
+                    "type": "boolean"
+                },
+                "supports_reasoning_summary_parameter": {
+                    "type": "boolean"
+                },
+                "supports_search_tool": {
+                    "type": "boolean"
+                },
+                "tool_mode": {
+                    "type": "string"
+                },
+                "truncation_policy": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.TruncationPolicy"
+                },
+                "use_responses_lite": {
+                    "type": "boolean"
+                },
+                "visibility": {
+                    "type": "string"
+                },
+                "web_search_tool_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_internal_platform_llm.CodexModelMessages": {
+            "type": "object",
+            "properties": {
+                "instructions_template": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_kimnt93_gorouter_internal_platform_llm.Delta": {
             "type": "object",
             "properties": {
@@ -3744,6 +3954,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ModelInfo"
                     }
                 },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CodexModelInfo"
+                    }
+                },
                 "object": {
                     "type": "string"
                 }
@@ -3756,6 +3972,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_internal_platform_llm.ReasoningLevel": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "effort": {
                     "type": "string"
                 }
             }
@@ -3859,6 +4086,17 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_internal_platform_llm.TruncationPolicy": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "mode": {
+                    "type": "string"
                 }
             }
         },
@@ -5338,6 +5576,191 @@ const docTemplate = `{
                 },
                 "provider": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesContent": {
+            "type": "object",
+            "properties": {
+                "annotations": {
+                    "type": "array",
+                    "items": {}
+                },
+                "logprobs": {
+                    "type": "array",
+                    "items": {}
+                },
+                "text": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesInputTokensDetails": {
+            "type": "object",
+            "properties": {
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "cached_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesOutput": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_handlers.ResponsesContent"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesOutputTokensDetails": {
+            "type": "object",
+            "properties": {
+                "reasoning_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "instructions": {
+                    "type": "string"
+                },
+                "max_output_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "reasoning": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.Reasoning"
+                },
+                "stream": {
+                    "type": "boolean"
+                },
+                "tool_choice": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_handlers.ResponsesTool"
+                    }
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesResponse": {
+            "type": "object",
+            "properties": {
+                "background": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "integer"
+                },
+                "error": {
+                    "$ref": "#/definitions/internal_api_handlers.ResponsesError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "object": {
+                    "type": "string"
+                },
+                "output": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_handlers.ResponsesOutput"
+                    }
+                },
+                "output_text": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "usage": {
+                    "$ref": "#/definitions/internal_api_handlers.ResponsesUsage"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesTool": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.ResponsesUsage": {
+            "type": "object",
+            "properties": {
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "input_tokens_details": {
+                    "$ref": "#/definitions/internal_api_handlers.ResponsesInputTokensDetails"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens_details": {
+                    "$ref": "#/definitions/internal_api_handlers.ResponsesOutputTokensDetails"
+                },
+                "total_tokens": {
+                    "type": "integer"
                 }
             }
         },

@@ -147,11 +147,63 @@ type ModelInfo struct {
 }
 
 type ModelList struct {
-	Object string      `json:"object"`
-	Data   []ModelInfo `json:"data"`
-	// Models is the Codex CLI-compatible alias for Data. OpenAI-compatible
-	// clients continue to consume the standard data field.
-	Models []ModelInfo `json:"models"`
+	Object string           `json:"object"`
+	Data   []ModelInfo      `json:"data"`
+	Models []CodexModelInfo `json:"models"`
+}
+
+// CodexModelInfo is the model-catalog shape consumed by current Codex CLI
+// custom providers. It intentionally coexists with the OpenAI-compatible data
+// list because the two clients require different identifiers and metadata.
+type CodexModelInfo struct {
+	Slug                     string             `json:"slug"`
+	DisplayName              string             `json:"display_name"`
+	Description              string             `json:"description"`
+	ModelMessages            CodexModelMessages `json:"model_messages"`
+	DefaultReasoningLevel    string             `json:"default_reasoning_level"`
+	SupportedReasoningLevels []ReasoningLevel   `json:"supported_reasoning_levels"`
+	ShellType                string             `json:"shell_type"`
+	Visibility               string             `json:"visibility"`
+	SupportedInAPI           bool               `json:"supported_in_api"`
+	Priority                 int                `json:"priority"`
+	IncludeSkillsUsage       bool               `json:"include_skills_usage_instructions"`
+	IncludePluginUsage       bool               `json:"include_plugin_usage_instructions"`
+	IncludeAppsUsage         bool               `json:"include_apps_usage_instructions"`
+	DefaultReasoningSummary  string             `json:"default_reasoning_summary"`
+	ApplyPatchToolType       string             `json:"apply_patch_tool_type"`
+	WebSearchToolType        string             `json:"web_search_tool_type"`
+	ContextWindow            int                `json:"context_window"`
+	MaxContextWindow         int                `json:"max_context_window"`
+	TruncationPolicy         TruncationPolicy   `json:"truncation_policy"`
+	SupportsOriginalImage    bool               `json:"supports_image_detail_original"`
+	CompHash                 string             `json:"comp_hash"`
+	EffectiveContextPercent  int                `json:"effective_context_window_percent"`
+	ExperimentalTools        []string           `json:"experimental_supported_tools"`
+	InputModalities          []string           `json:"input_modalities"`
+	SupportsSearchTool       bool               `json:"supports_search_tool"`
+	UseResponsesLite         bool               `json:"use_responses_lite"`
+	NodeReplAutoReview       bool               `json:"node_repl_auto_review_required"`
+	NodeReplDisabled         bool               `json:"node_repl_disabled"`
+	ToolMode                 *string            `json:"tool_mode"`
+	MultiAgentVersion        *string            `json:"multi_agent_version"`
+	SupportsReasoningSummary bool               `json:"supports_reasoning_summary_parameter"`
+	SupportsParallelTools    bool               `json:"supports_parallel_tool_calls"`
+	SupportVerbosity         bool               `json:"support_verbosity"`
+	DefaultVerbosity         string             `json:"default_verbosity"`
+}
+
+type CodexModelMessages struct {
+	InstructionsTemplate string `json:"instructions_template"`
+}
+
+type TruncationPolicy struct {
+	Mode  string `json:"mode"`
+	Limit int    `json:"limit"`
+}
+
+type ReasoningLevel struct {
+	Effort      string `json:"effort"`
+	Description string `json:"description,omitempty"`
 }
 
 type AnthropicRequest struct {

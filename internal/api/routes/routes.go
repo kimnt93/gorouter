@@ -143,6 +143,8 @@ func New(d Dependencies) *fiber.App {
 
 	app.Post("/v1/chat/completions", handlers.Require(d.Auth, "chat"), d.Gateway.Chat)
 	app.Post("/v1/chat/completions/", handlers.Require(d.Auth, "chat"), d.Gateway.Chat)
+	app.Post("/v1/responses", handlers.Require(d.Auth, "chat"), d.Gateway.Responses)
+	app.Post("/v1/responses/", handlers.Require(d.Auth, "chat"), d.Gateway.Responses)
 	app.Get("/v1/models", handlers.Require(d.Auth, "chat"), d.Gateway.ListModels)
 
 	admin := &handlers.Admin{Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit}

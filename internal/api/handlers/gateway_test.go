@@ -186,6 +186,54 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != "model-a" || body.Data[0].UpstreamModel != "openai/model-a" || body.Data[0].Pricing == nil || body.Data[0].Pricing.InputPerM != 0.2 {
 		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
 	}
+	if len(body.Models) != 1 || body.Models[0].Slug != "model-a" || body.Models[0].DisplayName == "" || body.Models[0].Description == "" || len(body.Models[0].SupportedReasoningLevels) != 1 || body.Models[0].SupportedReasoningLevels[0].Effort != "medium" {
+		t.Fatalf("Codex models = %+v", body.Models)
+	}
+}
+
+func TestCodexModelInfoUsesExactBundledReasoningProfiles(t *testing.T) {
+	tests := []struct {
+		model         string
+		defaultEffort string
+		efforts       []string
+		context       int
+		maxContext    int
+	}{
+		{model: "gpt-5.4", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh"}, context: 272000, maxContext: 1000000},
+		{model: "gpt-5.4-mini", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh"}, context: 272000, maxContext: 272000},
+		{model: "gpt-5.6-sol", defaultEffort: "low", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, context: 272000, maxContext: 872000},
+		{model: "gpt-5.6-terra", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, context: 272000, maxContext: 872000},
+		{model: "gpt-5.6-luna", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max"}, context: 272000, maxContext: 872000},
+		{model: "gpt-5.5", defaultEffort: "medium", efforts: []string{"low", "medium", "high", "xhigh"}, context: 272000, maxContext: 272000},
+	}
+	for _, test := range tests {
+		t.Run(test.model, func(t *testing.T) {
+			info := codexModelInfo("cx/"+test.model, test.model)
+			if info.Slug != "cx/"+test.model || info.DefaultReasoningLevel != test.defaultEffort || info.ContextWindow != test.context || info.MaxContextWindow != test.maxContext || !info.SupportedInAPI {
+				t.Fatalf("model info = %+v", info)
+			}
+			got := make([]string, 0, len(info.SupportedReasoningLevels))
+			for _, level := range info.SupportedReasoningLevels {
+				got = append(got, level.Effort)
+			}
+			if strings.Join(got, ",") != strings.Join(test.efforts, ",") {
+				t.Fatalf("efforts = %v, want %v", got, test.efforts)
+			}
+		})
+	}
+}
+
+func TestCodexModelInfoUsesClientNeutralAgentInstructions(t *testing.T) {
+	info := codexModelInfo("apollo-guidance/gemini/gemini-2.5-flash", "gemini-2.5-flash")
+	instructions := info.ModelMessages.InstructionsTemplate
+	if instructions != agentHarnessInstructions {
+		t.Fatalf("instructions = %q, want %q", instructions, agentHarnessInstructions)
+	}
+	for _, clientSpecific := range []string{"codex", "coding agent"} {
+		if strings.Contains(strings.ToLower(instructions), clientSpecific) {
+			t.Fatalf("instructions must be client-neutral: %q", instructions)
+		}
+	}
 }
 
 func TestKeyModelOptionsIncludesOnlyCallableModelsWithEffectivePrice(t *testing.T) {

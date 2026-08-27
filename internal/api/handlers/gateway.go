@@ -356,10 +356,98 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 				price = &resolved
 			}
 			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
+			out.Models = append(out.Models, codexModelInfo(model.Name, model.UpstreamModel))
 		}
 	}
-	out.Models = out.Data
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
+}
+
+type codexCatalogProfile struct {
+	displayName      string
+	description      string
+	defaultReasoning string
+	efforts          []string
+	priority         int
+	contextWindow    int
+	maxContextWindow int
+	defaultVerbosity string
+}
+
+var codexCatalogProfiles = map[string]codexCatalogProfile{
+	"gpt-5.4": {
+		displayName: "GPT-5.4", description: "Strong model for everyday coding.",
+		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh"},
+		priority: 16, contextWindow: 272000, maxContextWindow: 1000000,
+	},
+	"gpt-5.4-mini": {
+		displayName: "GPT-5.4-Mini", description: "Small, fast, and cost-efficient model for simpler coding tasks.",
+		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh"},
+		priority: 23, contextWindow: 272000, maxContextWindow: 272000, defaultVerbosity: "medium",
+	},
+	"gpt-5.6-sol": {
+		displayName: "GPT-5.6-Sol", description: "Latest frontier agentic coding model.",
+		defaultReasoning: "low", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
+		priority: 1, contextWindow: 272000, maxContextWindow: 872000,
+	},
+	"gpt-5.6-terra": {
+		displayName: "GPT-5.6-Terra", description: "Balanced agentic coding model for everyday work.",
+		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
+		priority: 2, contextWindow: 272000, maxContextWindow: 872000,
+	},
+	"gpt-5.6-luna": {
+		displayName: "GPT-5.6-Luna", description: "Fast and affordable agentic coding model.",
+		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh", "max"},
+		priority: 3, contextWindow: 272000, maxContextWindow: 872000,
+	},
+	"gpt-5.5": {
+		displayName: "GPT-5.5", description: "Frontier model for complex coding, research, and real-world work.",
+		defaultReasoning: "medium", efforts: []string{"low", "medium", "high", "xhigh"},
+		priority: 7, contextWindow: 272000, maxContextWindow: 272000,
+	},
+}
+
+var codexReasoningDescriptions = map[string]string{
+	"low":    "Fast responses with lighter reasoning",
+	"medium": "Balances speed and reasoning depth for everyday tasks",
+	"high":   "Greater reasoning depth for complex problems",
+	"xhigh":  "Extra high reasoning depth for complex problems",
+	"max":    "Maximum reasoning depth for the hardest problems",
+	"ultra":  "Maximum reasoning with automatic task delegation",
+}
+
+// agentHarnessInstructions is exposed through the Codex-compatible model
+// catalog as the client's base instruction template. Keep it independent of a
+// specific client, provider, or task type because GoRouter models are also used
+// by general-purpose agent harnesses.
+const agentHarnessInstructions = "Follow the user's instructions and use the available tools to complete the task."
+
+func codexModelInfo(name, upstreamModel string) llm.CodexModelInfo {
+	profile, known := codexCatalogProfiles[upstreamModel]
+	if !known {
+		profile = codexCatalogProfile{
+			displayName: name, description: "Model routed through GoRouter",
+			defaultReasoning: "medium", efforts: []string{"medium"},
+			contextWindow: 128000, maxContextWindow: 128000,
+		}
+	}
+	if profile.defaultVerbosity == "" {
+		profile.defaultVerbosity = "low"
+	}
+	reasoning := make([]llm.ReasoningLevel, 0, len(profile.efforts))
+	for _, effort := range profile.efforts {
+		reasoning = append(reasoning, llm.ReasoningLevel{Effort: effort, Description: codexReasoningDescriptions[effort]})
+	}
+	return llm.CodexModelInfo{
+		Slug: name, DisplayName: profile.displayName, Description: profile.description,
+		ModelMessages:         llm.CodexModelMessages{InstructionsTemplate: agentHarnessInstructions},
+		DefaultReasoningLevel: profile.defaultReasoning, SupportedReasoningLevels: reasoning,
+		ShellType: "unified_exec", Visibility: "list", SupportedInAPI: true,
+		Priority: profile.priority, ContextWindow: profile.contextWindow, MaxContextWindow: profile.maxContextWindow,
+		DefaultReasoningSummary: "none", ApplyPatchToolType: "freeform", WebSearchToolType: "text",
+		TruncationPolicy: llm.TruncationPolicy{Mode: "tokens", Limit: 10000}, EffectiveContextPercent: 95,
+		ExperimentalTools: []string{}, InputModalities: []string{"text"}, NodeReplDisabled: true,
+		SupportVerbosity: true, DefaultVerbosity: profile.defaultVerbosity,
+	}
 }
 
 func (g *Gateway) accessForSession(c fiber.Ctx, sess *entities.Session) (*GatewayAccessContext, error) {
@@ -438,9 +526,15 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 	var usage llm.Usage
 	var content strings.Builder
 	finishReason := "stop"
+	responsesMode, _ := c.Locals("responses_mode").(bool)
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		defer result.Body.Close()
 		streamStatus := fiber.StatusOK
+		var responses *responsesStreamEmitter
+		if responsesMode {
+			responses = newResponsesStreamEmitter(model.Name)
+			_ = responses.Created(w)
+		}
 		if providerpkg.UsesAnthropicWire(runtime.Provider) {
 			conv := llm.NewAnthropicStreamConverter(model.Name)
 			err := llm.ScanSSE(result.Body, func(ev llm.SSEEvent) error {
@@ -449,8 +543,14 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 					return err
 				}
 				for _, chunk := range chunks {
-					_, _ = w.WriteString("data: " + string(chunk) + "\n\n")
-					_ = w.Flush()
+					if responses != nil {
+						if err := responses.ChatChunk(w, chunk); err != nil {
+							return err
+						}
+					} else {
+						_, _ = w.WriteString("data: " + string(chunk) + "\n\n")
+						_ = w.Flush()
+					}
 				}
 				return nil
 			})
@@ -460,8 +560,10 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			if err != nil {
 				streamStatus = fiber.StatusBadGateway
 			}
-			_, _ = w.WriteString("data: [DONE]\n\n")
-			_ = w.Flush()
+			if responses == nil {
+				_, _ = w.WriteString("data: [DONE]\n\n")
+				_ = w.Flush()
+			}
 		} else {
 			done := false
 			err := llm.ScanSSE(result.Body, func(ev llm.SSEEvent) error {
@@ -475,6 +577,15 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 						finishReason = reason
 					}
 				}
+				if responses != nil {
+					if payload == "[DONE]" {
+						return nil
+					}
+					return responses.ChatChunk(w, ev.Data)
+				}
+				if payload == "" {
+					return nil
+				}
 				_, werr := w.WriteString("data: " + payload + "\n\n")
 				if werr == nil {
 					werr = w.Flush()
@@ -484,7 +595,7 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			if err != nil {
 				streamStatus = fiber.StatusBadGateway
 			}
-			if !done {
+			if !done && responses == nil {
 				_, _ = w.WriteString("data: [DONE]\n\n")
 				_ = w.Flush()
 			}
@@ -494,6 +605,11 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 		}
 		if usage.CompletionTokens == 0 {
 			usage.CompletionTokens = llm.EstimateTextTokens(content.String())
+		}
+		if responses != nil {
+			if err := responses.Completed(w, usage); err != nil {
+				streamStatus = fiber.StatusBadGateway
+			}
 		}
 		cost := entities.CalculateCost(price, usage.TokenUsage())
 		if streamStatus == fiber.StatusOK {

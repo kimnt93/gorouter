@@ -70,6 +70,88 @@ definitions:
       message:
         $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ResponseMessage'
     type: object
+  github_com_kimnt93_gorouter_internal_platform_llm.CodexModelInfo:
+    properties:
+      apply_patch_tool_type:
+        type: string
+      comp_hash:
+        type: string
+      context_window:
+        type: integer
+      default_reasoning_level:
+        type: string
+      default_reasoning_summary:
+        type: string
+      default_verbosity:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      effective_context_window_percent:
+        type: integer
+      experimental_supported_tools:
+        items:
+          type: string
+        type: array
+      include_apps_usage_instructions:
+        type: boolean
+      include_plugin_usage_instructions:
+        type: boolean
+      include_skills_usage_instructions:
+        type: boolean
+      input_modalities:
+        items:
+          type: string
+        type: array
+      max_context_window:
+        type: integer
+      model_messages:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CodexModelMessages'
+      multi_agent_version:
+        type: string
+      node_repl_auto_review_required:
+        type: boolean
+      node_repl_disabled:
+        type: boolean
+      priority:
+        type: integer
+      shell_type:
+        type: string
+      slug:
+        type: string
+      support_verbosity:
+        type: boolean
+      supported_in_api:
+        type: boolean
+      supported_reasoning_levels:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ReasoningLevel'
+        type: array
+      supports_image_detail_original:
+        type: boolean
+      supports_parallel_tool_calls:
+        type: boolean
+      supports_reasoning_summary_parameter:
+        type: boolean
+      supports_search_tool:
+        type: boolean
+      tool_mode:
+        type: string
+      truncation_policy:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.TruncationPolicy'
+      use_responses_lite:
+        type: boolean
+      visibility:
+        type: string
+      web_search_tool_type:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_internal_platform_llm.CodexModelMessages:
+    properties:
+      instructions_template:
+        type: string
+    type: object
   github_com_kimnt93_gorouter_internal_platform_llm.Delta:
     properties:
       content:
@@ -119,6 +201,10 @@ definitions:
         items:
           $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ModelInfo'
         type: array
+      models:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CodexModelInfo'
+        type: array
       object:
         type: string
     type: object
@@ -127,6 +213,13 @@ definitions:
       effort:
         type: string
       summary:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_internal_platform_llm.ReasoningLevel:
+    properties:
+      description:
+        type: string
+      effort:
         type: string
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.Response:
@@ -194,6 +287,13 @@ definitions:
         items:
           type: integer
         type: array
+    type: object
+  github_com_kimnt93_gorouter_internal_platform_llm.TruncationPolicy:
+    properties:
+      limit:
+        type: integer
+      mode:
+        type: string
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.Usage:
     properties:
@@ -1160,6 +1260,127 @@ definitions:
         type: string
       provider:
         type: string
+    type: object
+  internal_api_handlers.ResponsesContent:
+    properties:
+      annotations:
+        items: {}
+        type: array
+      logprobs:
+        items: {}
+        type: array
+      text:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_api_handlers.ResponsesError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  internal_api_handlers.ResponsesInputTokensDetails:
+    properties:
+      cache_write_tokens:
+        type: integer
+      cached_tokens:
+        type: integer
+    type: object
+  internal_api_handlers.ResponsesOutput:
+    properties:
+      content:
+        items:
+          $ref: '#/definitions/internal_api_handlers.ResponsesContent'
+        type: array
+      id:
+        type: string
+      role:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_api_handlers.ResponsesOutputTokensDetails:
+    properties:
+      reasoning_tokens:
+        type: integer
+    type: object
+  internal_api_handlers.ResponsesRequest:
+    properties:
+      input:
+        items:
+          type: integer
+        type: array
+      instructions:
+        type: string
+      max_output_tokens:
+        type: integer
+      model:
+        type: string
+      reasoning:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.Reasoning'
+      stream:
+        type: boolean
+      tool_choice:
+        items:
+          type: integer
+        type: array
+      tools:
+        items:
+          $ref: '#/definitions/internal_api_handlers.ResponsesTool'
+        type: array
+    type: object
+  internal_api_handlers.ResponsesResponse:
+    properties:
+      background:
+        type: boolean
+      created_at:
+        type: integer
+      error:
+        $ref: '#/definitions/internal_api_handlers.ResponsesError'
+      id:
+        type: string
+      model:
+        type: string
+      object:
+        type: string
+      output:
+        items:
+          $ref: '#/definitions/internal_api_handlers.ResponsesOutput'
+        type: array
+      output_text:
+        type: string
+      status:
+        type: string
+      usage:
+        $ref: '#/definitions/internal_api_handlers.ResponsesUsage'
+    type: object
+  internal_api_handlers.ResponsesTool:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+      parameters:
+        items:
+          type: integer
+        type: array
+      type:
+        type: string
+    type: object
+  internal_api_handlers.ResponsesUsage:
+    properties:
+      input_tokens:
+        type: integer
+      input_tokens_details:
+        $ref: '#/definitions/internal_api_handlers.ResponsesInputTokensDetails'
+      output_tokens:
+        type: integer
+      output_tokens_details:
+        $ref: '#/definitions/internal_api_handlers.ResponsesOutputTokensDetails'
+      total_tokens:
+        type: integer
     type: object
   internal_api_handlers.UsageActivityResponse:
     properties:
@@ -3515,6 +3736,61 @@ paths:
       security:
       - BearerAuth: []
       summary: List available models
+      tags:
+      - gateway
+  /v1/responses:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Responses request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_handlers.ResponsesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.ResponsesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a response
       tags:
       - gateway
 schemes:

@@ -63,6 +63,7 @@ The public runtime endpoints are:
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions, including streaming. |
+| `POST` | `/v1/responses` | OpenAI Responses compatibility for clients such as Codex CLI. |
 | `GET` | `/v1/models` | Models visible to and allowed for the supplied API key. |
 | `GET` | `/healthz` | Service health check. |
 
@@ -91,10 +92,18 @@ curl "$GOROUTER_BASE_URL/v1/chat/completions" \
 
 ## Coding clients
 
+See the [agent integration guide](docs/integrations.md) for API-key setup,
+endpoint details, and complete configurations for Codex CLI, OpenCode,
+OpenClaw, DeepSeek Harness, Hermes Agent, Claude Code, and other
+OpenAI-compatible clients.
+
 | Client | Status | Required protocol |
 |---|---|---|
 | OpenCode | Supported | OpenAI-compatible `/v1/chat/completions` |
-| Codex CLI | Not yet supported | OpenAI `/v1/responses` |
+| Codex CLI | Supported | OpenAI `/v1/responses` |
+| OpenClaw | Supported | OpenAI-compatible `/v1/chat/completions` |
+| DeepSeek Harness | Supported | OpenAI-compatible `/v1/chat/completions` |
+| Hermes Agent | Supported | OpenAI-compatible `/v1/chat/completions` |
 | Claude Code | Not yet supported | Anthropic `/v1/messages` |
 
 ### OpenCode
@@ -129,14 +138,18 @@ for configuration precedence and additional provider options.
 
 ### Codex CLI
 
-Current Codex custom providers use the Responses API. GoRouter does not yet
-implement `POST /v1/responses`, so a Codex provider pointed at GoRouter will not
-work yet. After Responses API compatibility is added, the provider shape will
-be:
+Current Codex custom providers use the Responses API. Choose an exact model ID
+returned by GoRouter's `/v1/models` endpoint, then add this to
+`~/.codex/config.toml`:
 
 ```toml
 model_provider = "gorouter"
-model = "cx/gpt-5.6-luna"
+model = "cx/gpt-5.4-luna"
+model_reasoning_effort = "medium"
+model_reasoning_summary = "detailed"
+hide_agent_reasoning = false
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 
 [model_providers.gorouter]
 name = "GoRouter"
@@ -144,6 +157,19 @@ base_url = "http://localhost:8090/v1"
 env_key = "GOROUTER_API_KEY"
 wire_api = "responses"
 ```
+
+Export the key and run Codex:
+
+```bash
+export GOROUTER_API_KEY='replace-with-a-gorouter-key'
+codex exec --ephemeral \
+  "Reply with exactly: codex gateway test" \
+  --skip-git-repo-check
+```
+
+This configuration gives Codex unsandboxed filesystem and network access and
+allows commands without approval prompts. Use it only on a machine and in
+repositories you trust.
 
 See the [Codex configuration reference](https://developers.openai.com/codex/config-reference/)
 for the current custom-provider contract.
