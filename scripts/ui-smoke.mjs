@@ -4,6 +4,7 @@ import puppeteer from 'puppeteer-core'
 const baseURL = process.env.UI_BASE_URL ?? 'http://127.0.0.1:8090'
 const accessKey = process.env.MASTER_KEY
 const screenshotDir = process.env.UI_SCREENSHOT_DIR ?? '/tmp/gorouter-ui-smoke'
+const desktopOnly = process.env.UI_DESKTOP_ONLY === '1'
 
 if (!accessKey) throw new Error('MASTER_KEY is required for the authenticated UI smoke test')
 await fs.mkdir(screenshotDir, { recursive: true })
@@ -23,12 +24,13 @@ async function assertLayout(name, path, viewport) {
     if (path !== '/dashboard/analysis' && path !== '/') await page.goto(`${baseURL}${path}`, { waitUntil: 'networkidle0' })
   }
   await page.waitForSelector('.app-shell')
-  await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage: true })
   const dimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: document.documentElement.clientWidth,
+    documentHeight: document.documentElement.scrollHeight,
     offenders: [...document.querySelectorAll('body *')].filter((element) => element.getBoundingClientRect().right > document.documentElement.clientWidth + 1).slice(0, 5).map((element) => `${element.tagName.toLowerCase()}.${element.className}`),
   }))
+  await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage: dimensions.documentHeight <= 16000, captureBeyondViewport: dimensions.documentHeight <= 16000 })
   if (dimensions.documentWidth > dimensions.viewportWidth) throw new Error(`${name} overflows horizontally: ${dimensions.documentWidth} > ${dimensions.viewportWidth}; ${dimensions.offenders.join(', ')}`)
   results.push({ name, path, ...dimensions })
 }
@@ -79,19 +81,21 @@ try {
   await assertLayout('organizations-desktop', '/dashboard/organizations', { width: 1440, height: 900 })
   await assertLayout('keys-desktop', '/dashboard/keys', { width: 1440, height: 900 })
   await assertLayout('audit-desktop', '/dashboard/audit', { width: 1440, height: 900 })
-  await assertLayout('analysis-mobile', '/dashboard/analysis', { width: 375, height: 812 })
-  await assertLayout('logs-mobile', '/dashboard/logs', { width: 375, height: 812 })
-  await assertLayout('cache-mobile', '/dashboard/cache', { width: 375, height: 812 })
-  await assertLayout('providers-mobile', '/dashboard/providers', { width: 375, height: 812 })
-  await assertLayout('keys-mobile', '/dashboard/keys', { width: 375, height: 812 })
-  const activeNavigationVisible = await page.$eval('.sidebar nav', (navigation) => {
-    const active = navigation.querySelector('.nav-link.active')
-    if (!active) return false
-    const navigationBounds = navigation.getBoundingClientRect()
-    const activeBounds = active.getBoundingClientRect()
-    return activeBounds.left >= navigationBounds.left && activeBounds.right <= navigationBounds.right
-  })
-  if (!activeNavigationVisible) throw new Error('active mobile navigation item is outside the visible navigation area')
+  if (!desktopOnly) {
+    await assertLayout('analysis-mobile', '/dashboard/analysis', { width: 375, height: 812 })
+    await assertLayout('logs-mobile', '/dashboard/logs', { width: 375, height: 812 })
+    await assertLayout('cache-mobile', '/dashboard/cache', { width: 375, height: 812 })
+    await assertLayout('providers-mobile', '/dashboard/providers', { width: 375, height: 812 })
+    await assertLayout('keys-mobile', '/dashboard/keys', { width: 375, height: 812 })
+    const activeNavigationVisible = await page.$eval('.sidebar nav', (navigation) => {
+      const active = navigation.querySelector('.nav-link.active')
+      if (!active) return false
+      const navigationBounds = navigation.getBoundingClientRect()
+      const activeBounds = active.getBoundingClientRect()
+      return activeBounds.left >= navigationBounds.left && activeBounds.right <= navigationBounds.right
+    })
+    if (!activeNavigationVisible) throw new Error('active mobile navigation item is outside the visible navigation area')
+  }
   process.stdout.write(`${JSON.stringify({ ok: true, screenshots: screenshotDir, results }, null, 2)}\n`)
 } finally {
   await page.evaluate(async (name) => {

@@ -1,291 +1,238 @@
+import { chmod, writeFile } from 'node:fs/promises'
+
 const baseURL = (process.env.SEED_BASE_URL ?? 'http://127.0.0.1:8090').replace(/\/$/, '')
 const masterKey = process.env.MASTER_KEY
 const backend = process.env.SEED_BACKEND ?? 'postgresql'
-
+const accessFile = process.env.SEED_ACCESS_FILE ?? ''
 if (!masterKey) throw new Error('MASTER_KEY is required')
 
 const providerInputs = [
-  { id: 'groq', label: 'Groq', keys: splitKeys(process.env.SMOKE_GROQ_KEYS), preferred: ['llama-3.1-8b-instant', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile'] },
-  { id: 'opencode-zen', label: 'OpenCode Zen', keys: splitKeys(process.env.SMOKE_OPENCODE_ZEN_KEYS), preferred: ['deepseek-v4-flash', 'kimi-k2.5-free', 'muse-spark-1.2'] },
-  { id: 'openrouter', label: 'OpenRouter', keys: splitKeys(process.env.SMOKE_OPENROUTER_KEYS), preferred: ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-chat-v3-0324:free'] },
-  { id: 'gemini', label: 'Gemini', keys: splitKeys(process.env.SMOKE_GEMINI_KEYS), preferred: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3-flash-preview'] },
+  { id: 'groq', label: 'Groq', keys: splitKeys(process.env.SMOKE_GROQ_KEYS), preferred: ['llama-3.1-8b-instant', 'openai/gpt-oss-20b'] },
+  { id: 'opencode-zen', label: 'OpenCode Zen', keys: splitKeys(process.env.SMOKE_OPENCODE_ZEN_KEYS), preferred: ['deepseek-v4-flash', 'kimi-k2.5-free'] },
+  { id: 'openrouter', label: 'OpenRouter', keys: splitKeys(process.env.SMOKE_OPENROUTER_KEYS), preferred: ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free'] },
+  { id: 'gemini', label: 'Gemini', keys: splitKeys(process.env.SMOKE_GEMINI_KEYS), preferred: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] },
 ].filter((provider) => provider.keys.length > 0)
-
 if (providerInputs.length === 0) throw new Error('at least one SMOKE_*_KEYS variable is required')
 
 const people = [
-  'ada.lovelace@example.com',
-  'alan.turing@example.com',
-  'grace.hopper@example.com',
-  'claude.shannon@example.com',
-  'margaret.hamilton@example.com',
-  'joan.clarke@example.com',
+  'ada.lovelace@example.com', 'alan.turing@example.com', 'grace.hopper@example.com', 'claude.shannon@example.com', 'margaret.hamilton@example.com',
+  'joan.clarke@example.com', 'john.von.neumann@example.com', 'katherine.johnson@example.com', 'donald.knuth@example.com', 'barbara.liskov@example.com',
+  'edsger.dijkstra@example.com', 'frances.allen@example.com', 'george.boole@example.com', 'hedy.lamarr@example.com', 'tim.berners.lee@example.com',
+  'radia.perlman@example.com', 'dennis.ritchie@example.com', 'ken.thompson@example.com', 'linus.torvalds@example.com', 'james.gosling@example.com',
+  'guido.van.rossum@example.com', 'brendan.eich@example.com', 'bjarne.stroustrup@example.com', 'john.mccarthy@example.com', 'marvin.minsky@example.com',
+  'allen.newell@example.com', 'herbert.simon@example.com', 'norbert.wiener@example.com', 'alonzo.church@example.com', 'kurt.godel@example.com',
+  'emmy.noether@example.com', 'mary.jackson@example.com', 'dorothy.vaughan@example.com', 'annie.easley@example.com', 'evelyn.boyd.granville@example.com',
+  'maryam.mirzakhani@example.com', 'sophie.germain@example.com', 'florence.nightingale@example.com', 'cecilia.payne@example.com', 'chien.shiung.wu@example.com',
+  'lise.meitner@example.com', 'marie.curie@example.com', 'niels.bohr@example.com', 'richard.feynman@example.com', 'subrahmanyan.chandrasekhar@example.com',
+  'srinivasa.ramanujan@example.com', 'david.hilbert@example.com', 'bernhard.riemann@example.com', 'carl.gauss@example.com', 'leonhard.euler@example.com',
 ]
+const organizationNames = ['Microsoft', 'VN Fin', 'Bletchley Park', 'Bell Laboratories', 'NASA', 'CERN', 'MIT AI Laboratory', 'Apollo Guidance', 'Royal Society', 'Institute for Advanced Study']
+const multiOrganizationCounts = new Map([[0, 4], [1, 3], [2, 2], [3, 4], [4, 3], [5, 2], [6, 4], [7, 3]])
 
-const organizationPlans = [
-  { name: 'Analytical Engine Society', admins: [0], members: [2] },
-  { name: 'Bletchley Park', admins: [1], members: [5] },
-  { name: 'Bell Laboratories', admins: [3], members: [4] },
-]
+const report = { backend, base_url: baseURL, users: [], organizations: [], memberships: [], credentials: [], models: [], api_keys: [], provider_checks: [], gateway_checks: [], authorization_checks: [], prompt_profiles: {} }
+const access = { backend, base_url: baseURL, admin_keys: [], sample_user_keys: [], organization_keys: [], personal_keys: [] }
 
-const report = {
-  backend,
-  base_url: baseURL,
-  users: [],
-  organizations: [],
-  credentials: [],
-  models: [],
-  api_keys: [],
-  provider_checks: [],
-  gateway_checks: [],
-}
-
-function splitKeys(value = '') {
-  return value.split(',').map((item) => item.trim()).filter(Boolean)
-}
-
+function splitKeys(value = '') { return value.split(',').map((item) => item.trim()).filter(Boolean) }
 function safeErrorBody(value) {
   if (!value) return ''
-  try {
-    const parsed = JSON.parse(value)
-    return String(parsed?.error?.message ?? parsed?.message ?? '').slice(0, 240)
-  } catch {
-    return value.replace(/(?:gsk_|sk-|AQ\.)[A-Za-z0-9_.-]+/g, '[redacted]').slice(0, 240)
-  }
+  try { const parsed = JSON.parse(value); return String(parsed?.error?.message ?? parsed?.error ?? parsed?.message ?? '').slice(0, 240) }
+  catch { return value.replace(/(?:gsk_|sk-|AQ\.)[A-Za-z0-9_.-]+/g, '[redacted]').slice(0, 240) }
 }
-
-async function request(path, { method = 'GET', body, key = masterKey, accept = 'application/json', timeout = 60000, allowFailure = false } = {}) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeout)
+async function request(path, { method = 'GET', body, key = masterKey, accept = 'application/json', timeout = 120000, allowFailure = false } = {}) {
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeout)
   try {
-    const response = await fetch(`${baseURL}${path}`, {
-      method,
-      signal: controller.signal,
-      headers: {
-        Accept: accept,
-        Authorization: `Bearer ${key}`,
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
+    const response = await fetch(`${baseURL}${path}`, { method, signal: controller.signal, headers: { Accept: accept, Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
     const text = await response.text()
     if (!response.ok && !allowFailure) throw new Error(`${method} ${path}: HTTP ${response.status} ${safeErrorBody(text)}`)
     let data = text
-    if ((response.headers.get('content-type') ?? '').includes('json') && text) {
-      try { data = JSON.parse(text) } catch { /* retain text */ }
-    }
+    if ((response.headers.get('content-type') ?? '').includes('json') && text) { try { data = JSON.parse(text) } catch { /* retain text */ } }
     return { ok: response.ok, status: response.status, data, text }
-  } finally {
-    clearTimeout(timer)
-  }
+  } finally { clearTimeout(timer) }
 }
-
-function modelID(item) {
-  return String(item?.id ?? item?.root ?? '').trim()
-}
-
-function chooseModels(modelLists, preferred) {
-  if (modelLists.length === 0) return []
-  const common = modelLists.slice(1).reduce((result, current) => {
-    const values = new Set(current)
-    return result.filter((model) => values.has(model))
-  }, [...modelLists[0]])
+function modelID(item) { return String(item?.id ?? item?.root ?? '').trim() }
+function chooseModels(models, preferred) {
   const selected = []
   for (const wanted of preferred) {
-    const exact = common.find((model) => model === wanted)
-    const suffix = common.find((model) => model.endsWith(`/${wanted}`))
-    const match = exact ?? suffix
+    const match = models.find((model) => model === wanted) ?? models.find((model) => model.endsWith(`/${wanted}`))
     if (match && !selected.includes(match)) selected.push(match)
   }
-  for (const model of [...common].sort()) {
-    if (selected.length >= 2) break
-    if (!selected.includes(model)) selected.push(model)
-  }
+  for (const model of [...models].sort()) { if (selected.length >= 2) break; if (!selected.includes(model)) selected.push(model) }
   return selected.slice(0, 2)
 }
+function buildPrompt(profile, tokenTarget) {
+  const prefix = `Repository simulation ${profile}. Analyze authorization boundaries, provider ownership, cache accounting, and concurrent request safety. `
+  return (prefix + 'Use precise operational language and return one short sentence. '.repeat(Math.ceil(tokenTarget * 4 / 58))).slice(0, tokenTarget * 4)
+}
+const prompts = { short: buildPrompt('short', 100), medium: buildPrompt('medium', 2000), long: buildPrompt('long', 10000) }
+report.prompt_profiles = Object.fromEntries(Object.entries(prompts).map(([name, value]) => [name, { estimated_tokens: Math.round(value.length / 4), characters: value.length }]))
 
 await request('/healthz')
-
 const users = []
 for (const username of people) {
   const response = await request('/admin/users', { method: 'POST', body: { username } })
-  users.push(response.data.user)
-  report.users.push({ id: response.data.user.id, username: response.data.user.username })
+  users.push(response.data.user); report.users.push({ id: response.data.user.id, username: response.data.user.username })
 }
-
 const organizations = []
-const organizationByUser = new Map()
-for (const plan of organizationPlans) {
-  const response = await request('/admin/organizations', { method: 'POST', body: { name: plan.name } })
-  const organization = response.data
-  organizations.push(organization)
-  report.organizations.push({ id: organization.id, name: organization.name })
-  for (const index of plan.admins) {
-    await request(`/admin/organizations/${organization.id}/members`, { method: 'POST', body: { user_id: users[index].id, role: 'admin' } })
-    organizationByUser.set(index, organization)
-  }
-  for (const index of plan.members) {
-    await request(`/admin/organizations/${organization.id}/members`, { method: 'POST', body: { user_id: users[index].id, role: 'member' } })
-    organizationByUser.set(index, organization)
-  }
+for (const name of organizationNames) {
+  const response = await request('/admin/organizations', { method: 'POST', body: { name } })
+  organizations.push(response.data); report.organizations.push({ id: response.data.id, name: response.data.name })
 }
 
-const credentialsByProvider = new Map()
-for (const provider of providerInputs) {
-  const credentials = []
-  for (let index = 0; index < provider.keys.length; index += 1) {
-    const response = await request('/admin/credentials', {
-      method: 'POST',
-      body: { name: `${provider.label} ${index + 1}`, provider: provider.id, kind: 'api_key', api_key: provider.keys[index] },
-    })
-    credentials.push(response.data)
-    report.credentials.push({ id: response.data.id, name: response.data.name, provider: response.data.provider, key_preview: response.data.key_preview })
+const membershipsByUser = new Map()
+for (let userIndex = 0; userIndex < users.length; userIndex += 1) {
+  const organizationIndexes = [userIndex % organizations.length]
+  const wantedCount = multiOrganizationCounts.get(userIndex) ?? 1
+  for (let offset = 1; organizationIndexes.length < wantedCount; offset += 1) organizationIndexes.push((userIndex + offset * 3) % organizations.length)
+  const uniqueIndexes = [...new Set(organizationIndexes)]
+  membershipsByUser.set(userIndex, uniqueIndexes)
+  for (const organizationIndex of uniqueIndexes) {
+    const role = userIndex === organizationIndex ? 'admin' : 'member'
+    const response = await request(`/admin/organizations/${organizations[organizationIndex].id}/members`, { method: 'POST', body: { user_id: users[userIndex].id, role } })
+    report.memberships.push({ organization_id: organizations[organizationIndex].id, user_id: users[userIndex].id, role: response.data.role })
   }
-  credentialsByProvider.set(provider.id, credentials)
 }
+const multiUsers = [...membershipsByUser.entries()].filter(([, memberships]) => memberships.length > 1)
+if (multiUsers.length !== 8 || multiUsers.some(([, memberships]) => memberships.length < 2 || memberships.length > 4)) throw new Error('multi-organization fixture invariant failed')
+if ([...membershipsByUser.entries()].some(([index, memberships]) => index >= 8 && memberships.length !== 1)) throw new Error('single-organization fixture invariant failed')
 
-const importedModels = []
-for (const provider of providerInputs) {
-  const credentials = credentialsByProvider.get(provider.id) ?? []
-  const discovered = []
-  for (const credential of credentials) {
-    const connectivity = await request(`/admin/credentials/${credential.id}/test`, { method: 'POST', allowFailure: true })
-    const modelsResponse = await request(`/admin/credentials/${credential.id}/models`, { allowFailure: true })
-    const models = modelsResponse.ok && Array.isArray(modelsResponse.data?.data) ? modelsResponse.data.data.map(modelID).filter(Boolean) : []
-    discovered.push(models)
-    report.provider_checks.push({ provider: provider.id, credential_id: credential.id, connectivity_status: connectivity.status, models_status: modelsResponse.status, discovered_models: models.length })
-  }
-  const selected = chooseModels(discovered, provider.preferred)
-  if (selected.length === 0) continue
-  for (const credential of credentials) {
+const sources = []
+for (const provider of providerInputs) for (let index = 0; index < provider.keys.length; index += 1) sources.push({ provider, key: provider.keys[index], index })
+const preferredSourceOrder = ['openrouter', 'opencode-zen', 'groq', 'gemini', 'opencode-zen', 'openrouter', 'groq', 'gemini', 'opencode-zen', 'openrouter']
+const organizationModels = new Map()
+for (let organizationIndex = 0; organizationIndex < organizations.length; organizationIndex += 1) {
+  const candidates = sources.filter((source) => source.provider.id === preferredSourceOrder[organizationIndex])
+  const source = candidates[organizationIndex % candidates.length] ?? sources[organizationIndex % sources.length]
+  const organization = organizations[organizationIndex]
+  const created = await request('/admin/credentials', { method: 'POST', body: { name: `${organization.name} ${source.provider.label}`, provider: source.provider.id, kind: 'api_key', api_key: source.key, owner_type: 'organization', owner_organization_id: organization.id } })
+  const credential = created.data
+  report.credentials.push({ id: credential.id, name: credential.name, provider: credential.provider, owner_type: 'organization', owner_organization_id: organization.id, key_preview: credential.key_preview })
+  const connectivity = await request(`/admin/credentials/${credential.id}/test`, { method: 'POST', allowFailure: true })
+  const discoveredResponse = await request(`/admin/credentials/${credential.id}/models`, { allowFailure: true })
+  const discovered = discoveredResponse.ok && Array.isArray(discoveredResponse.data?.data) ? discoveredResponse.data.data.map(modelID).filter(Boolean) : []
+  const selected = chooseModels(discovered, source.provider.preferred)
+  const check = { provider: source.provider.id, credential_id: credential.id, organization: organization.name, connectivity_status: connectivity.status, models_status: discoveredResponse.status, discovered_models: discovered.length, selected_models: selected }
+  if (selected.length > 0) {
     const imported = await request(`/admin/credentials/${credential.id}/models/import`, { method: 'POST', body: { models: selected } })
-    for (const model of imported.data.imported ?? []) if (!importedModels.includes(model)) importedModels.push(model)
-    const chat = await request(`/admin/credentials/${credential.id}/chat-tests`, {
-      method: 'POST',
-      body: { model: selected[0], prompt: 'Reply with exactly: connection healthy' },
-      accept: 'text/event-stream',
-      timeout: 90000,
-      allowFailure: true,
-    })
-    const check = report.provider_checks.find((item) => item.credential_id === credential.id)
-    check.selected_models = selected
-    check.chat_status = chat.status
-    if (!chat.ok) check.chat_error = safeErrorBody(chat.text)
-  }
+    organizationModels.set(organization.id, imported.data.imported ?? []); report.models.push(...(imported.data.imported ?? []))
+    const chat = await request(`/admin/credentials/${credential.id}/chat-tests`, { method: 'POST', body: { model: selected[0], prompt: 'Reply with exactly: connection healthy' }, accept: 'text/event-stream', allowFailure: true })
+    check.chat_status = chat.status; if (!chat.ok) check.chat_error = safeErrorBody(chat.text)
+  } else check.chat_error = 'no models discovered'
+  report.provider_checks.push(check)
 }
 
-if (importedModels.length === 0) throw new Error('no callable provider models could be discovered and imported')
-report.models = importedModels
+const personalUserIndex = 17
+const personalSource = sources.find((source) => source.provider.id === 'opencode-zen') ?? sources[0]
+const personalCreated = await request('/admin/credentials', { method: 'POST', body: { name: `${people[personalUserIndex]} personal`, provider: personalSource.provider.id, kind: 'api_key', api_key: personalSource.key, owner_type: 'user', owner_user_id: users[personalUserIndex].id } })
+const personalCredential = personalCreated.data
+report.credentials.push({ id: personalCredential.id, name: personalCredential.name, provider: personalCredential.provider, owner_type: 'user', owner_user_id: users[personalUserIndex].id, key_preview: personalCredential.key_preview })
+const personalDiscovery = await request(`/admin/credentials/${personalCredential.id}/models`)
+const personalSelected = chooseModels(personalDiscovery.data.data.map(modelID).filter(Boolean), personalSource.provider.preferred)
+const personalImport = await request(`/admin/credentials/${personalCredential.id}/models/import`, { method: 'POST', body: { models: personalSelected } })
+const personalModels = personalImport.data.imported ?? []; report.models.push(...personalModels)
+
+const managementScopes = ['chat', 'usage:read', 'keys:manage', 'credentials:manage', 'models:manage', 'members:manage']
+const adminKeys = []
+for (let index = 0; index < organizations.length; index += 1) {
+  const organization = organizations[index]; const models = organizationModels.get(organization.id) ?? []
+  if (models.length === 0) throw new Error(`no imported models for ${organization.name}`)
+  const response = await request('/admin/api-keys', { method: 'POST', body: { name: `${organization.name} administrator`, owner_type: 'user', owner_user_id: users[index].id, context_organization_id: organization.id, models, scopes: managementScopes, quota_usd: 25, quota_period: 'week', rpm: 120 } })
+  adminKeys.push(response.data); report.api_keys.push({ id: response.data.id, name: response.data.name, owner_type: 'user', owner_user_id: users[index].id, organization_id: organization.id, models, role: 'admin' })
+  access.admin_keys.push({ username: people[index], organization: organization.name, plaintext: response.data.plaintext })
+}
 
 const userKeys = []
 for (let index = 0; index < users.length; index += 1) {
-  const organization = organizationByUser.get(index)
-  if (!organization) throw new Error(`no organization assigned to ${people[index]}`)
-  const assigned = [importedModels[index % importedModels.length], importedModels[(index + 1) % importedModels.length]].filter((value, position, values) => values.indexOf(value) === position)
-  const quota = 2
-  const rpm = 30
-  const response = await request('/admin/api-keys', {
-    method: 'POST',
-    body: {
-      name: `${people[index].split('@')[0].replaceAll('.', ' ')} chat`,
-      owner_type: 'user',
-      owner_user_id: users[index].id,
-      context_organization_id: organization.id,
-      models: assigned,
-      scopes: ['chat'],
-      quota_usd: quota,
-      quota_period: 'week',
-      rpm,
-    },
-  })
-  userKeys.push(response.data)
-  report.api_keys.push({ id: response.data.id, name: response.data.name, key_prefix: response.data.key_prefix, owner_type: 'user', owner_user_id: users[index].id, organization_id: organization.id, models: assigned, quota_usd: quota, rpm })
+  const organization = organizations[index % organizations.length]; const models = organizationModels.get(organization.id) ?? []
+  const response = await request('/admin/api-keys', { method: 'POST', body: { name: `${people[index].split('@')[0].replaceAll('.', ' ')} workspace`, owner_type: 'user', owner_user_id: users[index].id, context_organization_id: organization.id, models: models.slice(0, 2), scopes: ['chat', 'usage:read'], quota_usd: 5, quota_period: 'week', rpm: 60 } })
+  userKeys.push(response.data); report.api_keys.push({ id: response.data.id, name: response.data.name, owner_type: 'user', owner_user_id: users[index].id, organization_id: organization.id, models: models.slice(0, 2), role: 'member' })
+  if (index < 5 || index === personalUserIndex) access.sample_user_keys.push({ username: people[index], organization: organization.name, plaintext: response.data.plaintext })
 }
 
 const organizationKeys = []
-for (const organization of organizations) {
-  const quota = 5
-  const rpm = 60
-  const response = await request('/admin/api-keys', {
-    method: 'POST',
-    body: {
-      name: `${organization.name} shared chat`,
-      owner_type: 'organization',
-      owner_organization_id: organization.id,
-      context_organization_id: organization.id,
-      models: importedModels,
-      scopes: ['chat'],
-      quota_usd: quota,
-      quota_period: 'week',
-      rpm,
-    },
-  })
-  organizationKeys.push(response.data)
-  report.api_keys.push({ id: response.data.id, name: response.data.name, key_prefix: response.data.key_prefix, owner_type: 'organization', organization_id: organization.id, models: importedModels, quota_usd: quota, rpm })
+for (let index = 0; index < organizations.length; index += 1) {
+  const organization = organizations[index]; const models = organizationModels.get(organization.id) ?? []
+  const response = await request('/admin/api-keys', { method: 'POST', body: { name: `${organization.name} shared workload`, owner_type: 'organization', owner_organization_id: organization.id, context_organization_id: organization.id, models, scopes: ['chat', 'usage:read'], quota_usd: 20, quota_period: 'week', rpm: 120 } })
+  organizationKeys.push(response.data); report.api_keys.push({ id: response.data.id, name: response.data.name, owner_type: 'organization', organization_id: organization.id, models })
+  access.organization_keys.push({ organization: organization.name, plaintext: response.data.plaintext })
 }
 
+const personalKeyResponse = await request('/admin/api-keys', { method: 'POST', body: { name: `${people[personalUserIndex]} private project`, owner_type: 'user', owner_user_id: users[personalUserIndex].id, context_organization_id: '', models: personalModels, scopes: ['chat', 'usage:read', 'credentials:manage', 'models:manage'], quota_usd: 5, quota_period: 'week', rpm: 60 } })
+const personalKey = personalKeyResponse.data
+report.api_keys.push({ id: personalKey.id, name: personalKey.name, owner_type: 'user', owner_user_id: users[personalUserIndex].id, organization_id: '', models: personalModels, role: 'personal' })
+access.personal_keys.push({ username: people[personalUserIndex], plaintext: personalKey.plaintext })
+
+const delegatedUserIndex = 10
+const delegated = await request('/admin/api-keys', { method: 'POST', key: adminKeys[0].plaintext, body: { name: 'Microsoft delegated member key', owner_type: 'user', owner_user_id: users[delegatedUserIndex].id, context_organization_id: organizations[0].id, models: (organizationModels.get(organizations[0].id) ?? []).slice(0, 1), scopes: ['chat'], quota_usd: 1, quota_period: 'week', rpm: 20 } })
+report.api_keys.push({ id: delegated.data.id, name: delegated.data.name, owner_type: 'user', owner_user_id: users[delegatedUserIndex].id, organization_id: organizations[0].id, delegated_by_org_admin: true })
+
+async function gateway(key, model, profile, stream) {
+  const response = await request('/v1/chat/completions', { method: 'POST', key, body: { model, messages: [{ role: 'user', content: prompts[profile] }], max_tokens: 32, stream, reasoning: { effort: 'low' } }, accept: stream ? 'text/event-stream' : 'application/json', timeout: 180000, allowFailure: true })
+  report.gateway_checks.push({ profile, model, stream, status: response.status, ...(response.ok ? {} : { error: safeErrorBody(response.text) }) })
+  return response
+}
 for (let index = 0; index < userKeys.length; index += 1) {
-  const key = userKeys[index]
-  const models = await request('/v1/models', { key: key.plaintext })
-  const allowed = Array.isArray(models.data?.data) ? models.data.data.map((item) => item.id) : []
-  const expected = report.api_keys.find((item) => item.id === key.id)?.models ?? []
-  if (allowed.length !== expected.length || expected.some((model) => !allowed.includes(model))) throw new Error(`allowed model mismatch for ${key.id}`)
-  const model = expected[0]
-  const chat = await request('/v1/chat/completions', {
-    method: 'POST',
-    key: key.plaintext,
-    body: { model, messages: [{ role: 'user', content: `Reply with exactly: ${people[index].split('@')[0]}` }], max_tokens: 24, stream: false },
-    timeout: 90000,
-    allowFailure: true,
-  })
-  report.gateway_checks.push({ key_id: key.id, model, stream: false, status: chat.status, ...(chat.ok ? {} : { error: safeErrorBody(chat.text) }) })
+  const models = report.api_keys.find((item) => item.id === userKeys[index].id)?.models ?? []
+  await gateway(userKeys[index].plaintext, models[0], 'short', false)
 }
+for (let index = 0; index < organizationKeys.length; index += 1) {
+  const models = organizationModels.get(organizations[index].id) ?? []
+  await gateway(organizationKeys[index].plaintext, models[0], 'medium', false)
+  await gateway(organizationKeys[index].plaintext, models[0], 'long', index % 2 === 0)
+}
+for (const profile of ['short', 'medium', 'long']) await gateway(personalKey.plaintext, personalModels[0], profile, profile === 'long')
 
-if (organizationKeys.length > 0) {
-  for (let index = 0; index < importedModels.length; index += 1) {
-    const key = organizationKeys[index % organizationKeys.length]
-    const model = importedModels[index]
-    const chat = await request('/v1/chat/completions', {
-      method: 'POST',
-      key: key.plaintext,
-      body: { model, messages: [{ role: 'user', content: `Reply with exactly: ${model} healthy` }], max_tokens: 24, stream: false },
-      timeout: 90000,
-      allowFailure: true,
-    })
-    report.gateway_checks.push({ key_id: key.id, model, stream: false, status: chat.status, ...(chat.ok ? {} : { error: safeErrorBody(chat.text) }) })
-  }
-  const key = organizationKeys[0]
-  const model = importedModels.find((item) => item.startsWith('ocz/')) ?? importedModels[0]
-  const stream = await request('/v1/chat/completions', {
-    method: 'POST',
-    key: key.plaintext,
-    body: { model, messages: [{ role: 'user', content: 'Reply with exactly: streaming healthy' }], max_tokens: 24, stream: true },
-    accept: 'text/event-stream',
-    timeout: 90000,
-    allowFailure: true,
-  })
-  report.gateway_checks.push({ key_id: key.id, model, stream: true, status: stream.status, ...(stream.ok ? {} : { error: safeErrorBody(stream.text) }) })
-}
+const ownMembers = await request(`/admin/organizations/${organizations[0].id}/members`, { key: adminKeys[0].plaintext })
+const foreignMembers = await request(`/admin/organizations/${organizations[1].id}/members`, { key: adminKeys[0].plaintext, allowFailure: true })
+const adminCredentials = await request('/admin/credentials', { key: adminKeys[0].plaintext })
+const personalCredentials = await request('/admin/credentials', { key: personalKey.plaintext })
+const userRecent = await request('/admin/usage/recent?limit=100', { key: userKeys[personalUserIndex].plaintext })
+const orgRecent = await request(`/admin/usage/recent?limit=500&organization_id=${organizations[0].id}`, { key: adminKeys[0].plaintext })
+const userModelList = await request('/v1/models', { key: userKeys[0].plaintext })
+const expectedModels = report.api_keys.find((item) => item.id === userKeys[0].id)?.models ?? []
+const listedModelIDs = userModelList.data.data?.map((item) => item.id) ?? []
+const checks = [
+  ['org admin lists all own members', ownMembers.ok && ownMembers.data.data.length === report.memberships.filter((item) => item.organization_id === organizations[0].id).length],
+  ['org admin cannot list foreign members', foreignMembers.status === 403 || foreignMembers.status === 404],
+  ['org admin cannot see member personal credential', !adminCredentials.data.some((item) => item.id === personalCredential.id)],
+  ['personal user sees own credential', personalCredentials.data.some((item) => item.id === personalCredential.id)],
+  ['user usage contains only own actor', userRecent.data.data.every((item) => item.user_id === users[personalUserIndex].id)],
+  ['org usage contains only organization context', orgRecent.data.data.every((item) => item.organization_id === organizations[0].id)],
+  ['API key lists exact allowed models', listedModelIDs.length === expectedModels.length && expectedModels.every((model) => listedModelIDs.includes(model))],
+  ['organization model namespace', [...organizationModels.values()].flat().every((model) => model.split('/').length >= 3)],
+  ['personal model namespace', personalModels.every((model) => model.split('/').length === 2)],
+]
+for (const [name, ok] of checks) { report.authorization_checks.push({ name, ok }); if (!ok) throw new Error(`authorization check failed: ${name}`) }
 
 const listedUsers = await request('/admin/users?limit=100')
 const listedOrganizations = await request('/admin/organizations?limit=100')
-const listedKeys = await request('/admin/api-keys?limit=100')
+const listedKeys = await request('/admin/api-keys?limit=500')
 const listedCredentials = await request('/admin/credentials')
 const listedModels = await request('/admin/models')
-const summary = await request('/admin/usage/summary')
-
+async function waitForUsageCount(expected, timeout = 30000) {
+  const deadline = Date.now() + timeout
+  let summary
+  do {
+    summary = await request('/admin/usage/summary')
+    if ((summary.data.requests ?? 0) >= expected) return summary
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  } while (Date.now() < deadline)
+  return summary
+}
+const summary = await waitForUsageCount(report.gateway_checks.length)
+const seededOrganizationNames = new Set(organizationNames)
 const counts = {
   users: listedUsers.data.data?.length ?? 0,
-  organizations: listedOrganizations.data.data?.length ?? 0,
+  seeded_organizations: (listedOrganizations.data.data ?? []).filter((item) => seededOrganizationNames.has(item.name)).length,
+  memberships: report.memberships.length,
+  multi_organization_users: multiUsers.length,
   api_keys: listedKeys.data.data?.length ?? 0,
   credentials: Array.isArray(listedCredentials.data) ? listedCredentials.data.length : 0,
   models: Array.isArray(listedModels.data) ? listedModels.data.length : 0,
   usage_requests: summary.data.requests ?? 0,
 }
-if (counts.users !== people.length) throw new Error(`expected ${people.length} users, found ${counts.users}`)
-if (counts.organizations < organizationPlans.length) throw new Error(`expected at least ${organizationPlans.length} organizations, found ${counts.organizations}`)
-if (counts.api_keys !== userKeys.length + organizationKeys.length) throw new Error(`API key count mismatch: ${counts.api_keys}`)
-report.counts = counts
-report.ok = true
-
+if (counts.users !== 50 || counts.seeded_organizations !== 10 || counts.multi_organization_users >= 10) throw new Error(`fixture count mismatch: ${JSON.stringify(counts)}`)
+if (counts.api_keys !== report.api_keys.length) throw new Error(`API key count mismatch: ${counts.api_keys} != ${report.api_keys.length}`)
+if (counts.usage_requests < report.gateway_checks.length) throw new Error(`usage count mismatch: ${counts.usage_requests} < ${report.gateway_checks.length}`)
+report.counts = counts; report.ok = true
+if (accessFile) { await writeFile(accessFile, `${JSON.stringify(access, null, 2)}\n`, { mode: 0o600 }); await chmod(accessFile, 0o600) }
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)

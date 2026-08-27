@@ -260,6 +260,10 @@ h2 { font-size: 19px; }
 .section-heading { gap: 22px; margin: 32px 0 14px; }
 .section-heading p { font-size: 14px; }
 .provider-grid-react, .available-model-grid, .model-card-grid, .organization-grid { gap: 14px; }
+.catalog-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 18px; }
+.catalog-pagination button { min-width: 88px; border: 1px solid var(--border); border-radius: 7px; padding: 9px 13px; color: #ddd; background: #252525; cursor: pointer; }
+.catalog-pagination button:disabled { color: #666; cursor: default; }
+.catalog-pagination span { color: #999; font: 12px ui-monospace, monospace; }
 .provider-card-react, .available-model-card, .model-card, .organization-card { padding: 18px; background: #202020; }
 .provider-card-head { grid-template-columns: 42px minmax(0, 1fr) auto; gap: 13px; }
 .provider-monogram { width: 42px; height: 42px; border-color: #484848; background: #2b2b2b; font-size: 13px; }

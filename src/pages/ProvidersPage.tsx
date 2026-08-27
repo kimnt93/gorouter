@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getProviders, importModels, refreshCredentialQuota, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
-import type { Credential, OAuthStartResponse, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot } from '../api/contracts'
+import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
+import type { Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
 import { Modal } from '../components/Modal'
 import { PageLoading } from '../components/PageState'
 import { useSession } from '../context/SessionContext'
 
 export function ProvidersPage() {
-  const { isMaster } = useSession()
+  const { isMaster, session } = useSession()
   const [providers, setProviders] = useState<ProviderDefinition[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [connect, setConnect] = useState<ProviderDefinition | null>(null)
@@ -18,8 +19,8 @@ export function ProvidersPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [providerResponse, credentialResponse] = await Promise.all([getProviders(), getCredentials()])
-      setProviders(providerResponse.data); setCredentials(credentialResponse)
+      const [providerResponse, credentialResponse, organizationResponse] = await Promise.all([getProviders(), getCredentials(), getOrganizations()])
+      setProviders(providerResponse.data); setCredentials(credentialResponse); setOrganizations(organizationResponse.data)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load])
@@ -30,8 +31,8 @@ export function ProvidersPage() {
     <ErrorBanner message={error} />
     <ProviderSection title="OAuth subscriptions" detail="Guided browser and device authorization flows." providers={grouped.oauth} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onRefresh={load} />
     <ProviderSection title="API-key providers" detail="Preset and custom OpenAI-compatible endpoints." providers={grouped.api} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onRefresh={load} />
-    {connect && <ConnectProviderModal provider={connect} onClose={() => setConnect(null)} onConnected={() => { setConnect(null); void load() }} />}
-    {modelsFor && <ModelsModal credential={modelsFor} canImport={isMaster} onClose={() => setModelsFor(null)} />}
+    {connect && <ConnectProviderModal provider={connect} session={session} organizations={organizations} onClose={() => setConnect(null)} onConnected={() => { setConnect(null); void load() }} />}
+    {modelsFor && <ModelsModal credential={modelsFor} canImport={isMaster || Boolean(session?.scopes.includes('models:manage'))} onClose={() => setModelsFor(null)} />}
     {chatFor && <ChatTestModal credential={chatFor} onClose={() => setChatFor(null)} />}
   </>
 }
@@ -100,7 +101,7 @@ function relativeTime(value: string): string {
   return formatter.format(Math.round(seconds / 86_400), 'day')
 }
 
-function ConnectProviderModal({ provider, onClose, onConnected }: { provider: ProviderDefinition; onClose: () => void; onConnected: () => void }) {
+function ConnectProviderModal({ provider, session, organizations, onClose, onConnected }: { provider: ProviderDefinition; session: Session | null; organizations: Organization[]; onClose: () => void; onConnected: () => void }) {
   const [name, setName] = useState(`${provider.name} account`)
   const [baseURL, setBaseURL] = useState(provider.default_base_url)
   const [apiKey, setAPIKey] = useState('')
@@ -109,11 +110,17 @@ function ConnectProviderModal({ provider, onClose, onConnected }: { provider: Pr
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
-  const submitAPIKey = async () => { setBusy(true); setError(''); try { await createCredential({ name, provider: provider.id, kind: 'api_key', base_url: baseURL, api_key: apiKey, oauth_access: '', oauth_refresh: '' }); setAPIKey(''); onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
+  const canChooseOrganization = session?.role === 'master' || session?.principal_type === 'organization' || session?.membership_role === 'admin'
+  const defaultOwner = session?.principal_type === 'organization' ? 'organization' : 'personal'
+  const [owner, setOwner] = useState(defaultOwner)
+  const [ownerOrganizationID, setOwnerOrganizationID] = useState(session?.organization_id ?? '')
+  const ownership = owner === 'organization' ? { owner_type: 'organization', owner_organization_id: ownerOrganizationID } : session?.role === 'master' ? {} : { owner_type: 'user' }
+  const submitAPIKey = async () => { setBusy(true); setError(''); try { await createCredential({ name, provider: provider.id, kind: 'api_key', base_url: baseURL, api_key: apiKey, oauth_access: '', oauth_refresh: '', ...ownership }); setAPIKey(''); onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
   const beginOAuth = async () => { setBusy(true); setError(''); try { setFlow(await startOAuth(provider.id)) } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
-  const finishOAuth = async () => { if (!flow) return; setBusy(true); setError(''); try { const response = await completeOAuth(provider.id, { flow_id: flow.flow_id, callback, name }); if (response.status === 'authorization_pending') setStatus('Authorization is still pending. Finish sign-in, then check again.'); else onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
+  const finishOAuth = async () => { if (!flow) return; setBusy(true); setError(''); try { const response = await completeOAuth(provider.id, { flow_id: flow.flow_id, callback, name, ...ownership }); if (response.status === 'authorization_pending') setStatus('Authorization is still pending. Finish sign-in, then check again.'); else onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
   return <Modal title={`Connect ${provider.name}`} onClose={onClose}><ErrorBanner message={error} /><SuccessBanner message={status} /><div className="form-grid"><Field label="Connection name"><input value={name} onChange={(event) => setName(event.target.value)} /></Field></div>
-    {provider.auth === 'api_key' ? <><Field label="Base URL"><input type="url" value={baseURL} disabled={!provider.custom_base_url && Boolean(provider.default_base_url)} onChange={(event) => setBaseURL(event.target.value)} /></Field><Field label="API key"><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setAPIKey(event.target.value)} /></Field><div className="dialog-actions"><button className="button" disabled={busy || !name.trim() || !apiKey.trim()} onClick={() => void submitAPIKey()}>Save encrypted connection</button></div></> : !flow ? <div className="oauth-panel"><p>{provider.description}</p><button className="button" disabled={busy || !provider.oauth_supported} onClick={() => void beginOAuth()}>Start authorization</button></div> : <div className="oauth-panel"><p>{flow.instructions}</p>{flow.user_code && <div className="device-code"><span>Device code</span><strong>{flow.user_code}</strong></div>}{(flow.verification_uri_complete || flow.verification_uri || flow.authorize_url) && <a className="button secondary" target="_blank" rel="noopener noreferrer" href={flow.verification_uri_complete || flow.verification_uri || flow.authorize_url}>Open authorization page ↗</a>}{flow.flow_type !== 'device' && <Field label="Callback URL or code"><textarea rows={4} value={callback} onChange={(event) => setCallback(event.target.value)} /></Field>}<div className="dialog-actions"><button className="button" disabled={busy} onClick={() => void finishOAuth()}>{flow.flow_type === 'device' ? 'Check authorization' : 'Complete connection'}</button></div></div>}
+    {canChooseOrganization && <div className="form-grid"><Field label="Connection owner"><select value={owner} onChange={(event) => setOwner(event.target.value)}><option value="personal">{session?.role === 'master' ? 'Shared globally' : 'Personal'}</option><option value="organization">Organization</option></select></Field>{owner === 'organization' && <Field label="Owner organization"><select value={ownerOrganizationID} disabled={session?.role !== 'master'} onChange={(event) => setOwnerOrganizationID(event.target.value)}><option value="">Choose organization</option>{organizations.map((organization) => <option value={organization.id} key={organization.id}>{organization.name}</option>)}</select></Field>}</div>}
+    {provider.auth === 'api_key' ? <><Field label="Base URL"><input type="url" value={baseURL} disabled={!provider.custom_base_url && Boolean(provider.default_base_url)} onChange={(event) => setBaseURL(event.target.value)} /></Field><Field label="API key"><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setAPIKey(event.target.value)} /></Field><div className="dialog-actions"><button className="button" disabled={busy || !name.trim() || !apiKey.trim() || owner === 'organization' && !ownerOrganizationID} onClick={() => void submitAPIKey()}>Save encrypted connection</button></div></> : !flow ? <div className="oauth-panel"><p>{provider.description}</p><button className="button" disabled={busy || !provider.oauth_supported || owner === 'organization' && !ownerOrganizationID} onClick={() => void beginOAuth()}>Start authorization</button></div> : <div className="oauth-panel"><p>{flow.instructions}</p>{flow.user_code && <div className="device-code"><span>Device code</span><strong>{flow.user_code}</strong></div>}{(flow.verification_uri_complete || flow.verification_uri || flow.authorize_url) && <a className="button secondary" target="_blank" rel="noopener noreferrer" href={flow.verification_uri_complete || flow.verification_uri || flow.authorize_url}>Open authorization page ↗</a>}{flow.flow_type !== 'device' && <Field label="Callback URL or code"><textarea rows={4} value={callback} onChange={(event) => setCallback(event.target.value)} /></Field>}<div className="dialog-actions"><button className="button" disabled={busy} onClick={() => void finishOAuth()}>{flow.flow_type === 'device' ? 'Check authorization' : 'Complete connection'}</button></div></div>}
   </Modal>
 }
 

@@ -11,6 +11,7 @@ import { formatPriceRate } from '../lib/pricing'
 const emptyPrice: Price = { input_per_m: 0, output_per_m: 0, cached_input_per_m: 0, cache_write_per_m: 0 }
 type Tab = 'catalog' | 'blends'
 interface ConnectedModel { credential: Credential; model: ProviderModel; price?: CatalogPrice }
+const catalogPageSize = 50
 
 function priceCandidates(publicID: string, upstream: string): string[] {
   const value = (upstream || publicID).toLowerCase()
@@ -38,6 +39,7 @@ export function ModelsPage() {
   const [connected, setConnected] = useState<ConnectedModel[]>([])
   const [discoveryErrors, setDiscoveryErrors] = useState<string[]>([])
   const [search, setSearch] = useState('')
+  const [catalogPage, setCatalogPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<ModelDefinition | null>(null)
@@ -67,6 +69,10 @@ export function ModelsPage() {
     const query = search.trim().toLowerCase()
     return query ? connected.filter((item) => `${item.model.public_id} ${item.model.name ?? ''} ${item.credential.name} ${item.credential.provider}`.toLowerCase().includes(query)) : connected
   }, [connected, search])
+  const catalogPages = Math.max(1, Math.ceil(visibleConnected.length / catalogPageSize))
+  const pagedConnected = useMemo(() => visibleConnected.slice((catalogPage - 1) * catalogPageSize, catalogPage * catalogPageSize), [catalogPage, visibleConnected])
+  useEffect(() => { setCatalogPage(1) }, [search])
+  useEffect(() => { if (catalogPage > catalogPages) setCatalogPage(catalogPages) }, [catalogPage, catalogPages])
   const closeModal = () => { setEditing(null); setDraft(null) }
   const remove = async (name: string) => { if (!window.confirm(`Delete model blend ${name}?`)) return; try { await deleteModel(name); await load() } catch (reason) { setError((reason as Error).message) } }
   const addConnected = (item: ConnectedModel) => setDraft({ name: item.model.public_id, upstream_model: item.model.id, strategy: 'priority', enabled: true, routes: [{ credential_id: item.credential.id, priority: 0, weight: 1, enabled: true }] })
@@ -78,7 +84,7 @@ export function ModelsPage() {
     {loading ? <PageLoading /> : tab === 'catalog' ? <>
       <div className="catalog-toolbar"><input aria-label="Search models" placeholder="Search model or provider" value={search} onChange={(event) => setSearch(event.target.value)} /><span>{visibleConnected.length} connected models</span></div>
       {discoveryErrors.length > 0 && <div className="banner error-banner">Some provider catalogs could not load: {discoveryErrors.join(' · ')}</div>}
-      {visibleConnected.length === 0 ? <Empty title="No connected models" detail="Connect a provider with model discovery, or create a blend manually." /> : <div className="available-model-grid">{visibleConnected.map((item) => { const callable = models.find((model) => model.enabled && model.name === item.model.public_id); return <article className="available-model-card" key={`${item.credential.id}-${item.model.id}`}><div className="model-card-title"><div><strong>{item.model.public_id}</strong><small>{item.model.name || item.model.id}</small></div><Badge>{item.credential.provider}</Badge></div><p>{item.credential.name}{item.model.context_length ? ` · ${item.model.context_length.toLocaleString()} context` : ''}</p><PriceStrip price={item.price?.price} source={item.price ? `catalog · ${item.price.model}` : 'free'} /><div className="card-actions model-card-actions">{callable && <button onClick={() => setUsage({ model: callable.name, price: callable.price ?? item.price?.price ?? emptyPrice })}>View usage</button>}{isMaster && <button onClick={() => addConnected(item)}>Add to blends</button>}</div></article>})}</div>}
+      {visibleConnected.length === 0 ? <Empty title="No connected models" detail="Connect a provider with model discovery, or create a blend manually." /> : <><div className="available-model-grid">{pagedConnected.map((item) => { const callable = models.find((model) => model.enabled && model.name === item.model.public_id); return <article className="available-model-card" key={`${item.credential.id}-${item.model.id}`}><div className="model-card-title"><div><strong>{item.model.public_id}</strong><small>{item.model.name || item.model.id}</small></div><Badge>{item.credential.provider}</Badge></div><p>{item.credential.name}{item.model.context_length ? ` · ${item.model.context_length.toLocaleString()} context` : ''}</p><PriceStrip price={item.price?.price} source={item.price ? `catalog · ${item.price.model}` : 'free'} /><div className="card-actions model-card-actions">{callable && <button onClick={() => setUsage({ model: callable.name, price: callable.price ?? item.price?.price ?? emptyPrice })}>View usage</button>}{isMaster && <button onClick={() => addConnected(item)}>Add to blends</button>}</div></article>})}</div>{catalogPages > 1 && <nav className="catalog-pagination" aria-label="Model catalog pages"><button disabled={catalogPage === 1} onClick={() => setCatalogPage((page) => page - 1)}>Previous</button><span>Page {catalogPage} of {catalogPages} · {visibleConnected.length} models</span><button disabled={catalogPage === catalogPages} onClick={() => setCatalogPage((page) => page + 1)}>Next</button></nav>}</>}
     </> : models.length === 0 ? <Empty title="No model blends configured" detail="Add a connected model or define a blend manually." /> : <div className="model-card-grid">{models.map((model) => { const inherited = findCatalogPrice(catalog, model.name, model.upstream_model); const effectivePrice = model.price ?? inherited?.price ?? emptyPrice; return <article className="model-card" key={model.name}><div className="model-card-title"><div><strong>{model.name}</strong><small>original · {model.upstream_model}</small></div><div><Badge tone={model.enabled ? 'good' : ''}>{model.enabled ? 'enabled' : 'disabled'}</Badge><Badge>{model.strategy}</Badge></div></div><div className="route-list">{model.routes.map((route) => <div key={route.credential_id}><span>{credentials.find((credential) => credential.id === route.credential_id)?.name || route.credential_id}</span><small>P{route.priority} · W{route.weight} · {route.enabled ? 'active' : 'off'}</small></div>)}</div><PriceStrip price={effectivePrice} source={model.price ? 'manual override' : inherited ? `original · ${inherited.model}` : 'free'} /><div className="card-actions"><button onClick={() => setUsage({ model: model.name, price: effectivePrice })}>View usage</button>{isMaster && <><button onClick={() => setEditing(model)}>Edit blend</button><button className="danger-text" onClick={() => void remove(model.name)}>Delete</button></>}</div></article>})}</div>}
     {(draft || editing) && <ModelModal existing={editing} initial={draft} credentials={credentials} inherited={findCatalogPrice(catalog, (editing ?? draft)?.name ?? '', (editing ?? draft)?.upstream_model ?? '')} onClose={closeModal} onSaved={() => { closeModal(); void load() }} />}
     {usage && <ModelUsageModal model={usage.model} price={usage.price} onClose={() => setUsage(null)} />}
