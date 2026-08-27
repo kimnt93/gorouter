@@ -1,0 +1,4 @@
+interface:
+  display_name: "React Dashboard"
+  short_description: "Build the typed React operations dashboard"
+  default_prompt: "Use $react-dashboard to update this GoRouter dashboard flow."

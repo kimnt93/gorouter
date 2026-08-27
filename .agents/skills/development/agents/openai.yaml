@@ -1,0 +1,4 @@
+interface:
+  display_name: "Development"
+  short_description: "Implement and update GoRouter features safely"
+  default_prompt: "Use $development to implement this GoRouter change using the project conventions."

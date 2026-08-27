@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Verification"
+  short_description: "Verify code and report reproducible evidence"
+  default_prompt: "Use $code-verification to test and validate this GoRouter change."

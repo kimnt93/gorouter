@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark & Report"
+  short_description: "Run reproducible benchmarks and report evidence"
+  default_prompt: "Use $benchmark-report to benchmark this GoRouter behavior and produce a reproducible report."

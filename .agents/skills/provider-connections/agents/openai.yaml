@@ -1,0 +1,4 @@
+interface:
+  display_name: "Provider Connections"
+  short_description: "Add and maintain LLM provider connections"
+  default_prompt: "Use $provider-connections to implement or diagnose this GoRouter provider integration."

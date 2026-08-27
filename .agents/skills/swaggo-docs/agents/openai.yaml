@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swaggo Docs"
+  short_description: "Maintain and verify generated Swagger contracts"
+  default_prompt: "Use $swaggo-docs to update and regenerate the GoRouter API documentation."

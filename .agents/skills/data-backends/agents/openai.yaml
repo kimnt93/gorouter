@@ -1,0 +1,4 @@
+interface:
+  display_name: "Data Backends"
+  short_description: "Keep PostgreSQL ClickHouse and Redis correct"
+  default_prompt: "Use $data-backends to update GoRouter storage while preserving backend parity."

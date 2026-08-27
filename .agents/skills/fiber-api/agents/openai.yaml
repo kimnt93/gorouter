@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fiber API"
+  short_description: "Build typed Fiber handlers and API contracts"
+  default_prompt: "Use $fiber-api to add or update this GoRouter HTTP endpoint."

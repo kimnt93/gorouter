@@ -1,0 +1,4 @@
+interface:
+  display_name: "Solution Design"
+  short_description: "Design secure multi-tenant gateway features"
+  default_prompt: "Use $solution-design to design this GoRouter feature before implementation."
