@@ -49,7 +49,10 @@ CHARS_PER_TOKEN = 3.8  # Calibrated against Luna usage for this mixed codebase.
 @dataclass
 class Result:
     target: str
+    model: str
     mode: str
+    concurrency: int
+    repetition: int
     requested_tokens: int
     estimated_input_tokens: int
     status: int
@@ -105,12 +108,12 @@ def source_files(root: Path) -> list[Path]:
     return sorted(selected, key=lambda item: str(item.relative_to(root)))
 
 
-def build_prompt(root: Path, requested_tokens: int) -> tuple[str, int, int]:
+def build_prompt(root: Path, requested_tokens: int, response_words: int) -> tuple[str, int, int]:
     target_chars = int(requested_tokens * CHARS_PER_TOKEN)
     header = (
         "Analyze the repository snapshot below. Identify its architecture, request flow, "
         "concurrency behavior, resource risks, and three concrete improvements. Return "
-        "exactly 250 plain words. Do not use tools and do not reproduce large code blocks.\n\n"
+        f"exactly {response_words} plain words. Do not use tools and do not reproduce large code blocks.\n\n"
         "<repository_snapshot>\n"
     )
     footer = "\n</repository_snapshot>"
@@ -285,13 +288,14 @@ def usage_from_body(body: bytes, stream: bool) -> tuple[int | None, int | None, 
     )
 
 
-def chat_call(target: str, base: str, key: str, model: str, prompt: str, requested_tokens: int, estimated_tokens: int, stream: bool, timeout: int, probe_identifier: str, temperature: float) -> Result:
+def chat_call(target: str, base: str, key: str, model: str, prompt: str, requested_tokens: int, estimated_tokens: int, stream: bool, timeout: int, probe_identifier: str, temperature: float, max_tokens: int, concurrency: int, repetition: int) -> Result:
     mode = "stream" if stream else "nonstream"
     unique_prompt = prompt + f"\n\nProbe identifier: {probe_identifier}"
     payload = {
         "model": model,
         "stream": stream,
         "temperature": temperature,
+        "max_tokens": max_tokens,
         "reasoning": {"effort": "low"},
         "messages": [{"role": "user", "content": unique_prompt}],
     }
@@ -311,7 +315,7 @@ def chat_call(target: str, base: str, key: str, model: str, prompt: str, request
             gateway_cache = response.headers.get("X-Cache", "")
             header_ms = round((time.perf_counter() - started) * 1000)
             while True:
-                chunk = response.read(64 * 1024)
+                chunk = response.readline() if stream else response.read1(64 * 1024)
                 if not chunk:
                     break
                 if not first_byte_ms:
@@ -329,7 +333,9 @@ def chat_call(target: str, base: str, key: str, model: str, prompt: str, request
     if not ok and not error_text:
         error_text = safe_error(bytes(body))
     return Result(
-        target=target, mode=mode, requested_tokens=requested_tokens,
+        target=target, model=model, mode=mode, concurrency=concurrency,
+        repetition=repetition,
+        requested_tokens=requested_tokens,
         estimated_input_tokens=estimated_tokens, status=status, ok=ok,
         header_ms=header_ms, first_byte_ms=first_byte_ms,
         duration_ms=duration_ms, response_bytes=len(body),
@@ -341,9 +347,9 @@ def chat_call(target: str, base: str, key: str, model: str, prompt: str, request
     )
 
 
-def run_group(target: str, base: str, key: str, model: str, prompt: str, requested_tokens: int, estimated_tokens: int, mode: str, concurrency: int, timeout: int, probe_identifiers: list[str], temperature: float = 0.2) -> list[Result]:
+def run_group(target: str, base: str, key: str, model: str, prompt: str, requested_tokens: int, estimated_tokens: int, mode: str, concurrency: int, timeout: int, probe_identifiers: list[str], repetition: int, temperature: float = 0.2, max_tokens: int = 128) -> list[Result]:
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(chat_call, target, base, key, model, prompt, requested_tokens, estimated_tokens, mode == "stream", timeout, probe_identifiers[index], temperature) for index in range(concurrency)]
+        futures = [executor.submit(chat_call, target, base, key, model, prompt, requested_tokens, estimated_tokens, mode == "stream", timeout, probe_identifiers[index], temperature, max_tokens, concurrency, repetition) for index in range(concurrency)]
         return [future.result() for future in futures]
 
 
@@ -352,10 +358,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--targets", choices=["direct", "gorouter", "both"], default="both")
     parser.add_argument("--tokens", type=int, nargs="+", default=[60000], help="Approximate input token targets (recommended: 40000-80000)")
     parser.add_argument("--modes", choices=["nonstream", "stream"], nargs="+", default=["nonstream", "stream"])
-    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--concurrency", type=int, nargs="+", default=[1], help="Concurrent request levels to test")
     parser.add_argument("--repetitions", type=int, default=1, help="Repeat each concurrent batch to expose intermittent failures")
     parser.add_argument("--exact-repeat", action="store_true", help="Reuse byte-identical prompts across repetitions for provider-cache tests")
     parser.add_argument("--temperature", type=float, default=0.2, help="Keep non-zero to avoid gorouter response-cache hits while testing provider cache")
+    parser.add_argument("--max-tokens", type=int, default=128, help="Maximum generated tokens per response")
+    parser.add_argument("--response-words", type=int, default=60, help="Requested response length in plain words")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
@@ -376,14 +384,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     load_env_file(args.env_file)
-    if args.concurrency < 1 or args.concurrency > 64:
-        raise RuntimeError("--concurrency must be between 1 and 64")
+    if any(concurrency < 1 or concurrency > 64 for concurrency in args.concurrency):
+        raise RuntimeError("each --concurrency value must be between 1 and 64")
     if args.repetitions < 1 or args.repetitions > 100:
         raise RuntimeError("--repetitions must be between 1 and 100")
+    if args.max_tokens < 1 or args.max_tokens > 4096:
+        raise RuntimeError("--max-tokens must be between 1 and 4096")
+    if args.response_words < 1 or args.response_words > 2000:
+        raise RuntimeError("--response-words must be between 1 and 2000")
     if args.setup_gorouter and args.setup_gorouter_codex:
         raise RuntimeError("choose only one of --setup-gorouter and --setup-gorouter-codex")
-    if any(tokens < 1000 or tokens > 200000 for tokens in args.tokens):
-        raise RuntimeError("each --tokens value must be between 1000 and 200000")
+    if any(tokens < 100 or tokens > 200000 for tokens in args.tokens):
+        raise RuntimeError("each --tokens value must be between 100 and 200000")
     direct_key = "" if args.direct_no_auth else secret_from_env(args.direct_key_env, "MASTER_KEY")
     gorouter_key = secret_from_env(args.gorouter_key_env) if args.targets in {"gorouter", "both"} else ""
     temporary: TemporaryRoute | TemporaryExistingCredentialRoute | None = None
@@ -409,33 +421,48 @@ def main() -> int:
     all_results: list[Result] = []
     try:
         prepared_prompts: list[tuple[int, str, int]] = []
-        probe_sets: dict[tuple[int, str], list[list[str]]] = {}
+        probe_sets: dict[tuple[int, str, int], list[list[str]]] = {}
         for requested_tokens in args.tokens:
-            prompt, estimated_tokens, file_count = build_prompt(args.repo.resolve(), requested_tokens)
+            prompt, estimated_tokens, file_count = build_prompt(args.repo.resolve(), requested_tokens, args.response_words)
             print(json.dumps({"event": "prompt_built", "requested_tokens": requested_tokens, "estimated_tokens": estimated_tokens, "characters": len(prompt), "source_files": file_count}))
             prepared_prompts.append((requested_tokens, prompt, estimated_tokens))
             for mode in args.modes:
-                stable_identifiers = [f"{requested_tokens}-{mode}-{index + 1}-{uuid.uuid4().hex}" for index in range(args.concurrency)]
-                probe_sets[(requested_tokens, mode)] = [stable_identifiers if args.exact_repeat else [f"{requested_tokens}-{mode}-r{repetition + 1}-{index + 1}-{uuid.uuid4().hex}" for index in range(args.concurrency)] for repetition in range(args.repetitions)]
+                for concurrency in args.concurrency:
+                    stable_identifiers = [f"{requested_tokens}-{mode}-c{concurrency}-{index + 1}-{uuid.uuid4().hex}" for index in range(concurrency)]
+                    probe_sets[(requested_tokens, mode, concurrency)] = [stable_identifiers if args.exact_repeat else [f"{requested_tokens}-{mode}-c{concurrency}-r{repetition + 1}-{index + 1}-{uuid.uuid4().hex}" for index in range(concurrency)] for repetition in range(args.repetitions)]
         for target, base, key, model in targets:
             print(json.dumps({"event": "target_started", "target": target}))
             for requested_tokens, prompt, estimated_tokens in prepared_prompts:
                 for mode in args.modes:
-                    for repetition, probe_identifiers in enumerate(probe_sets[(requested_tokens, mode)], start=1):
-                        results = run_group(target, base, key, model, prompt, requested_tokens, estimated_tokens, mode, args.concurrency, args.timeout, probe_identifiers, args.temperature)
-                        all_results.extend(results)
-                        for result in results:
-                            output = {**asdict(result), "repetition": repetition}
-                            print(json.dumps(output, separators=(",", ":")))
+                    for concurrency in args.concurrency:
+                        for repetition, probe_identifiers in enumerate(probe_sets[(requested_tokens, mode, concurrency)], start=1):
+                            results = run_group(target, base, key, model, prompt, requested_tokens, estimated_tokens, mode, concurrency, args.timeout, probe_identifiers, repetition, args.temperature, args.max_tokens)
+                            all_results.extend(results)
+                            for result in results:
+                                print(json.dumps(asdict(result), separators=(",", ":")))
         summary: dict[str, Any] = {"event": "summary", "successful": sum(result.ok for result in all_results), "requests": len(all_results), "groups": []}
-        group_keys = sorted({(result.requested_tokens, result.mode, result.target) for result in all_results})
-        for tokens, mode, target in group_keys:
-            group = [result for result in all_results if (result.requested_tokens, result.mode, result.target) == (tokens, mode, target)]
+        group_keys = sorted({(result.requested_tokens, result.mode, result.target, result.model, result.concurrency, result.repetition) for result in all_results})
+        for tokens, mode, target, model, concurrency, repetition in group_keys:
+            group = [result for result in all_results if (result.requested_tokens, result.mode, result.target, result.model, result.concurrency, result.repetition) == (tokens, mode, target, model, concurrency, repetition)]
+            durations = sorted(result.duration_ms for result in group)
+            p95_index = min(len(durations) - 1, max(0, round(0.95 * len(durations) - 1)))
+            prompt_total = sum(result.prompt_tokens or 0 for result in group)
+            cache_read_total = sum(result.cache_read_tokens or 0 for result in group)
+            # gorouter exposes uncached input and cache-read input separately.
+            # The direct OpenAI-compatible endpoint follows the OpenAI shape,
+            # where prompt_tokens already includes cached_tokens.
+            provider_input_total = prompt_total if target == "direct" else prompt_total + cache_read_total
             summary["groups"].append({
-                "target": target, "mode": mode, "requested_tokens": tokens,
+                "target": target, "model": model, "mode": mode,
+                "concurrency": concurrency, "repetition": repetition,
+                "requested_tokens": tokens,
                 "successful": sum(result.ok for result in group), "requests": len(group),
                 "duration_p50_ms": round(statistics.median(result.duration_ms for result in group)),
+                "duration_p95_ms": durations[p95_index],
                 "first_byte_p50_ms": round(statistics.median(result.first_byte_ms for result in group)),
+                "batch_requests_per_second": round(len(group) / (max(durations) / 1000), 3) if max(durations) else None,
+                "error_rate": round(1 - (sum(result.ok for result in group) / len(group)), 4),
+                "provider_cache_read_rate": round(cache_read_total / provider_input_total, 4) if provider_input_total else None,
                 "provider_prompt_tokens": [result.prompt_tokens for result in group],
                 "provider_cache_read_tokens": [result.cache_read_tokens for result in group],
                 "provider_cache_write_tokens": [result.cache_write_tokens for result in group],

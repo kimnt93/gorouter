@@ -13,6 +13,8 @@ coverage.*
 *.coverprofile
 profile.cov
 node_modules/
+__pycache__/
+*.py[cod]
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
