@@ -29,7 +29,9 @@ Use one row per comparable cell:
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 
 Add a compact error-class table and token/cost table when they materially
-explain outcomes. Never average percentiles from separate runs.
+explain outcomes. For cache work, label cold versus warm samples and include
+both request hit rate and cached-token share with their denominators. Never
+average percentiles from separate runs.
 
 ## Interpretation
 

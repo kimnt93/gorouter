@@ -22,7 +22,8 @@ results or writing the handoff.
    or Go benchmark output so summaries can be reproduced.
 5. Measure latency percentiles and error classes alongside throughput,
    time-to-first-token, CPU, memory, active connections, token/cost components,
-   and both provider-cache and router-cache results where relevant.
+   and both provider-cache and router-cache results where relevant. Report cold
+   and warm cache samples separately and state the cache-rate denominator.
 6. Report facts separately from hypotheses. Do not claim causation or improved
    reliability from a small, biased, or rate-limited sample.
 

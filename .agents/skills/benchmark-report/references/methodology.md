@@ -43,6 +43,23 @@ do not replace it with a generated benchmark label.
 - Use exactly matching canonical requests for cache-hit trials and one
   controlled mutation for misses.
 
+### Cache comparisons
+
+- Separate cold population from measured warm repetitions. An aggregate that
+  includes the initial miss will understate steady-state provider reuse.
+- Report request hit rate and token reuse rate separately. A request can be a
+  partial hit, so request count alone does not measure saved input cost.
+- Normalize schemas before comparison. GoRouter stores uncached input and cache
+  read separately, so token reuse is
+  `cache_read / (uncached_input + cache_read)`. An upstream aggregate whose
+  `totalInputTokens` already includes cached tokens uses
+  `cachedTokens / totalInputTokens`.
+- Keep explicit session/cache identity stable when testing a multi-credential
+  blend, and record which credential handled each sanitized sample when that
+  dimension is available.
+- Never infer provider cache effectiveness from GoRouter `X-Cache`; that header
+  describes the separate deterministic response cache.
+
 ## Metrics
 
 Per cell capture:

@@ -26,7 +26,10 @@
 ## Usage and logs
 
 - Shared range controls: `1D`, `7D`, `30D`, `90D`, `YTD`, `All`, and custom.
-- Shared grouping controls: Hour, Day, Week.
+- Time resolution is automatic and the resolution filter is absent: `1D` and
+  `7D` use hour buckets; `30D` and `90D` use day buckets; `YTD` and `All` use
+  week buckets. Custom intervals under 7 days use hours, under 90 days use
+  days, and longer intervals use weeks.
 - Shared multi-select dimension: user, API key, or organization, constrained by
   current visibility.
 - Token order is `[input / output / cache read / cache write]`.
@@ -36,6 +39,10 @@
   that policy.
 - Provider cache page reports upstream cache-read/cache-write tokens separately
   from router Redis response-cache statistics.
+- All bar charts fit the panel and anchor sparse buckets at the right edge.
+  Hover/focus targets the full projected bucket column, including empty space
+  above short bars, and the detail tooltip stays above the pointer so adjacent
+  columns remain easy to traverse.
 
 ## Models, routes, keys, and providers
 

@@ -34,6 +34,8 @@ changing caches, quotas, OAuth state, routing state, or invalidation.
 - Use atomic scripts/transactions where quota, RPM, reservation, locking, or
   ownership invalidation requires it.
 - Namespace keys with stable prefixes and all isolation dimensions.
+- Keep provider credential/session affinity in Redis across replicas. Hash
+  client affinity material and include API-key, tenant, and model scope.
 - Permit process-local state only as documented development or Redis-error
   fallback. Never silently accept stale authorization or exceed quota because
   Redis is unavailable in strict mode.

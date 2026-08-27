@@ -9,7 +9,8 @@ Production replicas share Redis for:
 - API-token/session lookup invalidation;
 - OAuth/device flow state and single-use consumption;
 - provider quota snapshots, exhaustion cooldowns, and active accounts;
-- route round-robin positions and provider health cooldowns;
+- route round-robin positions, explicit session-to-credential affinity, and
+  provider health cooldowns;
 - pricing snapshot invalidation;
 - ClickHouse uniqueness-sensitive configuration mutation locks.
 
@@ -41,9 +42,26 @@ credentials, model routes/prices, usage, audit, or OAuth refresh tokens.
 - A router cache hit records `cache_hit=true` and zero provider cost. It does
   not become provider cache-read tokens.
 
+## Provider credential affinity
+
+- Affinity is routing coordination, not a response-cache entry or durable
+  credential assignment.
+- Use only explicit client cache/session/conversation identity. A derived
+  system/tools prefix can be common to unrelated conversations and would
+  collapse round-robin distribution.
+- Hash the API-key/global scope, tenant, model, and affinity value into the
+  Redis key. Never store raw session or prompt-cache identifiers in key names.
+- Apply affinity to round-robin blends; priority/fill-first routing is already
+  deterministic. Refresh a bounded TTL while active and rebind after successful
+  failover so the next turn follows the credential that actually worked.
+- Affinity improves provider cache reuse but is not correctness-critical. If
+  Redis is unavailable, continue with the normal eligible routing order; do not
+  weaken authorization, quota, or credential visibility.
+
 ## Tests
 
-Exercise two service instances against one Redis, atomic contention, TTL/end-of-
-window behavior, invalidation after mutations, strict outage behavior, and
-namespace isolation. Miniredis is useful for units; retain real Redis
-integration coverage for scripts/commands or behavior miniredis cannot model.
+Exercise two service instances against one Redis, affinity continuity and
+isolation, atomic contention, TTL/end-of-window behavior, invalidation after
+mutations, strict outage behavior, and namespace isolation. Miniredis is useful
+for units; retain real Redis integration coverage for scripts/commands or
+behavior miniredis cannot model.

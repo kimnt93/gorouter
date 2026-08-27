@@ -30,7 +30,10 @@ when working on wire formats, OAuth, streaming, or token accounting.
 7. Import personal/global models as `<prefix>/<model>` and organization routes
    as `<org-slug>/<prefix>/<model>`. Cost resolution follows the original
    upstream model while usage retains the public model.
-8. Test connectivity, discovery, non-stream and stream chat, refresh-on-401,
+8. Treat prompt caching as a provider capability: preserve supported client
+   markers/keys, keep stable prefixes byte-stable, normalize provider usage,
+   and preserve explicit session affinity across routed credentials.
+9. Test connectivity, discovery, non-stream and stream chat, refresh-on-401,
    model namespace, safe errors, concurrent requests, and all four token/cost
    components.
 

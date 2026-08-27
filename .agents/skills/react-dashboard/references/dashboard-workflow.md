@@ -124,6 +124,12 @@ test('selects a searchable widget option', async () => {
 - Keep the current larger readable font scale and compact operational density.
 - Keep activity/chart bars visually compact; data volume should not make a bar
   dominate the page.
+- Reuse the vertical chart interaction contract: buckets stay chronological,
+  sparse series anchor to the right edge, and columns flex to fit the available
+  panel width without horizontal overflow.
+- Make the whole time-bucket column the pointer/focus target, not only the
+  painted bar. Position the tooltip above the pointer with
+  `pointer-events: none` so it does not block movement to adjacent bars.
 - Constrain tables/dialogs inside the viewport. Desktop is the requested
   priority; maintain basic overflow safety without an unsolicited mobile
   redesign.

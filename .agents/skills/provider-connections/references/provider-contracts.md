@@ -53,6 +53,24 @@ If a provider omits usage, use the bounded documented estimator. Do not label
 GoRouter Redis response-cache hits as provider cache reads. A router response-
 cache hit has zero provider cost and its own `cache_hit` flag.
 
+### Provider prompt-cache behavior
+
+- Preserve a client's valid `cache_control` or `prompt_cache_key` when the
+  destination supports it. Inject hints only for known capabilities; generic
+  OpenAI compatibility does not prove a provider accepts every OpenAI field.
+- Keep system/developer instructions, tools, and early history byte-stable.
+  Reordering, rewriting, or moving a cache breakpoint between turns can turn a
+  nominally identical conversation into a provider miss.
+- For Anthropic-format requests, preserve client breakpoints, enforce the
+  provider limit, and add bounded automatic breakpoints only where missing.
+- For routed blends, explicit `prompt_cache_key`, session, or conversation
+  identity may pin a round-robin conversation to its successful credential.
+  Store that affinity in Redis with key/tenant/model isolation and a bounded
+  TTL; never use a broadly shared derived system-prefix hash for route pinning.
+- OpenAI-style `cached_tokens` is normally a subset of total input. Store the
+  uncached remainder as input and cached/created portions separately so costs
+  and cache rates are not double-counted.
+
 ## Concurrency
 
 - Reuse the shared HTTP client/transport; close or fully drain bodies.

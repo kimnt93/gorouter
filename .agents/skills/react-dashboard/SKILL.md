@@ -16,7 +16,8 @@ formatting, and interaction rules.
    `src/api/client.ts`. Keep server and browser field names aligned.
 2. Reuse or extend shared components before adding page-local variants,
    especially `Modal`, `SearchableSelect`, range/usage filters, token
-   breakdowns, charts, and management layout primitives.
+   breakdowns, charts, and management layout primitives. Usage charts share
+   automatic time resolution, right anchoring, and column-wide hover behavior.
 3. Get principal, scopes, memberships, and View As context from
    `SessionContext`. Hide unauthorized actions for clarity, but rely on the
    server for enforcement.
@@ -27,8 +28,8 @@ formatting, and interaction rules.
    accessible detail view. Never put secrets, prompts, completions, hashes, or
    cookies into browser state.
 6. Style every select/dropdown consistently, make long lists searchable, and
-   number list/table rows where order matters. Keep charts compact and labels
-   legible.
+   number list/table rows where order matters. Keep charts compact, fill the
+   available width from the right, and make labels and hover details legible.
 7. Add Vitest/Testing Library coverage for behavior and a desktop browser smoke
    assertion for layout-critical changes.
 8. Run `npm test -- --run` and `npm run build`. Commit the generated
