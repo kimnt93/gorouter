@@ -35,7 +35,7 @@ services:
       OPENROUTER_SYNC_INTERVAL: "${OPENROUTER_SYNC_INTERVAL:-1h}"
       OPENROUTER_HTTP_TIMEOUT: "${OPENROUTER_HTTP_TIMEOUT:-30s}"
     ports:
-      - "${ROUTER_PORT:-8090}:8090"
+      - "${CLICKHOUSE_ROUTER_PORT:-18091}:8090"
     depends_on:
       redis:
         condition: service_healthy

@@ -219,6 +219,38 @@ type captureUsageRepository struct {
 	events []entities.UsageEvent
 }
 
+func TestGatewayRecordsNoHealthyCredentialFailure(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "org-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	health := chat.NewHealth()
+	for range 3 {
+		health.Report("cred-a", false)
+	}
+	repository := &captureUsageRepository{}
+	usageService := usage.NewService(repository, 16, nil)
+	gateway := &Gateway{
+		Keys:     apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:    credential.NewService(gatewayCredRepo{routes: []entities.RouteCandidate{{CredentialID: "cred-a"}}, runtimes: map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: entities.ProviderOpenAICompatible}}}, nil),
+		Models:   modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Selector: &chat.Selector{}, Health: health, Usage: usageService,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, OrganizationID: key.TenantID, PrincipalType: entities.PrincipalUser, UserID: "user-1", Username: "user@example.com", Scopes: key.Scopes})
+		return gateway.Chat(c)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Content-Type", fiber.MIMEApplicationJSON)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	usageService.Close()
+	if response.StatusCode != http.StatusServiceUnavailable || len(repository.events) != 1 || repository.events[0].StatusCode != http.StatusServiceUnavailable || repository.events[0].Error != "no healthy credentials available" {
+		t.Fatalf("status=%d events=%+v", response.StatusCode, repository.events)
+	}
+}
+
 func (*captureUsageRepository) SpendForKeySince(context.Context, string, time.Time) (float64, error) {
 	return 0, nil
 }

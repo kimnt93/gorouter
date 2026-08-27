@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"net/url"
@@ -284,20 +285,77 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if b.Provider == "" {
 		b.Provider = entities.ProviderOpenAICompatible
 	}
-	// Credential ownership is derived from the authenticated principal.
-	var ownerTenant *string
-	ownerUserID := ""
-	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
-		ownerUserID = sess.UserID
-		if ownerUserID == "" {
-			ownerTenant = &sess.TenantID
+	ownerTenant, ownerUserID, ownerErr := credentialOwner(c.Context(), SessionFrom(c), b.OwnerType, b.OwnerUserID, b.OwnerOrganizationID, a.IdentityRepo)
+	if ownerErr != nil {
+		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+			return presenter.Forbidden(c, ownerErr.Error())
 		}
+		return presenter.BadRequest(c, ownerErr.Error())
 	}
 	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: ownerTenant, OwnerUserID: ownerUserID})
 	if err != nil {
 		return presenter.BadRequest(c, err.Error())
 	}
 	return responseapi.JSONStatus(c, 201, v)
+}
+
+func credentialOwner(ctx context.Context, session *entities.Session, ownerType, ownerUserID, ownerOrganizationID string, identities identity.Repository) (*string, string, error) {
+	if session == nil {
+		return nil, "", errors.New("authentication required")
+	}
+	ownerType = strings.TrimSpace(ownerType)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	ownerOrganizationID = strings.TrimSpace(ownerOrganizationID)
+	if session.IsMaster() {
+		switch ownerType {
+		case "":
+			return nil, "", nil
+		case entities.OwnerUser:
+			if ownerUserID == "" {
+				return nil, "", errors.New("owner_user_id is required")
+			}
+			if identities != nil {
+				user, err := identities.UserByID(ctx, ownerUserID)
+				if err != nil || user.Status != entities.StatusActive {
+					return nil, "", errors.New("active credential owner is required")
+				}
+			}
+			return nil, ownerUserID, nil
+		case entities.OwnerOrganization:
+			if ownerOrganizationID == "" {
+				return nil, "", errors.New("owner_organization_id is required")
+			}
+			if identities != nil {
+				organization, err := identities.OrganizationByID(ctx, ownerOrganizationID)
+				if err != nil || organization.Status != entities.StatusActive {
+					return nil, "", errors.New("active credential organization is required")
+				}
+			}
+			return &ownerOrganizationID, "", nil
+		default:
+			return nil, "", errors.New("owner_type must be user or organization")
+		}
+	}
+	organizationID := strings.TrimSpace(session.OrganizationID)
+	if organizationID == "" {
+		organizationID = strings.TrimSpace(session.TenantID)
+	}
+	if session.PrincipalType == entities.PrincipalOrganization || session.UserID == "" {
+		if organizationID == "" {
+			return nil, "", errors.New("organization context is required")
+		}
+		return &organizationID, "", nil
+	}
+	if ownerType == entities.OwnerOrganization {
+		if ownerOrganizationID == "" {
+			ownerOrganizationID = organizationID
+		}
+		if session.MembershipRole != entities.MembershipAdmin || organizationID == "" || ownerOrganizationID != organizationID {
+			return nil, "", errors.New("organization administration is required")
+		}
+		return &organizationID, "", nil
+	}
+	return nil, session.UserID, nil
 }
 
 // CredentialByID updates or deletes a credential.

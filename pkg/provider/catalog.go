@@ -1,6 +1,9 @@
 package provider
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 const (
 	AuthAPIKey = "api_key"
@@ -105,4 +108,28 @@ func PublicModelID(providerID, upstream string) string {
 		return upstream
 	}
 	return definition.ModelPrefix + "/" + strings.TrimPrefix(upstream, definition.ModelPrefix+"/")
+}
+
+// OrganizationModelID isolates routes backed by an organization-owned
+// connection while retaining the stable provider/model portion used by
+// personal and globally shared connections.
+func OrganizationModelID(organizationName, providerID, upstream string) string {
+	return OrganizationSlug(organizationName) + "/" + PublicModelID(providerID, upstream)
+}
+
+func OrganizationSlug(name string) string {
+	var value strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if dash && value.Len() > 0 {
+				value.WriteByte('-')
+			}
+			value.WriteRune(r)
+			dash = false
+			continue
+		}
+		dash = value.Len() > 0
+	}
+	return strings.Trim(value.String(), "-")
 }

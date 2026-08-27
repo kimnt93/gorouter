@@ -74,3 +74,18 @@ func TestCredentialCreateDerivesPersonalOwnerAndIgnoresRequestedOrganization(t *
 		t.Fatal("credential input was not bound")
 	}
 }
+
+func TestCredentialOwnerSupportsOrganizationAdminAndMasterAssignment(t *testing.T) {
+	adminSession := &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "user_1", OrganizationID: "org_1", TenantID: "org_1", MembershipRole: entities.MembershipAdmin}
+	owner, userID, err := credentialOwner(context.Background(), adminSession, entities.OwnerOrganization, "", "org_1", nil)
+	if err != nil || owner == nil || *owner != "org_1" || userID != "" {
+		t.Fatalf("organization admin owner=%v user=%q err=%v", owner, userID, err)
+	}
+	if _, _, err = credentialOwner(context.Background(), adminSession, entities.OwnerOrganization, "", "org_2", nil); err == nil {
+		t.Fatal("organization admin assigned a foreign organization credential")
+	}
+	owner, userID, err = credentialOwner(context.Background(), &entities.Session{Role: entities.RoleMaster}, entities.OwnerUser, "user_2", "", nil)
+	if err != nil || owner != nil || userID != "user_2" {
+		t.Fatalf("master personal owner=%v user=%q err=%v", owner, userID, err)
+	}
+}

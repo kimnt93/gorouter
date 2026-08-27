@@ -197,6 +197,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	routes, err := g.Creds.Routes(c.Context(), model.Name)
 	if err != nil || len(routes) == 0 {
+		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no credentials available")
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "no credentials available", "service_unavailable", "no_credentials")
 	}
 	candidates := make([]chat.Candidate, 0, len(routes))
@@ -236,6 +237,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	candidates = g.Selector.Order(strategy, candidates)
 	if len(candidates) == 0 {
+		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
 		return presenter.Err(c, fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials")
 	}
 	upstreamModel := model.UpstreamModel

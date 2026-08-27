@@ -32,6 +32,15 @@ func TestPublicModelIDUsesAliasWithoutReasoningSuffixes(t *testing.T) {
 	}
 }
 
+func TestOrganizationModelIDUsesStableSlugAndProviderPrefix(t *testing.T) {
+	if got := OrganizationModelID("Microsoft", "codex", "gpt-5.6-luna"); got != "microsoft/cx/gpt-5.6-luna" {
+		t.Fatalf("organization model = %q", got)
+	}
+	if got := OrganizationModelID("VN Fin", "opencode-zen", "deepseek-v4-flash"); got != "vn-fin/ocz/deepseek-v4-flash" {
+		t.Fatalf("organization model = %q", got)
+	}
+}
+
 func TestKimiUsesAnthropicWireTranslation(t *testing.T) {
 	if !UsesAnthropicWire("kimi-code") || !UsesAnthropicWire("claude") || UsesAnthropicWire("codex") {
 		t.Fatal("Anthropic wire protocol classification is incorrect")

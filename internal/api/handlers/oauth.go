@@ -9,11 +9,13 @@ import (
 	responseapi "github.com/kimnt93/gorouter/internal/api"
 	"github.com/kimnt93/gorouter/internal/api/presenter"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 )
 
 type OAuthConnector struct {
-	Service *oauthpkg.Service
+	Service    *oauthpkg.Service
+	Identities identity.Repository
 }
 
 type oauthCompleteBody = OAuthCompleteRequest
@@ -66,13 +68,12 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return presenter.BadRequest(c, "flow_id is required")
 	}
 	session := SessionFrom(c)
-	var ownerUserID string
-	var ownerTenant *string
-	if session != nil && !session.IsMaster() {
-		ownerUserID = session.UserID
-		if ownerUserID == "" {
-			ownerTenant = &session.TenantID
+	ownerTenant, ownerUserID, ownerErr := credentialOwner(c.Context(), session, body.OwnerType, "", body.OwnerOrganizationID, h.Identities)
+	if ownerErr != nil {
+		if session != nil && !session.IsMaster() {
+			return presenter.Forbidden(c, ownerErr.Error())
 		}
+		return presenter.BadRequest(c, ownerErr.Error())
 	}
 	created, err := h.Service.Complete(c.Context(), oauthpkg.CompleteInput{
 		Provider: strings.ToLower(c.Params("provider")), FlowID: body.FlowID,
