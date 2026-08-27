@@ -15,6 +15,7 @@ import (
 	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
@@ -30,6 +31,7 @@ type CredentialConnectivity struct {
 	Providers   map[string]credential.ConnectivityProber
 	ModelRoutes *modelroute.Service
 	Quotas      *providerquota.Service
+	Identities  identity.Repository
 }
 
 // Quota returns the cached provider quota or refreshes it on explicit POST.
@@ -67,7 +69,7 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 	return responseapi.JSON(c, snapshot)
 }
 
-// ImportModels imports selected upstream models into global model routes.
+// ImportModels imports selected upstream models into ownership-aware routes.
 // @Summary Import provider models
 // @Tags credentials
 // @Security BearerAuth
@@ -78,7 +80,10 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 // @Router /admin/credentials/{id}/models/import [post]
 func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
-		return presenter.Forbidden(c, "only the master session can import global model routes")
+		return presenter.Forbidden(c, "only the master session can import model routes")
+	}
+	if !h.authorize(c) {
+		return presenter.NotFound(c, "credential not found")
 	}
 	if h.ModelRoutes == nil {
 		return presenter.ServerError(c, "model service is unavailable")
@@ -90,6 +95,21 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	runtime, err := h.Credentials.Runtime(c.Context(), c.Params("id"))
 	if err != nil {
 		return presenter.NotFound(c, "credential not found")
+	}
+	metadata, err := h.credential(c, runtime.ID)
+	if err != nil {
+		return presenter.NotFound(c, "credential not found")
+	}
+	organizationName := ""
+	if metadata.OwnerTenantID != nil {
+		if h.Identities == nil {
+			return presenter.ServerError(c, "identity repository is unavailable")
+		}
+		organization, organizationErr := h.Identities.OrganizationByID(c.Context(), *metadata.OwnerTenantID)
+		if organizationErr != nil || organization.Status != entities.StatusActive {
+			return presenter.BadRequest(c, "credential organization is unavailable")
+		}
+		organizationName = organization.Name
 	}
 	existing, err := h.ModelRoutes.List(c.Context())
 	if err != nil {
@@ -108,6 +128,9 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 		}
 		seen[upstream] = true
 		name := providerpkg.PublicModelID(runtime.Provider, upstream)
+		if organizationName != "" {
+			name = providerpkg.OrganizationModelID(organizationName, runtime.Provider, upstream)
+		}
 		model, ok := byName[name]
 		if !ok {
 			model = entities.ModelDef{Name: name, Strategy: "priority", UpstreamModel: upstream, Enabled: true, Routes: []entities.ModelRoute{}}
@@ -132,6 +155,19 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 		imported = append(imported, name)
 	}
 	return responseapi.JSON(c, ImportModelsResponse{OK: true, Imported: imported})
+}
+
+func (h *CredentialConnectivity) credential(c fiber.Ctx, id string) (*entities.Credential, error) {
+	credentials, err := h.Credentials.List(c.Context())
+	if err != nil {
+		return nil, err
+	}
+	for index := range credentials {
+		if credentials[index].ID == id {
+			return &credentials[index], nil
+		}
+	}
+	return nil, entities.ErrNotFound
 }
 
 func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
