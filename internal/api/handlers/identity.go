@@ -179,16 +179,20 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to list organizations")
 	}
+	membershipRoles := map[string]string{}
 	if actor.Type != entities.PrincipalMaster {
 		allowed := map[string]bool{}
 		if actor.Type == entities.PrincipalOrganization {
 			allowed[actor.OrganizationID] = true
+			membershipRoles[actor.OrganizationID] = entities.MembershipAdmin
 		} else if actor.OrganizationID != "" {
 			allowed[actor.OrganizationID] = true
+			membershipRoles[actor.OrganizationID] = actor.MembershipRole
 		} else {
 			memberships, _ := a.IdentityRepo.ListMembershipsForUser(c.Context(), actor.UserID)
 			for _, membership := range memberships {
 				allowed[membership.OrganizationID] = true
+				membershipRoles[membership.OrganizationID] = membership.Role
 			}
 		}
 		filtered := organizations[:0]
@@ -200,7 +204,15 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 		organizations = filtered
 		next = ""
 	}
-	return responseapi.JSON(c, OrganizationListResponse{Object: "list", Data: organizations, NextCursor: next})
+	items := make([]OrganizationListItem, 0, len(organizations))
+	for _, organization := range organizations {
+		members, memberErr := a.IdentityRepo.ListMemberships(c.Context(), organization.ID)
+		if memberErr != nil {
+			return presenter.ServerError(c, "failed to count organization members")
+		}
+		items = append(items, OrganizationListItem{Organization: organization, MemberCount: len(members), MembershipRole: membershipRoles[organization.ID]})
+	}
+	return responseapi.JSON(c, OrganizationListResponse{Object: "list", Data: items, NextCursor: next})
 }
 
 // OrganizationByID returns or updates an organization.
@@ -273,7 +285,15 @@ func (a *Admin) Members(c fiber.Ctx) error {
 		if err != nil {
 			return presenter.ServerError(c, "failed to list members")
 		}
-		return responseapi.JSON(c, MembershipListResponse{Object: "list", Data: members})
+		items := make([]MembershipListItem, 0, len(members))
+		for _, member := range members {
+			item := MembershipListItem{Membership: member}
+			if user, userErr := a.IdentityRepo.UserByID(c.Context(), member.UserID); userErr == nil {
+				item.Username = user.Username
+			}
+			items = append(items, item)
+		}
+		return responseapi.JSON(c, MembershipListResponse{Object: "list", Data: items})
 	}
 	var body MembershipCreateRequest
 	if err := c.Bind().Body(&body); err != nil {

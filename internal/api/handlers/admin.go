@@ -270,8 +270,25 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 		if err != nil {
 			return presenter.ServerError(c, "failed to load credentials")
 		}
-		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
-			v = filterCredentialsForSession(v, sess)
+		if sess := SessionFrom(c); sess != nil {
+			requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+			if requestedOrganization != "" {
+				if !sess.IsMaster() && sess.OrganizationID != requestedOrganization {
+					membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, sess.UserID)
+					if membershipErr != nil || membership.Role != entities.MembershipAdmin {
+						return presenter.Forbidden(c, "organization context is not accessible")
+					}
+				}
+				filtered := make([]entities.Credential, 0, len(v))
+				for _, credential := range v {
+					if credential.OwnerTenantID != nil && *credential.OwnerTenantID == requestedOrganization {
+						filtered = append(filtered, credential)
+					}
+				}
+				v = filtered
+			} else if !sess.IsMaster() {
+				v = filterCredentialsForSession(v, sess)
+			}
 		}
 		return responseapi.JSON(c, v)
 	}
@@ -424,6 +441,11 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 	ownerID := strings.TrimSpace(c.Query("owner_id"))
 	organizationID := strings.TrimSpace(c.Query("organization_id"))
 	status := strings.TrimSpace(c.Query("status"))
+	if actor.Type == entities.PrincipalUser && organizationID != "" && actor.OrganizationID == "" {
+		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), organizationID, actor.UserID); membershipErr == nil {
+			actor.OrganizationID, actor.MembershipRole = organizationID, membership.Role
+		}
+	}
 	if ownerType != "" && ownerType != entities.OwnerUser && ownerType != entities.OwnerOrganization {
 		return presenter.BadRequest(c, "owner_type must be user or organization")
 	}
@@ -795,15 +817,34 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 	if err != nil {
 		return presenter.ServerError(c, "failed to load models")
 	}
-	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+	if sess := SessionFrom(c); sess != nil && (!sess.IsMaster() || strings.TrimSpace(c.Query("organization_id")) != "") {
 		credentials, listErr := a.CredsSvc.List(c.Context())
 		if listErr != nil {
 			return presenter.ServerError(c, "failed to filter model routes")
 		}
+		requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+		if requestedOrganization != "" && !sess.IsMaster() && sess.OrganizationID != requestedOrganization {
+			membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, sess.UserID)
+			if membershipErr != nil || membership.Role != entities.MembershipAdmin {
+				return presenter.Forbidden(c, "organization context is not accessible")
+			}
+		}
+		visibleCredentials := credentials
+		if requestedOrganization != "" {
+			visibleCredentials = visibleCredentials[:0]
+			for _, credential := range credentials {
+				if credential.OwnerTenantID != nil && *credential.OwnerTenantID == requestedOrganization {
+					visibleCredentials = append(visibleCredentials, credential)
+				}
+			}
+		} else {
+			visibleCredentials = filterCredentialsForSession(credentials, sess)
+		}
 		allowed := map[string]bool{}
-		for _, cred := range filterCredentialsForSession(credentials, sess) {
+		for _, cred := range visibleCredentials {
 			allowed[cred.ID] = true
 		}
+		filteredModels := v[:0]
 		for i := range v {
 			routes := v[i].Routes[:0]
 			for _, route := range v[i].Routes {
@@ -812,7 +853,11 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 				}
 			}
 			v[i].Routes = routes
+			if len(routes) > 0 {
+				filteredModels = append(filteredModels, v[i])
+			}
 		}
+		v = filteredModels
 	}
 	return responseapi.JSON(c, v)
 }

@@ -4866,13 +4866,39 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_handlers.MembershipListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by_actor_id": {
+                    "type": "string"
+                },
+                "created_by_actor_type": {
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_handlers.MembershipListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Membership"
+                        "$ref": "#/definitions/internal_api_handlers.MembershipListItem"
                     }
                 },
                 "next_cursor": {
@@ -4992,13 +5018,42 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_handlers.OrganizationListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "member_count": {
+                    "type": "integer"
+                },
+                "membership_role": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "normalized_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_handlers.OrganizationListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Organization"
+                        "$ref": "#/definitions/internal_api_handlers.OrganizationListItem"
                     }
                 },
                 "next_cursor": {

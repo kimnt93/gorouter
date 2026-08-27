@@ -137,14 +137,23 @@ type UserListResponse struct {
 	NextCursor string          `json:"next_cursor,omitempty"`
 }
 type OrganizationListResponse struct {
-	Object     string                  `json:"object"`
-	Data       []entities.Organization `json:"data"`
-	NextCursor string                  `json:"next_cursor,omitempty"`
+	Object     string                 `json:"object"`
+	Data       []OrganizationListItem `json:"data"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+}
+type OrganizationListItem struct {
+	entities.Organization
+	MemberCount    int    `json:"member_count"`
+	MembershipRole string `json:"membership_role,omitempty"`
 }
 type MembershipListResponse struct {
-	Object     string                `json:"object"`
-	Data       []entities.Membership `json:"data"`
-	NextCursor string                `json:"next_cursor,omitempty"`
+	Object     string               `json:"object"`
+	Data       []MembershipListItem `json:"data"`
+	NextCursor string               `json:"next_cursor,omitempty"`
+}
+type MembershipListItem struct {
+	entities.Membership
+	Username string `json:"username,omitempty"`
 }
 type AuditListResponse struct {
 	Object     string                `json:"object"`
