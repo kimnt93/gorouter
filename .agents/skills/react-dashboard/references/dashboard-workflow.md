@@ -41,6 +41,81 @@ client function can own the request.
 - Number table/list rows when users need stable visual order.
 - Keep async cancellation/abort handling for streaming provider chat tests.
 
+## Canonical React examples
+
+Keep the browser contract and request function typed. Encode path values and
+use `URLSearchParams` for query values instead of string concatenation.
+
+```ts
+// src/api/contracts.ts
+export interface Widget {
+  id: string
+  name: string
+  status: 'active' | 'disabled'
+}
+
+// src/api/client.ts
+export const getWidgets = (query = ''): Promise<ListResponse<Widget>> => {
+  const params = new URLSearchParams({ limit: '100' })
+  if (query.trim()) params.set('q', query.trim())
+  return request<ListResponse<Widget>>(`/admin/widgets?${params}`).then(normalizeList)
+}
+```
+
+Compose existing controls and presentation helpers. Keep authorization/context
+in the page/session layer, use component classes rather than repeated inline
+styles, number operational rows, and truncate only safe display values.
+
+```tsx
+interface WidgetTableProps {
+  widgets: Widget[]
+  selected: string
+  onSelect: (id: string) => void
+}
+
+export function WidgetTable({ widgets, selected, onSelect }: WidgetTableProps) {
+  const options = widgets.map((widget) => ({
+    value: widget.id,
+    label: widget.name,
+    meta: widget.status,
+  }))
+
+  return <section className="panel">
+    <SearchableSelect
+      value={selected}
+      options={options}
+      onChange={onSelect}
+      placeholder="Select a widget"
+      searchPlaceholder="Search widgets"
+    />
+    <table className="data-table">
+      <thead><tr><th>#</th><th>Name</th><th>Status</th></tr></thead>
+      <tbody>{widgets.map((widget, index) => <tr key={widget.id}>
+        <td>{index + 1}</td>
+        <td><TruncatedText>{widget.name}</TruncatedText></td>
+        <td><span className={`status-pill ${widget.status}`}>{widget.status}</span></td>
+      </tr>)}</tbody>
+    </table>
+  </section>
+}
+```
+
+Test observable behavior and accessible roles rather than component internals:
+
+```tsx
+test('selects a searchable widget option', async () => {
+  const user = userEvent.setup()
+  const onSelect = vi.fn()
+  render(<WidgetTable widgets={fixtures} selected="" onSelect={onSelect} />)
+
+  await user.click(screen.getByRole('button', { name: /select a widget/i }))
+  await user.type(screen.getByRole('textbox', { name: /search widgets/i }), 'alpha')
+  await user.click(screen.getByRole('option', { name: /alpha/i }))
+
+  expect(onSelect).toHaveBeenCalledWith('widget_alpha')
+})
+```
+
 ## CSS
 
 - Use existing custom properties, typography scale, spacing, status pills,

@@ -6,7 +6,8 @@ description: Add, update, review, or diagnose GoRouter's Vite React TypeScript o
 # React dashboard
 
 Read [dashboard-workflow.md](references/dashboard-workflow.md) before editing the
-SPA. Read [ui-contracts.md](references/ui-contracts.md) for current visibility,
+SPA and follow its typed client/component examples. Read
+[ui-contracts.md](references/ui-contracts.md) for current visibility,
 formatting, and interaction rules.
 
 ## Workflow

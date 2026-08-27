@@ -14,9 +14,9 @@ changes; its examples are the canonical package/service style. Use
 ## Workflow
 
 1. Inspect the working tree and preserve unrelated edits.
-2. Read the relevant specifications and existing tests. The identity and React
-   follow-ups in `specs/identity-organizations-usage/` override stale top-level
-   storage/UI statements.
+2. Read the relevant code, typed contracts, migrations, and existing tests.
+   Treat implemented behavior plus `AGENTS.md` and the repository skills as the
+   maintained product contract.
 3. Trace the behavior across domain types/ports, service/policy, repository,
    handler/route, browser contract, composition root, and tests. Change only the
    layers the behavior actually crosses.

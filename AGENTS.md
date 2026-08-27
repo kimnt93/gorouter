@@ -11,22 +11,18 @@ Prefer explicit, secure behavior over clever abstractions. Keep the gateway
 focused: do not add unrelated agent orchestration, workflow engines, payments,
 VM/process management, or provider features without a product requirement.
 
-## Instruction and specification precedence
+## Instruction and contract precedence
 
 Apply guidance in this order:
 
 1. The current user request.
 2. This `AGENTS.md` and any closer `AGENTS.override.md`.
 3. Current code, tests, migrations, and generated contracts.
-4. `specs/identity-organizations-usage/`, which explicitly overrides older
-   identity, tenant, storage, and UI statements.
-5. The remaining files under `specs/`.
 
-The React dashboard follow-ups at the end of
-`specs/identity-organizations-usage/CHECKLIST.md` are the current UI contract.
-Older instructions saying not to use React, or saying ClickHouse must be paired
-with PostgreSQL, are superseded. Exactly one durable backend is active:
-PostgreSQL or ClickHouse.
+The implemented behavior is now the living product contract. Preserve the
+React dashboard, identity/organization rules, and single-backend runtime model
+documented below and in the repository skills. Exactly one durable backend is
+active: PostgreSQL or ClickHouse.
 
 ## Use the repository skills
 
