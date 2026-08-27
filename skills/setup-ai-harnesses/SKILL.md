@@ -1,6 +1,6 @@
 ---
 name: setup-ai-harnesses
-description: Configure AI coding harnesses and agents to use GoRouter through Responses, Anthropic Messages, or OpenAI Chat Completions. Use for Codex, Claude Code, OpenCode, OpenClaw, DeepSeek Harness, Hermes Agent, and generic clients.
+description: Configure AI coding harnesses and agents to use GoRouter through Responses, Anthropic Messages, or OpenAI Chat Completions. Use for Codex, Claude Code, OpenCode, Pi, OpenClaw, DeepSeek Harness, Hermes Agent, and generic clients.
 ---
 
 # Set up AI harnesses with GoRouter
@@ -15,6 +15,14 @@ key itself.
 
 ```bash
 python3 scripts/render_config.py codex \
+  --base-url http://127.0.0.1:8090 \
+  --model cx/gpt-5.6-luna
+```
+
+Pi example:
+
+```bash
+python3 scripts/render_config.py pi \
   --base-url http://127.0.0.1:8090 \
   --model cx/gpt-5.6-luna
 ```
@@ -36,4 +44,3 @@ Do not grant full filesystem/network access unless the user explicitly wants
 that trust level. The Codex template defaults to the requested always-allow,
 full-access profile; warn before deploying it onto an untrusted machine or
 repository.
-

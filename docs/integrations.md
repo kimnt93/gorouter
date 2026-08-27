@@ -11,6 +11,7 @@ the model with an exact ID visible to your GoRouter API key.
 |---|---|---|
 | Codex CLI | Supported | `POST /v1/responses` |
 | OpenCode | Supported | `POST /v1/chat/completions` |
+| Pi | Supported | `POST /v1/chat/completions` |
 | OpenClaw | Supported | `POST /v1/chat/completions` |
 | DeepSeek Harness (`dsh`) | Supported | `POST /v1/chat/completions` |
 | Hermes Agent | Supported | `POST /v1/chat/completions` |
@@ -158,6 +159,71 @@ The outer `gorouter/` segment is OpenCode's provider name. The remaining
 `cx/gpt-5.6-luna` is the full model ID sent to GoRouter. See the [OpenCode
 provider documentation](https://opencode.ai/docs/providers/) for configuration
 locations and precedence.
+
+## Pi
+
+[Pi](https://github.com/earendil-works/pi) supports custom
+OpenAI-compatible providers through `~/.pi/agent/models.json`. Install Pi using
+its published package if it is not already present:
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```
+
+Export `GOROUTER_API_KEY`, then merge this provider into
+`~/.pi/agent/models.json`:
+
+```json
+{
+  "providers": {
+    "gorouter": {
+      "baseUrl": "http://127.0.0.1:8090/v1",
+      "api": "openai-completions",
+      "apiKey": "$GOROUTER_API_KEY",
+      "models": [
+        {
+          "id": "cx/gpt-5.6-luna",
+          "name": "GPT through GoRouter",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 16384,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+The `$GOROUTER_API_KEY` value is resolved by Pi at request time; do not replace
+it with plaintext in the tracked configuration. The model's prices in this Pi
+file are display-only placeholders—GoRouter remains the source of truth for
+pricing, quota enforcement, and usage attribution.
+
+Verify the provider and run one bounded prompt:
+
+```bash
+pi --list-models gorouter
+pi --model gorouter/cx/gpt-5.6-luna -p \
+  "Reply with exactly: pi gateway test"
+```
+
+Pi identifies a custom model as `provider/model`, so the selected value has two
+parts: Pi provider `gorouter`, followed by the complete GoRouter public model ID
+`cx/gpt-5.6-luna`. Add additional entries from `GET /v1/models` when the key is
+allowed to use more models. Pi reloads `models.json` when `/model` is opened.
+
+Pi runs tools with the permissions of the process that launched it. Use its
+[containerization guidance](https://pi.dev/docs/latest/containerization) when
+the repository or host is not fully trusted. See Pi's
+[custom-model documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)
+for the current provider schema.
 
 ## OpenClaw
 

@@ -95,12 +95,13 @@ curl "$GOROUTER_BASE_URL/v1/chat/completions" \
 
 See the [agent integration guide](docs/integrations.md) for API-key setup,
 endpoint details, and complete configurations for Codex CLI, OpenCode,
-OpenClaw, DeepSeek Harness, Hermes Agent, Claude Code, and other
+Pi, OpenClaw, DeepSeek Harness, Hermes Agent, Claude Code, and other
 OpenAI-compatible clients.
 
 | Client | Status | Required protocol |
 |---|---|---|
 | OpenCode | Supported | OpenAI-compatible `/v1/chat/completions` |
+| Pi | Supported | OpenAI-compatible `/v1/chat/completions` |
 | Codex CLI | Supported | OpenAI `/v1/responses` |
 | OpenClaw | Supported | OpenAI-compatible `/v1/chat/completions` |
 | DeepSeek Harness | Supported | OpenAI-compatible `/v1/chat/completions` |
@@ -136,6 +137,36 @@ the example model with one returned by `/v1/models`:
 
 See the [OpenCode provider documentation](https://opencode.ai/docs/providers/)
 for configuration precedence and additional provider options.
+
+### Pi
+
+Pi uses `~/.pi/agent/models.json` for custom OpenAI-compatible providers. Add a
+GoRouter provider and keep the API key in the process environment:
+
+```json
+{
+  "providers": {
+    "gorouter": {
+      "baseUrl": "http://localhost:8090/v1",
+      "api": "openai-completions",
+      "apiKey": "$GOROUTER_API_KEY",
+      "models": [
+        {
+          "id": "cx/gpt-5.6-luna",
+          "name": "GPT through GoRouter",
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        }
+      ]
+    }
+  }
+}
+```
+
+Then run `pi --model gorouter/cx/gpt-5.6-luna`. Replace the example ID with an
+exact model returned by GoRouter's `/v1/models` endpoint. See the
+[Pi custom-model documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)
+for model metadata and configuration precedence.
 
 ### Codex CLI
 

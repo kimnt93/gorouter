@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 
-CLIENTS = ("codex", "claude-code", "opencode", "openclaw", "deepseek-harness", "hermes", "generic")
+CLIENTS = ("codex", "claude-code", "opencode", "pi", "openclaw", "deepseek-harness", "hermes", "generic")
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +54,9 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ANTHROPIC_MODEL"
 '''
     if ns.client == "opencode":
         value = {"$schema": "https://opencode.ai/config.json", "provider": {"gorouter": {"npm": "@ai-sdk/openai-compatible", "name": "GoRouter", "options": {"baseURL": api, "apiKey": "{env:" + env + "}"}, "models": {model: {"name": "GoRouter model"}}}}, "model": "gorouter/" + model}
+        return json.dumps(value, indent=2) + "\n"
+    if ns.client == "pi":
+        value = {"providers": {"gorouter": {"baseUrl": api, "api": "openai-completions", "apiKey": "$" + env, "models": [{"id": model, "name": "GoRouter model", "reasoning": False, "input": ["text"], "contextWindow": 128000, "maxTokens": 16384, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}]}}}
         return json.dumps(value, indent=2) + "\n"
     if ns.client == "openclaw":
         return f'''{{

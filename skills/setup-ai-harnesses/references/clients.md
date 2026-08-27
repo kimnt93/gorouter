@@ -9,7 +9,7 @@ Assume `GOROUTER_URL=http://127.0.0.1:8090`,
 |---|---|---|
 | Codex CLI | `$GOROUTER_URL/v1` | OpenAI Responses: `POST /v1/responses` |
 | Claude Code | `$GOROUTER_URL` | Anthropic Messages: `POST /v1/messages` |
-| OpenCode, OpenClaw, DeepSeek Harness, Hermes | `$GOROUTER_URL/v1` | OpenAI Chat Completions |
+| OpenCode, Pi, OpenClaw, DeepSeek Harness, Hermes | `$GOROUTER_URL/v1` | OpenAI Chat Completions |
 
 Do not append an endpoint path when a client asks for a base URL. A duplicated
 `/v1/v1` is a client configuration error.
@@ -74,6 +74,38 @@ different `ANTHROPIC_API_KEY` in the same process.
 }
 ```
 
+## Pi
+
+Merge this provider into `~/.pi/agent/models.json`:
+
+```json
+{
+  "providers": {
+    "gorouter": {
+      "baseUrl": "http://127.0.0.1:8090/v1",
+      "api": "openai-completions",
+      "apiKey": "$GOROUTER_API_KEY",
+      "models": [
+        {
+          "id": "cx/gpt-5.6-luna",
+          "name": "GoRouter model",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 16384,
+          "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+        }
+      ]
+    }
+  }
+}
+```
+
+Run `pi --model gorouter/cx/gpt-5.6-luna`. Pi's outer `gorouter/` selects the
+custom provider; the remaining `cx/gpt-5.6-luna` is sent unchanged to
+GoRouter. Pi has no built-in tool permission boundary and should be sandboxed
+or containerized when the host or repository is not trusted.
+
 ## Hermes Agent
 
 ```yaml
@@ -113,4 +145,3 @@ export OPENAI_API_KEY="$GOROUTER_API_KEY"
 
 Expose these generic aliases only to the intended process so the gateway key
 is not accidentally sent to another OpenAI-compatible host.
-
