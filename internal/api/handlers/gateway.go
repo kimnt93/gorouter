@@ -395,7 +395,7 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 	supportsReasoningSummary := false
 	supportsParallelTools := false
 	supportVerbosity := false
-	defaultVerbosity := ""
+	defaultVerbosity := "medium"
 	if metadata := model.Metadata; metadata != nil {
 		if metadata.DisplayName != "" {
 			displayName = metadata.DisplayName
@@ -438,7 +438,10 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 		supportsReasoningSummary = metadata.SupportsReasoningSummary
 		supportsParallelTools = metadata.SupportsParallelTools
 		supportVerbosity = metadata.SupportsVerbosity
-		defaultVerbosity = metadata.DefaultVerbosity
+		switch metadata.DefaultVerbosity {
+		case "low", "medium", "high":
+			defaultVerbosity = metadata.DefaultVerbosity
+		}
 	}
 	return llm.CodexModelInfo{
 		Slug: model.Name, DisplayName: displayName, Description: description,

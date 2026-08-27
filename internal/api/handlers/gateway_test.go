@@ -210,7 +210,7 @@ func TestCodexModelInfoUsesPersistedProviderMetadata(t *testing.T) {
 
 func TestCodexModelInfoFailsClosedWithoutMetadata(t *testing.T) {
 	info := codexModelInfo(entities.ModelDef{Name: "custom/model", UpstreamModel: "unknown-model"})
-	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || len(info.SupportedReasoningLevels) != 1 || info.SupportedReasoningLevels[0].Effort != "medium" || info.SupportedReasoningLevels[0].Description == "" {
+	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || info.DefaultVerbosity != "medium" || len(info.SupportedReasoningLevels) != 1 || info.SupportedReasoningLevels[0].Effort != "medium" || info.SupportedReasoningLevels[0].Description == "" {
 		t.Fatalf("fallback info = %+v", info)
 	}
 }
