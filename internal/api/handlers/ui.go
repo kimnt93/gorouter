@@ -11,7 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/internal/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
 	"github.com/kimnt93/gorouter/internal/api/views"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -28,7 +28,7 @@ import (
 func renderTemplate(c fiber.Ctx, name string, data any) error {
 	var b bytes.Buffer
 	if err := views.Render(&b, name, data); err != nil {
-		return presenter.ServerError(c, "template rendering failed")
+		return responseapi.For(c).InternalError("template rendering failed").Send()
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
 	return c.Send(b.Bytes())
@@ -116,12 +116,12 @@ type membershipView struct {
 func (u *UI) UsersPage(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	if sess == nil || !sess.IsMaster() {
-		return presenter.Forbidden(c, "only master may view users")
+		return responseapi.For(c).Forbidden("only master may view users").Send()
 	}
 	data := u.page(c, "Users")
 	users, next, err := u.IdentityRepo.ListUsers(c.Context(), entities.PageQuery{Cursor: c.Query("cursor"), Limit: 100, Query: c.Query("q"), Status: c.Query("status")})
 	if err != nil {
-		return presenter.ServerError(c, "failed to load users")
+		return responseapi.For(c).InternalError("failed to load users").Send()
 	}
 	data.Users = users
 	data.Models, _ = u.Models.List(c.Context())
@@ -147,19 +147,19 @@ func (u *UI) UserCreate(c fiber.Ctx) error {
 	if c.FormValue("generate_initial_key") != "" {
 		_, key, createErr := u.Identity.CreateUserWithInitialKey(c.Context(), actor, c.FormValue("username"), u.Keys, apikey.CreateInput{Name: "Initial login key", Models: formValues(c, "models"), Scopes: splitCSV(c.FormValue("scopes"))})
 		if createErr != nil {
-			return presenter.BadRequest(c, createErr.Error())
+			return responseapi.For(c).BadRequest(createErr.Error()).Send()
 		}
 		secret = key.Plaintext
 	} else {
 		if _, err = u.Identity.CreateUser(c.Context(), actor, c.FormValue("username")); err != nil {
-			return presenter.BadRequest(c, err.Error())
+			return responseapi.For(c).BadRequest(err.Error()).Send()
 		}
 	}
 	data := u.page(c, "Users")
 	data.CreatedSecret = secret
 	data.Users, _, err = u.IdentityRepo.ListUsers(c.Context(), entities.PageQuery{Limit: 100})
 	if err != nil {
-		return presenter.ServerError(c, "failed to refresh users")
+		return responseapi.For(c).InternalError("failed to refresh users").Send()
 	}
 	data.Models, _ = u.Models.List(c.Context())
 	keys, _ := u.Keys.List(c.Context())
@@ -178,17 +178,17 @@ func (u *UI) UserCreate(c fiber.Ctx) error {
 func (u *UI) UserPage(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	if sess == nil || !sess.IsMaster() {
-		return presenter.Forbidden(c, "only master may view users")
+		return responseapi.For(c).Forbidden("only master may view users").Send()
 	}
 	data := u.page(c, "User")
 	user, err := u.IdentityRepo.UserByID(c.Context(), c.Params("id"))
 	if err != nil {
-		return presenter.NotFound(c, "user not found")
+		return responseapi.For(c).NotFound("user not found").Send()
 	}
 	data.User = user
 	data.Memberships, err = u.IdentityRepo.ListMembershipsForUser(c.Context(), user.ID)
 	if err != nil {
-		return presenter.ServerError(c, "failed to load memberships")
+		return responseapi.For(c).InternalError("failed to load memberships").Send()
 	}
 	for _, membership := range data.Memberships {
 		view := membershipView{Membership: membership}
@@ -213,7 +213,7 @@ func (u *UI) UserPage(c fiber.Ctx) error {
 }
 func (u *UI) UserStatus(c fiber.Ctx) error {
 	if err := u.Identity.SetUserStatus(c.Context(), principalFromSession(SessionFrom(c)), c.Params("id"), c.FormValue("status")); err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/users/"+c.Params("id"), u.UserPage)
 }
@@ -222,7 +222,7 @@ func (u *UI) OrganizationsPage(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	organizations, next, err := u.IdentityRepo.ListOrganizations(c.Context(), entities.PageQuery{Cursor: c.Query("cursor"), Limit: 100, Query: c.Query("q"), Status: c.Query("status")})
 	if err != nil {
-		return presenter.ServerError(c, "failed to load organizations")
+		return responseapi.For(c).InternalError("failed to load organizations").Send()
 	}
 	if actor.Type != entities.PrincipalMaster {
 		allowed := map[string]bool{}
@@ -275,7 +275,7 @@ func (u *UI) OrganizationsPage(c fiber.Ctx) error {
 func (u *UI) OrganizationCreate(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if _, err := u.Identity.CreateOrganization(c.Context(), actor, c.FormValue("name")); err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/organizations", u.OrganizationsPage)
 }
@@ -285,20 +285,20 @@ func (u *UI) OrganizationPage(c fiber.Ctx) error {
 	organizationID := c.Params("id")
 	organization, err := u.IdentityRepo.OrganizationByID(c.Context(), organizationID)
 	if err != nil {
-		return presenter.NotFound(c, "organization not found")
+		return responseapi.For(c).NotFound("organization not found").Send()
 	}
 	if actor.Type == entities.PrincipalUser {
 		if actor.OrganizationID != "" && actor.OrganizationID != organizationID {
-			return presenter.NotFound(c, "organization not found")
+			return responseapi.For(c).NotFound("organization not found").Send()
 		}
 		membership, membershipErr := u.IdentityRepo.Membership(c.Context(), organizationID, actor.UserID)
 		if membershipErr != nil {
-			return presenter.NotFound(c, "organization not found")
+			return responseapi.For(c).NotFound("organization not found").Send()
 		}
 		actor.OrganizationID, actor.MembershipRole = organizationID, membership.Role
 	}
 	if policy.ViewOrganization(actor, organizationID) != nil {
-		return presenter.NotFound(c, "organization not found")
+		return responseapi.For(c).NotFound("organization not found").Send()
 	}
 	data.Organization = organization
 	if message, ok := c.Locals("ui_error").(string); ok {
@@ -308,7 +308,7 @@ func (u *UI) OrganizationPage(c fiber.Ctx) error {
 	if data.CanManageMembers {
 		data.Memberships, err = u.IdentityRepo.ListMemberships(c.Context(), organizationID)
 		if err != nil {
-			return presenter.ServerError(c, "failed to load members")
+			return responseapi.For(c).InternalError("failed to load members").Send()
 		}
 		for _, membership := range data.Memberships {
 			view := membershipView{Membership: membership}
@@ -326,11 +326,11 @@ func (u *UI) MemberAdd(c fiber.Ctx) error {
 	if userID == "" {
 		normalized, err := entities.NormalizeUsername(c.FormValue("username"))
 		if err != nil {
-			return presenter.BadRequest(c, err.Error())
+			return responseapi.For(c).BadRequest(err.Error()).Send()
 		}
 		user, err := u.IdentityRepo.UserByNormalizedUsername(c.Context(), normalized)
 		if err != nil {
-			return presenter.BadRequest(c, "user does not exist; master must create the user first")
+			return responseapi.For(c).BadRequest("user does not exist; master must create the user first").Send()
 		}
 		userID = user.ID
 	}
@@ -344,7 +344,7 @@ func (u *UI) MemberAdd(c fiber.Ctx) error {
 func (u *UI) OrganizationUpdate(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if _, err := u.Identity.UpdateOrganization(c.Context(), actor, c.Params("id"), c.FormValue("name"), c.FormValue("status")); err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/organizations/"+c.Params("id"), u.OrganizationPage)
 }
@@ -383,23 +383,23 @@ func (u *UI) AuditPage(c fiber.Ctx) error {
 	data := u.page(c, "Audit")
 	actor, err := u.actorForContext(c, principalFromSession(SessionFrom(c)))
 	if err != nil {
-		return presenter.Forbidden(c, err.Error())
+		return responseapi.For(c).Forbidden(err.Error()).Send()
 	}
 	visibility, err := policy.AuditVisibility(actor)
 	if err != nil {
-		return presenter.Forbidden(c, "audit access is not allowed")
+		return responseapi.For(c).Forbidden("audit access is not allowed").Send()
 	}
 	limit := 100
 	query := entities.AuditQuery{Visibility: visibility, OrganizationID: data.ActiveOrganizationID, Cursor: c.Query("cursor"), Limit: limit, ActorID: c.Query("actor_id"), Action: c.Query("action"), TargetType: c.Query("target_type"), TargetID: c.Query("target_id")}
 	if query.Since, err = optionalRFC3339(c.Query("since")); err != nil {
-		return presenter.BadRequest(c, "since must be RFC3339")
+		return responseapi.For(c).BadRequest("since must be RFC3339").Send()
 	}
 	if query.Until, err = optionalRFC3339(c.Query("until")); err != nil {
-		return presenter.BadRequest(c, "until must be RFC3339")
+		return responseapi.For(c).BadRequest("until must be RFC3339").Send()
 	}
 	page, err := u.Audit.QueryAudit(c.Context(), query)
 	if err != nil {
-		return presenter.ServerError(c, "failed to load audit")
+		return responseapi.For(c).InternalError("failed to load audit").Send()
 	}
 	data.AuditEvents = page.Data
 	data.NextCursor = page.NextCursor
@@ -566,7 +566,7 @@ func (u *UI) CacheFragment(c fiber.Ctx) error {
 func (u *UI) KeysPage(c fiber.Ctx) error {
 	data, err := u.loadKeys(c, "")
 	if err != nil {
-		return presenter.ServerError(c, "failed to load API keys")
+		return responseapi.For(c).InternalError("failed to load API keys").Send()
 	}
 	return renderTemplate(c, "keys.html", data)
 }
@@ -575,7 +575,7 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	quota, err := optionalFloat(c.FormValue("quota"))
 	if err != nil {
-		return presenter.BadRequest(c, "quota must be a non-negative number")
+		return responseapi.For(c).BadRequest("quota must be a non-negative number").Send()
 	}
 	quotaPeriod := strings.ToLower(strings.TrimSpace(c.FormValue("quota_period")))
 	if quotaPeriod == "" {
@@ -583,11 +583,11 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	}
 	rpm, err := optionalInt(c.FormValue("rpm"))
 	if err != nil {
-		return presenter.BadRequest(c, "RPM must be a positive integer")
+		return responseapi.For(c).BadRequest("RPM must be a positive integer").Send()
 	}
 	models := formValues(c, "models")
 	if len(models) == 0 {
-		return presenter.BadRequest(c, "select at least one model")
+		return responseapi.For(c).BadRequest("select at least one model").Send()
 	}
 	actor := principalFromSession(sess)
 	contextActor, contextErr := u.actorForContext(c, actor)
@@ -598,11 +598,11 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 		}
 	}
 	if contextErr != nil {
-		return presenter.Forbidden(c, contextErr.Error())
+		return responseapi.For(c).Forbidden(contextErr.Error()).Send()
 	}
 	in := apikey.CreateInput{Name: c.FormValue("name"), Models: models, Scopes: splitCSV(c.FormValue("scopes")), QuotaUSD: quota, QuotaPeriod: quotaPeriod, RPM: rpm}
 	if !sess.IsMaster() && !policy.CanGrant(actor, in.Scopes, in.Models, sess.AllowedModels) {
-		return presenter.Forbidden(c, "cannot grant scopes or models not held by the current session")
+		return responseapi.For(c).Forbidden("cannot grant scopes or models not held by the current session").Send()
 	}
 	switch actor.Type {
 	case entities.PrincipalMaster:
@@ -616,7 +616,7 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	case entities.PrincipalUser:
 		if c.FormValue("key_kind") == "organization" {
 			if contextActor.OrganizationID == "" || contextActor.MembershipRole != entities.MembershipAdmin {
-				return presenter.Forbidden(c, "organization administration is required")
+				return responseapi.For(c).Forbidden("organization administration is required").Send()
 			}
 			in.OwnerType = entities.OwnerOrganization
 			in.OwnerOrganizationID = contextActor.OrganizationID
@@ -626,7 +626,7 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 			in.OwnerUserID = actor.UserID
 			in.ContextOrganizationID = c.FormValue("context_organization_id")
 			if err = u.Identity.ValidateUserKeyContext(c.Context(), actor.UserID, in.ContextOrganizationID); err != nil {
-				return presenter.Forbidden(c, "active organization membership is required")
+				return responseapi.For(c).Forbidden("active organization membership is required").Send()
 			}
 		}
 	case entities.PrincipalOrganization:
@@ -636,14 +636,14 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 	}
 	key, err := u.Keys.Create(c.Context(), in)
 	if err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	if err = u.appendUIKeyAudit(c, actor, "key.create", key, map[string]string{"name": key.Name, "owner_type": key.OwnerType}); err != nil {
-		return presenter.ServerError(c, "API key created but audit write failed")
+		return responseapi.For(c).InternalError("API key created but audit write failed").Send()
 	}
 	data, loadErr := u.loadKeys(c, key.Plaintext)
 	if loadErr != nil {
-		return presenter.ServerError(c, "key created but list refresh failed")
+		return responseapi.For(c).InternalError("key created but list refresh failed").Send()
 	}
 	return renderTemplate(c, "keys.html", data)
 }
@@ -651,22 +651,22 @@ func (u *UI) KeysCreate(c fiber.Ctx) error {
 func (u *UI) KeyToggle(c fiber.Ctx) error {
 	enabled, err := strconv.ParseBool(c.FormValue("enabled"))
 	if err != nil {
-		return presenter.BadRequest(c, "enabled must be true or false")
+		return responseapi.For(c).BadRequest("enabled must be true or false").Send()
 	}
 	key, getErr := u.Keys.GetByID(c.Context(), c.Params("id"))
 	if getErr != nil || policy.ManageKey(principalFromSession(SessionFrom(c)), *key) != nil {
-		return presenter.NotFound(c, "API key not found")
+		return responseapi.For(c).NotFound("API key not found").Send()
 	}
 	err = u.Keys.Patch(c.Context(), c.Params("id"), &enabled, nil, nil, nil, nil)
 	if err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	action := "key.enable"
 	if !enabled {
 		action = "key.disable"
 	}
 	if err = u.appendUIKeyAudit(c, principalFromSession(SessionFrom(c)), action, key, nil); err != nil {
-		return presenter.ServerError(c, "API key updated but audit write failed")
+		return responseapi.For(c).InternalError("API key updated but audit write failed").Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/keys", u.KeysPage)
 }
@@ -674,32 +674,32 @@ func (u *UI) KeyToggle(c fiber.Ctx) error {
 func (u *UI) KeyDelete(c fiber.Ctx) error {
 	key, getErr := u.Keys.GetByID(c.Context(), c.Params("id"))
 	if getErr != nil || policy.ManageKey(principalFromSession(SessionFrom(c)), *key) != nil {
-		return presenter.NotFound(c, "API key not found")
+		return responseapi.For(c).NotFound("API key not found").Send()
 	}
 	err := u.Keys.Delete(c.Context(), c.Params("id"))
 	if err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	if err = u.appendUIKeyAudit(c, principalFromSession(SessionFrom(c)), "key.delete", key, nil); err != nil {
-		return presenter.ServerError(c, "API key deleted but audit write failed")
+		return responseapi.For(c).InternalError("API key deleted but audit write failed").Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/keys", u.KeysPage)
 }
 func (u *UI) KeyRotate(c fiber.Ctx) error {
 	key, err := u.Keys.GetByID(c.Context(), c.Params("id"))
 	if err != nil || policy.ManageKey(principalFromSession(SessionFrom(c)), *key) != nil {
-		return presenter.NotFound(c, "API key not found")
+		return responseapi.For(c).NotFound("API key not found").Send()
 	}
 	rotated, err := u.Keys.Rotate(c.Context(), key.ID)
 	if err != nil {
-		return presenter.ServerError(c, "failed to rotate API key")
+		return responseapi.For(c).InternalError("failed to rotate API key").Send()
 	}
 	if err = u.appendUIKeyAudit(c, principalFromSession(SessionFrom(c)), "key.rotate", rotated, map[string]string{"key_prefix": rotated.SecretPrefix}); err != nil {
-		return presenter.ServerError(c, "API key rotated but audit write failed")
+		return responseapi.For(c).InternalError("API key rotated but audit write failed").Send()
 	}
 	data, loadErr := u.loadKeys(c, rotated.Plaintext)
 	if loadErr != nil {
-		return presenter.ServerError(c, "key rotated but list refresh failed")
+		return responseapi.For(c).InternalError("key rotated but list refresh failed").Send()
 	}
 	return renderTemplate(c, "keys.html", data)
 }
@@ -819,7 +819,7 @@ func (u *UI) appendUIKeyAudit(c fiber.Ctx, actor entities.Principal, action stri
 func (u *UI) CredentialsPage(c fiber.Ctx) error {
 	data, err := u.loadCredentials(c)
 	if err != nil {
-		return presenter.ServerError(c, "failed to load credentials")
+		return responseapi.For(c).InternalError("failed to load credentials").Send()
 	}
 	return renderTemplate(c, "credentials.html", data)
 }
@@ -827,7 +827,7 @@ func (u *UI) CredentialsPage(c fiber.Ctx) error {
 func (u *UI) ProvidersPage(c fiber.Ctx) error {
 	data, err := u.loadCredentials(c)
 	if err != nil {
-		return presenter.ServerError(c, "failed to load providers")
+		return responseapi.For(c).InternalError("failed to load providers").Send()
 	}
 	data.Title = "Providers"
 	byProvider := make(map[string][]entities.Credential)
@@ -848,7 +848,7 @@ func (u *UI) ProvidersPage(c fiber.Ctx) error {
 func (u *UI) ProviderConnect(c fiber.Ctx) error {
 	definition, ok := providerpkg.Lookup(c.Params("provider"))
 	if !ok || definition.Auth != providerpkg.AuthAPIKey {
-		return presenter.BadRequest(c, "unknown API-key provider")
+		return responseapi.For(c).BadRequest("unknown API-key provider").Send()
 	}
 	sess := SessionFrom(c)
 	var owner *string
@@ -868,7 +868,7 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 		BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OwnerTenant: owner, OwnerUserID: ownerUserID,
 	})
 	if err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
@@ -885,7 +885,7 @@ func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 	}
 	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{Name: c.FormValue("name"), Provider: c.FormValue("provider"), Kind: c.FormValue("kind"), BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OAuthAccess: c.FormValue("oauth_access"), OAuthRefresh: c.FormValue("oauth_refresh"), OwnerTenant: owner, OwnerUserID: ownerUserID})
 	if err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
@@ -893,13 +893,13 @@ func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 func (u *UI) CredentialDelete(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	if sess != nil && !sess.IsMaster() && !u.sessionOwnsCredential(c, sess, c.Params("id")) {
-		return presenter.NotFound(c, "credential not found")
+		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	if err := u.Credentials.Delete(c.Context(), c.Params("id")); err != nil {
 		if errors.Is(err, entities.ErrNotFound) {
-			return presenter.NotFound(c, "credential not found")
+			return responseapi.For(c).NotFound("credential not found").Send()
 		}
-		return presenter.ServerError(c, "failed to delete credential")
+		return responseapi.For(c).InternalError("failed to delete credential").Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
@@ -908,7 +908,7 @@ func (u *UI) CredentialToggle(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	credentials, err := u.Credentials.List(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, "failed to load credential")
+		return responseapi.For(c).InternalError("failed to load credential").Send()
 	}
 	var selected *entities.Credential
 	for i := range credentials {
@@ -918,7 +918,7 @@ func (u *UI) CredentialToggle(c fiber.Ctx) error {
 		}
 	}
 	if selected == nil || (sess != nil && !sess.IsMaster() && !credentialOwnedBySession(*selected, sess)) {
-		return presenter.NotFound(c, "credential not found")
+		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	status := "active"
 	if selected.Status == "active" {
@@ -927,7 +927,7 @@ func (u *UI) CredentialToggle(c fiber.Ctx) error {
 	if _, err := u.Credentials.Update(c.Context(), selected.ID, entities.CredentialUpdate{
 		Name: selected.Name, BaseURL: selected.BaseURL, Status: status,
 	}); err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/providers", u.ProvidersPage)
 }
@@ -955,11 +955,11 @@ func (u *UI) ModelsPage(c fiber.Ctx) error {
 	var err error
 	data.Models, err = u.Models.List(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, "failed to load models")
+		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
 	data.Credentials, err = u.Credentials.List(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, "failed to load credentials")
+		return responseapi.For(c).InternalError("failed to load credentials").Send()
 	}
 	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
 		data.Credentials = filterCredentialsForSession(data.Credentials, sess)
@@ -982,7 +982,7 @@ func (u *UI) ModelsPage(c fiber.Ctx) error {
 
 func (u *UI) ModelsCreate(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
-		return presenter.Forbidden(c, "only the master session can change global model routes")
+		return responseapi.For(c).Forbidden("only the master session can change global model routes").Send()
 	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	weight, _ := strconv.Atoi(c.FormValue("weight"))
@@ -996,27 +996,27 @@ func (u *UI) ModelsCreate(c fiber.Ctx) error {
 	}
 	err := u.Models.Upsert(c.Context(), entities.ModelDef{Name: strings.TrimSpace(c.FormValue("name")), Strategy: c.FormValue("strategy"), UpstreamModel: strings.TrimSpace(c.FormValue("upstream_model")), Enabled: true, Routes: routes})
 	if err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
 }
 
 func (u *UI) ModelDelete(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
-		return presenter.Forbidden(c, "only the master session can change global model routes")
+		return responseapi.For(c).Forbidden("only the master session can change global model routes").Send()
 	}
 	if err := u.Models.Delete(c.Context(), decodedPathParam(c, "name")); err != nil {
 		if errors.Is(err, entities.ErrNotFound) {
-			return presenter.NotFound(c, "model not found")
+			return responseapi.For(c).NotFound("model not found").Send()
 		}
-		return presenter.ServerError(c, "failed to delete model")
+		return responseapi.For(c).InternalError("failed to delete model").Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
 }
 
 func (u *UI) ModelPriceSet(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
-		return presenter.Forbidden(c, "only the master session can change global prices")
+		return responseapi.For(c).Forbidden("only the master session can change global prices").Send()
 	}
 	readPrice := func(name string) (float64, error) {
 		value, err := optionalFloat(c.FormValue(name))
@@ -1030,23 +1030,23 @@ func (u *UI) ModelPriceSet(c fiber.Ctx) error {
 	}
 	input, err := readPrice("input_per_m")
 	if err != nil {
-		return presenter.BadRequest(c, "input price must be non-negative")
+		return responseapi.For(c).BadRequest("input price must be non-negative").Send()
 	}
 	output, err := readPrice("output_per_m")
 	if err != nil {
-		return presenter.BadRequest(c, "output price must be non-negative")
+		return responseapi.For(c).BadRequest("output price must be non-negative").Send()
 	}
 	cacheRead, err := readPrice("cached_input_per_m")
 	if err != nil {
-		return presenter.BadRequest(c, "cache-read price must be non-negative")
+		return responseapi.For(c).BadRequest("cache-read price must be non-negative").Send()
 	}
 	cacheWrite, err := readPrice("cache_write_per_m")
 	if err != nil {
-		return presenter.BadRequest(c, "cache-write price must be non-negative")
+		return responseapi.For(c).BadRequest("cache-write price must be non-negative").Send()
 	}
 	price := entities.Price{InputPerM: input, OutputPerM: output, CachedInputPerM: cacheRead, CacheWritePerM: cacheWrite}
 	if err := u.Models.SetPrice(c.Context(), decodedPathParam(c, "name"), price); err != nil {
-		return presenter.BadRequest(c, err.Error())
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return u.redirectOrRefresh(c, "/ui/models", u.ModelsPage)
 }
@@ -1057,12 +1057,12 @@ func (u *UI) UsagePage(c fiber.Ctx) error {
 	since := time.Now().UTC().Add(-30 * 24 * time.Hour)
 	actor, contextErr := u.actorForContext(c, principalFromSession(SessionFrom(c)))
 	if contextErr != nil {
-		return presenter.Forbidden(c, contextErr.Error())
+		return responseapi.For(c).Forbidden(contextErr.Error()).Send()
 	}
 	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
 	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
 	if policyErr != nil {
-		return presenter.Forbidden(c, "usage access is not allowed")
+		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
 	}
 	query := entities.UsageQuery{Visibility: visibility, Cursor: c.Query("cursor"), Since: &since, Limit: 100, OrganizationID: data.ActiveOrganizationID, UserID: c.Query("user_id"), Model: c.Query("model"), APIKeyID: c.Query("api_key_id")}
 	data.Models, _ = u.Models.List(c.Context())
@@ -1086,22 +1086,22 @@ func (u *UI) UsagePage(c fiber.Ctx) error {
 	if value := c.Query("since"); value != "" {
 		query.Since, err = optionalRFC3339(value)
 		if err != nil {
-			return presenter.BadRequest(c, "since must be RFC3339")
+			return responseapi.For(c).BadRequest("since must be RFC3339").Send()
 		}
 	}
 	if query.Until, err = optionalRFC3339(c.Query("until")); err != nil {
-		return presenter.BadRequest(c, "until must be RFC3339")
+		return responseapi.For(c).BadRequest("until must be RFC3339").Send()
 	}
 	if value := c.Query("status"); value != "" {
 		status, parseErr := strconv.Atoi(value)
 		if parseErr != nil {
-			return presenter.BadRequest(c, "status must be an integer")
+			return responseapi.For(c).BadRequest("status must be an integer").Send()
 		}
 		query.StatusCode = &status
 	}
 	data.Summary, err = u.Usage.SummaryQuery(c.Context(), query)
 	if err != nil {
-		return presenter.ServerError(c, "failed to load usage summary")
+		return responseapi.For(c).InternalError("failed to load usage summary").Send()
 	}
 	page, queryErr := u.Usage.Query(c.Context(), query)
 	if queryErr == nil {
@@ -1111,7 +1111,7 @@ func (u *UI) UsagePage(c fiber.Ctx) error {
 	}
 	err = queryErr
 	if err != nil {
-		return presenter.ServerError(c, "failed to load recent usage")
+		return responseapi.For(c).InternalError("failed to load recent usage").Send()
 	}
 	return renderTemplate(c, "usage.html", data)
 }

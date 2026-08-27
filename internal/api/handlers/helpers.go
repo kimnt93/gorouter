@@ -11,7 +11,12 @@ import (
 // @Tags system
 // @Success 200 {object} HealthResponse
 // @Router /healthz [get]
-func Health(c fiber.Ctx) error { return responseapi.JSON(c, HealthResponse{OK: true}) }
+func Health(c fiber.Ctx) error {
+	return responseapi.For(c).Response().
+		Status(fiber.StatusOK).
+		Data(HealthResponse{OK: true}).
+		Send()
+}
 
 func renderString(c fiber.Ctx, status int, html string) error {
 	c.Status(status)

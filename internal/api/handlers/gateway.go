@@ -13,7 +13,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	responseapi "github.com/kimnt93/gorouter/internal/api"
-	"github.com/kimnt93/gorouter/internal/api/presenter"
 	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -77,29 +76,29 @@ type PriceCatalog interface {
 // @Produce json
 // @Param request body llm.ChatRequest true "Chat request"
 // @Success 200 {object} llm.Response
-// @Failure 400,401,403,404,429,500,502,503 {object} presenter.Error
+// @Failure 400,401,403,404,429,500,502,503 {object} responseapi.ErrorResponse
 // @Router /v1/chat/completions [post]
 func (g *Gateway) Chat(c fiber.Ctx) error {
 	started := time.Now()
 	sess := SessionFrom(c)
 	if sess == nil || !sess.Has(entities.ScopeChat) {
-		return presenter.Unauthorized(c, "chat access required")
+		return responseapi.For(c).Unauthorized("chat access required").Send()
 	}
 	raw := append([]byte(nil), c.Body()...)
 	req, err := llm.ParseRequest(raw)
 	if err != nil || req.Model == "" || len(req.Messages) == 0 {
-		return presenter.BadRequest(c, "model and messages are required")
+		return responseapi.For(c).BadRequest("model and messages are required").Send()
 	}
 	key, err := g.accessForSession(c, sess)
 	if err != nil {
-		return presenter.Unauthorized(c, "API key required")
+		return responseapi.For(c).Unauthorized("API key required").Send()
 	}
 	if !key.Master && !contains(key.Models, req.Model) {
-		return presenter.Forbidden(c, "model is not allowed for this API key")
+		return responseapi.For(c).Forbidden("model is not allowed for this API key").Send()
 	}
 	models, err := g.Models.List(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, "failed to load model")
+		return responseapi.For(c).InternalError("failed to load model").Send()
 	}
 	var model *entities.ModelDef
 	for i := range models {
@@ -109,21 +108,21 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 	}
 	if model == nil {
-		return presenter.NotFound(c, "unknown model")
+		return responseapi.For(c).NotFound("unknown model").Send()
 	}
 	if key.RPM != nil {
 		if g.Quota == nil {
-			return presenter.Err(c, fiber.StatusServiceUnavailable, "rate-limit coordination is unavailable", "service_unavailable", "redis_unavailable")
+			return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "rate-limit coordination is unavailable", "service_unavailable", "redis_unavailable").Send()
 		}
 		allowed, limitErr := g.Quota.AllowRPM(c.Context(), key.ID, *key.RPM, started)
 		if errors.Is(limitErr, quota.ErrUnavailable) {
-			return presenter.Err(c, fiber.StatusServiceUnavailable, "rate-limit coordination is unavailable", "service_unavailable", "redis_unavailable")
+			return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "rate-limit coordination is unavailable", "service_unavailable", "redis_unavailable").Send()
 		}
 		if limitErr != nil {
-			return presenter.ServerError(c, "failed to enforce rate limit")
+			return responseapi.For(c).InternalError("failed to enforce rate limit").Send()
 		}
 		if !allowed {
-			return presenter.Err(c, fiber.StatusTooManyRequests, "requests-per-minute limit exceeded", "rate_limit_error", "rate_limit_exceeded")
+			return responseapi.For(c).Error(fiber.StatusTooManyRequests, "requests-per-minute limit exceeded", "rate_limit_error", "rate_limit_exceeded").Send()
 		}
 	}
 	deterministic := llm.IsDeterministic(req)
@@ -142,7 +141,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	price, priced, priceErr := g.resolvePrice(c.Context(), model)
 	if priceErr != nil {
-		return presenter.ServerError(c, "failed to load model price")
+		return responseapi.For(c).InternalError("failed to load model price").Send()
 	}
 	var pricePtr *entities.Price
 	if priced {
@@ -161,14 +160,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	quotaPeriod := key.QuotaPeriod
 	if quotaLimit != nil && quotaPeriod != entities.QuotaPeriodNone {
 		if g.Quota == nil {
-			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")
+			return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable").Send()
 		}
 		if g.Usage == nil {
-			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota usage is unavailable", "service_unavailable", "usage_unavailable")
+			return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "quota usage is unavailable", "service_unavailable", "usage_unavailable").Send()
 		}
 		windowStart, _, _, windowErr := quota.Window(quotaPeriod, started)
 		if windowErr != nil {
-			return presenter.ServerError(c, "invalid API-key quota period")
+			return responseapi.For(c).InternalError("invalid API-key quota period").Send()
 		}
 		estimate := entities.CalculateCost(pricePtr, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
 		if g.Pricing != nil {
@@ -176,29 +175,29 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 		spent, spendErr := g.Usage.SpendForKeySince(c.Context(), key.ID, windowStart)
 		if spendErr != nil {
-			return presenter.ServerError(c, "failed to load quota usage")
+			return responseapi.For(c).InternalError("failed to load quota usage").Send()
 		}
 		if periodQuota, ok := g.Quota.(quota.PeriodCoordinator); ok {
 			reservation, err = periodQuota.ReserveForPeriod(c.Context(), key.ID, *quotaLimit, spent, estimate.USD, quotaPeriod, started)
 		} else if quotaPeriod == entities.QuotaPeriodWeek || quotaPeriod == "" {
 			reservation, err = g.Quota.Reserve(c.Context(), key.ID, *quotaLimit, spent, estimate.USD, started)
 		} else {
-			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination does not support this period", "service_unavailable", "quota_period_unavailable")
+			return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "quota coordination does not support this period", "service_unavailable", "quota_period_unavailable").Send()
 		}
 		if errors.Is(err, quota.ErrExceeded) {
-			return presenter.Err(c, fiber.StatusTooManyRequests, "quota exceeded", "insufficient_quota", "quota_exceeded")
+			return responseapi.For(c).Error(fiber.StatusTooManyRequests, "quota exceeded", "insufficient_quota", "quota_exceeded").Send()
 		}
 		if errors.Is(err, quota.ErrUnavailable) {
-			return presenter.Err(c, fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable")
+			return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "quota coordination is unavailable", "service_unavailable", "redis_unavailable").Send()
 		}
 		if err != nil {
-			return presenter.ServerError(c, "failed to reserve quota")
+			return responseapi.For(c).InternalError("failed to reserve quota").Send()
 		}
 	}
 	routes, err := g.Creds.Routes(c.Context(), model.Name)
 	if err != nil || len(routes) == 0 {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no credentials available")
-		return presenter.Err(c, fiber.StatusServiceUnavailable, "no credentials available", "service_unavailable", "no_credentials")
+		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no credentials available", "service_unavailable", "no_credentials").Send()
 	}
 	candidates := make([]chat.Candidate, 0, len(routes))
 	runtimes := make(map[string]*entities.CredentialRuntime, len(routes))
@@ -238,7 +237,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	candidates = g.Selector.Order(strategy, candidates)
 	if len(candidates) == 0 {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
-		return presenter.Err(c, fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials")
+		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials").Send()
 	}
 	upstreamModel := model.UpstreamModel
 	if upstreamModel == "" {
@@ -272,7 +271,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			drainAndClose(result.Body)
 			g.recordError(key, model, runtime.ID, status, started, "upstream rejected request")
 			c.Set("X-Cache", "bypass")
-			return presenter.Err(c, status, "upstream rejected the request", "upstream_error", "upstream_rejected")
+			return responseapi.For(c).Error(status, "upstream rejected the request", "upstream_error", "upstream_rejected").Send()
 		}
 		if result.StatusCode < 200 || result.StatusCode >= 300 {
 			lastStatus = result.StatusCode
@@ -296,7 +295,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if lastStatus >= fiber.StatusBadRequest && lastStatus < fiber.StatusInternalServerError {
 		responseStatus = lastStatus
 	}
-	return presenter.Err(c, responseStatus, "all credentials failed", "upstream_error", "upstream_unavailable")
+	return responseapi.For(c).Error(responseStatus, "all credentials failed", "upstream_error", "upstream_unavailable").Send()
 }
 
 func (g *Gateway) adapter(provider string) (entities.Upstream, bool) {
@@ -337,17 +336,17 @@ func drainAndClose(body io.ReadCloser) {
 // @Tags gateway
 // @Security BearerAuth
 // @Success 200 {object} llm.ModelList
-// @Failure 401,403,500 {object} presenter.Error
+// @Failure 401,403,500 {object} responseapi.ErrorResponse
 // @Router /v1/models [get]
 func (g *Gateway) ListModels(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	key, err := g.accessForSession(c, sess)
 	if err != nil {
-		return presenter.Unauthorized(c, "API key required")
+		return responseapi.For(c).Unauthorized("API key required").Send()
 	}
 	models, err := g.Models.List(c.Context())
 	if err != nil {
-		return presenter.ServerError(c, "failed to load models")
+		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
 	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}}
 	for _, model := range models {
@@ -359,7 +358,7 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
 		}
 	}
-	return responseapi.JSON(c, out)
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
 }
 
 func (g *Gateway) accessForSession(c fiber.Ctx, sess *entities.Session) (*GatewayAccessContext, error) {
@@ -390,14 +389,14 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 	body, err := io.ReadAll(io.LimitReader(result.Body, 32<<20))
 	if err != nil {
 		g.recordError(key, model, runtime.ID, fiber.StatusBadGateway, started, "upstream read failed")
-		return presenter.Err(c, 502, "upstream read failed", "upstream_error", "")
+		return responseapi.For(c).Error(502, "upstream read failed", "upstream_error", "").Send()
 	}
 	usage := llm.ExtractUsage(body)
 	if providerpkg.UsesAnthropicWire(runtime.Provider) {
 		resp, err := llm.FromAnthropic(body, model.Name)
 		if err != nil {
 			g.recordError(key, model, runtime.ID, fiber.StatusBadGateway, started, "response translation failed")
-			return presenter.Err(c, 502, "response translation failed", "upstream_error", "")
+			return responseapi.For(c).Error(502, "response translation failed", "upstream_error", "").Send()
 		}
 		body, _ = json.Marshal(resp)
 		usage = resp.Usage
@@ -411,7 +410,7 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 	cost := entities.CalculateCost(price, usage.TokenUsage())
 	if err := g.settle(c.Context(), reservation, cost.USD); err != nil {
 		g.recordCostConversation(key, model, runtime.ID, usage, false, fiber.StatusServiceUnavailable, started, cost, raw, body)
-		return presenter.Err(c, fiber.StatusServiceUnavailable, "quota settlement is unavailable", "service_unavailable", "redis_unavailable")
+		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "quota settlement is unavailable", "service_unavailable", "redis_unavailable").Send()
 	}
 	g.recordCostConversation(key, model, runtime.ID, usage, false, result.StatusCode, started, cost, raw, body)
 	cacheStatus := "off"

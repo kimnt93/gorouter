@@ -10,7 +10,7 @@ type Error = response.ErrorResponse
 type Detail = response.ErrorDetail
 
 func Err(c fiber.Ctx, status int, msg, typ, code string) error {
-	return response.Response().Error(status, msg, typ, code).Send(c)
+	return response.For(c).Error(status, msg, typ, code).Send()
 }
 
 func BadRequest(c fiber.Ctx, msg string) error {
@@ -29,4 +29,6 @@ func ServerError(c fiber.Ctx, msg string) error {
 	return Err(c, fiber.StatusInternalServerError, msg, "server_error", "")
 }
 
-func OK(c fiber.Ctx, v any) error { return response.Response().Data(v).Send(c) }
+func OK(c fiber.Ctx, v any) error {
+	return response.For(c).Response().Status(fiber.StatusOK).Data(v).Send()
+}

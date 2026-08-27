@@ -5,7 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/kimnt93/gorouter/internal/api/presenter"
+	responseapi "github.com/kimnt93/gorouter/internal/api"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
@@ -49,7 +49,7 @@ func Require(authSvc *auth.Service, scope string) fiber.Handler {
 			case c.Path() == "/" || strings.HasPrefix(c.Path(), "/ui") || strings.HasPrefix(c.Path(), "/dashboard"):
 				return c.Redirect().To("/login")
 			default:
-				return presenter.Unauthorized(c, "authentication required")
+				return responseapi.For(c).Unauthorized("authentication required").Send()
 			}
 		}
 		if scope != "" && !sess.Has(scope) {
@@ -57,7 +57,7 @@ func Require(authSvc *auth.Service, scope string) fiber.Handler {
 				c.Status(fiber.StatusForbidden)
 				return renderString(c, fiber.StatusForbidden, `<div class="p-4 text-red-400">Forbidden: missing <code>`+scope+`</code> access for this key.</div>`)
 			}
-			return presenter.Err(c, fiber.StatusForbidden, "missing required access: "+scope, "permission_error", "scope_denied")
+			return responseapi.For(c).Error(fiber.StatusForbidden, "missing required access: "+scope, "permission_error", "scope_denied").Send()
 		}
 		c.Locals(localSession, sess)
 		return c.Next()
