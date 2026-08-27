@@ -363,18 +363,39 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
+	credentials, err := g.Creds.List(c.Context())
+	if err != nil {
+		return responseapi.For(c).InternalError("failed to load models").Send()
+	}
+	callableCredentials := make(map[string]bool, len(credentials))
+	for _, credential := range credentials {
+		if credential.Status != entities.StatusActive || credential.OwnerUserID != "" && !key.Master && credential.OwnerUserID != key.Actor.UserID || !policy.CredentialVisible(key.Master, key.TenantID, credential.OwnerTenantID) {
+			continue
+		}
+		callableCredentials[credential.ID] = true
+	}
 	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}}
 	for _, model := range models {
-		if model.Enabled && (key.Master || contains(key.Models, model.Name)) {
-			var price *entities.Price
-			if resolved, ok, resolveErr := g.resolvePrice(c.Context(), &model); resolveErr == nil && ok {
-				price = &resolved
-			}
-			out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
-			out.Models = append(out.Models, codexModelInfo(model))
+		if !model.Enabled || !key.Master && !contains(key.Models, model.Name) || !hasCallableRoute(model.Routes, callableCredentials) {
+			continue
 		}
+		var price *entities.Price
+		if resolved, ok, resolveErr := g.resolvePrice(c.Context(), &model); resolveErr == nil && ok {
+			price = &resolved
+		}
+		out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
+		out.Models = append(out.Models, codexModelInfo(model))
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
+}
+
+func hasCallableRoute(routes []entities.ModelRoute, callableCredentials map[string]bool) bool {
+	for _, route := range routes {
+		if route.Enabled && callableCredentials[route.CredentialID] {
+			return true
+		}
+	}
+	return false
 }
 
 // agentHarnessInstructions is exposed through the Codex-compatible model

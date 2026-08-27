@@ -166,7 +166,14 @@ func TestGatewayUsesPriceResolverFallback(t *testing.T) {
 }
 
 func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
-	gateway := &Gateway{Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "openai/model-a", Enabled: true}}), Pricing: gatewayPriceResolver{price: entities.Price{InputPerM: 0.2, OutputPerM: 1.2, CachedInputPerM: 0.02, CacheWritePerM: 0.25}}}
+	gateway := &Gateway{
+		Creds: credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive}}}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{
+			Name: "model-a", UpstreamModel: "openai/model-a", Enabled: true,
+			Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}},
+		}}),
+		Pricing: gatewayPriceResolver{price: entities.Price{InputPerM: 0.2, OutputPerM: 1.2, CachedInputPerM: 0.02, CacheWritePerM: 0.25}},
+	}
 	app := fiber.New()
 	app.Get("/v1/models", func(c fiber.Ctx) error {
 		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes})
@@ -190,6 +197,81 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	}
 	if len(body.Models) != 1 || body.Models[0].Slug != "model-a" || body.Models[0].DisplayName == "" || body.Models[0].Description == "" || len(body.Models[0].SupportedReasoningLevels) != 1 || body.Models[0].SupportedReasoningLevels[0].Effort != "medium" || body.Models[0].SupportedReasoningLevels[0].Description == "" {
 		t.Fatalf("Codex models = %+v", body.Models)
+	}
+}
+
+func TestListModelsHidesModelsWithoutActiveCredentialRoutes(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		credentials []entities.Credential
+	}{
+		{name: "deleted credential"},
+		{name: "inactive credential", credentials: []entities.Credential{{ID: "cred-a", Status: entities.StatusDisabled}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gateway := &Gateway{
+				Creds: credential.NewService(gatewayCredRepo{items: test.credentials}, nil),
+				Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{
+					Name: "cx/orphan", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}},
+				}}),
+			}
+			app := fiber.New()
+			app.Get("/v1/models", func(c fiber.Ctx) error {
+				c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes})
+				return gateway.ListModels(c)
+			})
+			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var body llm.ModelList
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK || len(body.Data) != 0 || len(body.Models) != 0 {
+				t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestListModelsKeepsPersonalCredentialRoutesPrivate(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		ownerUserID   string
+		expectedCount int
+	}{
+		{name: "own route", ownerUserID: "user-a", expectedCount: 1},
+		{name: "foreign route", ownerUserID: "user-b", expectedCount: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			key := &entities.ApiKey{ID: "key-a", Models: []string{"cx/model"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+			gateway := &Gateway{
+				Keys:  apikey.NewService(gatewayKeyRepo{key: key}, func(string) string { return "" }, func() string { return "" }),
+				Creds: credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive, OwnerUserID: test.ownerUserID}}}, nil),
+				Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{
+					Name: "cx/model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}},
+				}}),
+			}
+			app := fiber.New()
+			app.Get("/v1/models", func(c fiber.Ctx) error {
+				c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, KeyID: key.ID, UserID: "user-a", Scopes: []string{entities.ScopeChat}})
+				return gateway.ListModels(c)
+			})
+			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var body llm.ModelList
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Data) != test.expectedCount || len(body.Models) != test.expectedCount {
+				t.Fatalf("body=%+v", body)
+			}
+		})
 	}
 }
 
