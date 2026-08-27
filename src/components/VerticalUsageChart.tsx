@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { UsageActivityBucket } from '../api/contracts'
 import { formatDateBucket, formatInteger, formatUSD } from '../lib/format'
+import { TruncatedText } from './SearchableSelect'
 
 type Metric = 'requests' | 'tokens' | 'cost' | 'cache'
 
@@ -71,10 +72,10 @@ export function VerticalUsageChart({ data, metric }: { data: UsageActivityBucket
             {bucket.segments.filter((segment) => segment.value > 0).map((segment) => <i key={segment.key} style={{ background: segment.color, height: `${bucket.total ? segment.value / bucket.total * 100 : 0}%` }} />)}
           </div></div>
           <time dateTime={bucket.start}>{formatDateBucket(bucket.start)}</time>
-          <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} />{segment.label}<b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></div>
+          <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></div>
         </div>
       })}
     </div>
-    <div className="chart-legend">{legend.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} />{segment.label}</span>)}</div>
+    <div className="chart-legend">{legend.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText></span>)}</div>
   </div>
 }

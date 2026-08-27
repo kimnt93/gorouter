@@ -7,6 +7,13 @@ export class APIError extends Error {
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const viewOrganization = new URLSearchParams(window.location.search).get('organization_id') ?? ''
+  if (method === 'GET' && viewOrganization && ['/admin/api-keys', '/admin/credentials', '/admin/models', '/admin/audit/'].some((prefix) => path.startsWith(prefix))) {
+    const url = new URL(path, window.location.origin)
+    if (!url.searchParams.has('organization_id')) url.searchParams.set('organization_id', viewOrganization)
+    path = `${url.pathname}${url.search}`
+  }
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')

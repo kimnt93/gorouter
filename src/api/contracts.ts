@@ -102,8 +102,8 @@ export interface Session {
   scopes: string[]
 }
 
-export interface Organization { id: string; name: string; status: string; created_at: string; updated_at: string }
-export interface Membership { organization_id: string; user_id: string; role: 'member' | 'admin'; created_at: string }
+export interface Organization { id: string; name: string; status: string; created_at: string; updated_at: string; member_count?: number; membership_role?: 'member' | 'admin' }
+export interface Membership { organization_id: string; user_id: string; username?: string; role: 'member' | 'admin'; created_at: string }
 export interface AuditEvent { id: string; ts: string; actor_type: string; actor_id: string; actor_label: string; organization_id: string; action: string; target_type: string; target_id: string; safe_metadata: Record<string, string> }
 
 export interface ProviderDefinition {
