@@ -8,8 +8,8 @@
 - Generated, committed outputs: `internal/docs/docs.go`, `swagger.json`, and
   `swagger.yaml`.
 
-The repository requires dependency and internal-package parsing because the
-shared presenter error aliases `internal/api.ErrorResponse` and contracts use
+The repository requires dependency and internal-package parsing because
+annotations reference `internal/api.ErrorResponse` and contracts use
 internal/domain types.
 
 ## Generate
@@ -38,8 +38,36 @@ The bundled script runs this exact command and supports a no-write drift check:
 - `@Accept json` for JSON bodies and the correct `@Produce` media type.
 - Typed body/query/path parameters with required flags and bounded values.
 - Exact success status and response type.
-- Expected 400/401/403/404/409/429/5xx presenter errors.
+- Expected 400/401/403/404/409/429/5xx errors documented as
+  `responseapi.ErrorResponse`.
 - No secret examples, tokens, cookies, prompts, or raw provider bodies.
+
+## Canonical annotation example
+
+Keep the annotation immediately above the handler and describe the exported
+typed contracts rather than an internal builder or `any` payload:
+
+```go
+// CreateWidget creates a widget visible to the current organization context.
+// @Summary Create a widget
+// @Tags widgets
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body WidgetCreateRequest true "Widget"
+// @Success 201 {object} WidgetCreateResponse
+// @Failure 400,401,403,409,500 {object} responseapi.ErrorResponse
+// @Router /admin/widgets [post]
+func (a *Admin) CreateWidget(c fiber.Ctx) error {
+	// Handler implementation uses responseapi.For(c).
+}
+```
+
+For a cursor list, annotate the named list response whose JSON fields match the
+fluent `Object("list").Data(...).Next(...)` envelope. For offset pagination,
+annotate the named response containing `data`, `total`, `offset`, and `limit`.
+The response builder is an implementation detail and must not replace a stable
+Swagger schema.
 
 ## Diagnose generation errors
 

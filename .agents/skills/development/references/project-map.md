@@ -11,7 +11,7 @@ assuming every package listed is involved.
 | `cmd/mock-gorouter/` | Local/mock upstream executable used by tests and smoke work |
 | `internal/api/routes/routes.go` | Fiber app construction, route registration, middleware, SPA/static delivery, Swagger |
 | `internal/api/handlers/` | HTTP binding, policy boundary, typed response contracts, gateway lifecycle |
-| `internal/api/presenter/` and `internal/api/response.go` | Shared OpenAI-style error and JSON response boundary |
+| `internal/api/response.go` | Request-scoped fluent JSON response and OpenAI-style error boundary |
 | `internal/api/spa/` | Embedded generated React bundle |
 | `internal/docs/` | Generated Swagger Go, JSON, and YAML artifacts |
 

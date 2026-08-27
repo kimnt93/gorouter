@@ -35,8 +35,8 @@ Select the smallest relevant set from `.agents/skills/` and read each selected
 
 - `$development` — project map, Go conventions, and feature workflow.
 - `$go-refactoring` — behavior-preserving Go restructuring and analysis tools.
-- `$fiber-api` — Fiber v3 handlers, middleware, typed JSON, routes,
-  SSE, and Swagger.
+- `$fiber-api` — Fiber v3 handlers, middleware, typed JSON, request-scoped
+  fluent responses, routes, SSE, and Swagger.
 - `$swaggo-docs` — Swag annotations, deterministic generation, and API-doc
   verification.
 - `$provider-connections` — provider catalog, API-key/OAuth adapters,
@@ -55,6 +55,11 @@ Select the smallest relevant set from `.agents/skills/` and read each selected
 Use several skills when a change crosses boundaries. For example, a new
 provider normally needs provider, Fiber API, data backend, React dashboard, and
 testing guidance.
+
+When a selected skill links a reference as required or marks an example as
+canonical, read that reference before editing and follow its structure unless
+the existing local contract has a concrete reason to differ. Adapt example
+domain names and types; do not copy hypothetical identifiers literally.
 
 ## Non-negotiable domain rules
 
@@ -142,8 +147,10 @@ cmd/gorouter -> all concrete implementations
 Use typed Go structs with JSON tags for defined request, response, persistence,
 and provider shapes. Do not use `map[string]any` when a stable shape is known.
 Keep handlers thin: bind and validate HTTP input, call services/policy, map
-errors, and return through the shared response/presenter boundary. Keep SQL,
-Redis, and provider HTTP details out of handlers and domain entities.
+errors, and return through the request-scoped `internal/api` fluent response
+boundary. Bind it with `responseapi.For(c)`; never store Fiber context in
+package-global state. Keep SQL, Redis, and provider HTTP details out of
+handlers and domain entities.
 
 Preserve user work in a dirty tree. Inspect current changes before editing and
 make the smallest cohesive patch. Do not edit generated files by hand.

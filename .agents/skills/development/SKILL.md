@@ -8,7 +8,8 @@ description: Implement or update GoRouter features using its Go architecture, ty
 Follow `AGENTS.md` first. Read [project-map.md](references/project-map.md) when
 locating ownership or tracing a feature. Read
 [coding-conventions.md](references/coding-conventions.md) for ordinary Go
-changes. Use `$go-refactoring` for a behavior-preserving structural refactor.
+changes; its examples are the canonical package/service style. Use
+`$go-refactoring` for a behavior-preserving structural refactor.
 
 ## Workflow
 
@@ -33,8 +34,8 @@ changes. Use `$go-refactoring` for a behavior-preserving structural refactor.
 - Accept `context.Context` in service/repository/provider operations and pass it
   through; do not replace request context with `context.Background()` unless
   the work intentionally outlives the request.
-- Wrap operational errors with useful context, but expose only safe presenter
-  messages at HTTP boundaries.
+- Wrap operational errors with useful context, but expose only safe messages
+  through the request-scoped response API at HTTP boundaries.
 - Keep constructors explicit and wire concrete dependencies only in
   `cmd/gorouter/main.go`.
 - Generate IDs with `entities.NewID` and timestamps with `time.Now().UTC()`

@@ -6,15 +6,16 @@ description: Add or review GoRouter Swag annotations, regenerate committed Swagg
 # Swaggo documentation
 
 Read [swaggo-workflow.md](references/swaggo-workflow.md) before changing
-annotations or diagnosing generation. Use `scripts/generate.sh check` to detect
-drift and `scripts/generate.sh generate` after the source contract is correct.
+annotations or diagnosing generation. Follow its canonical annotation example.
+Use `scripts/generate.sh check` to detect drift and `scripts/generate.sh
+generate` after the source contract is correct.
 
 ## Contract rules
 
 - Document the real Fiber route and typed request/response structs; never patch
   generated output to conceal a missing annotation or unsupported type.
 - Include summary, tags, security, parameters, success status/type, and every
-  meaningful error status using the shared presenter error type.
+  meaningful error status using `responseapi.ErrorResponse`.
 - Keep the operation's object-level authorization in implementation/tests;
   Swagger security metadata does not enforce policy.
 - Regenerate `internal/docs/docs.go`, `swagger.json`, and `swagger.yaml`
