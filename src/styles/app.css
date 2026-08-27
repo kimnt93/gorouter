@@ -381,19 +381,16 @@ h2 { font-size: 19px; }
 .usage-filter-panel .custom-range { flex-basis: 100%; margin-top: 0; }
 
 .vertical-chart-wrap { padding: 24px 22px 18px; }
-.vertical-chart { width: 100%; min-height: 240px; display: flex; align-items: stretch; justify-content: flex-end; gap: clamp(3px, .55vw, 10px); overflow: hidden; padding: 16px 4px 4px; }
-.vertical-column { position: relative; min-width: 0; max-width: 72px; flex: 1 1 0; display: grid; grid-template-rows: 22px 165px 38px; gap: 5px; outline: none; }
+.vertical-chart { width: 100%; min-height: 240px; display: flex; align-items: stretch; justify-content: flex-end; gap: 0; overflow: hidden; padding: 16px 4px 4px; }
+.vertical-column { position: relative; min-width: 0; max-width: 82px; flex: 1 1 0; display: grid; grid-template-rows: 22px 165px 38px; gap: 5px; padding-inline: clamp(2px, .3vw, 5px); outline: none; }
 .vertical-value { overflow: hidden; color: #aaa; text-align: center; font: 11px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .vertical-track { display: flex; align-items: flex-end; overflow: hidden; border-radius: 5px 5px 2px 2px; background: repeating-linear-gradient(to top, transparent 0, transparent 24%, #313131 25%); border-bottom: 1px solid #464646; }
 .vertical-stack { width: 100%; min-height: 1px; display: flex; flex-direction: column-reverse; justify-content: flex-start; overflow: hidden; border-radius: 5px 5px 1px 1px; transition: filter .15s ease; }
 .vertical-stack i { width: 100%; min-height: 1px; display: block; }
 .vertical-column:hover .vertical-stack, .vertical-column:focus .vertical-stack { filter: brightness(1.18); }
 .vertical-column > time { overflow: hidden; color: #999; text-align: center; font: 11px/1.35 ui-monospace, monospace; text-overflow: ellipsis; }
-.chart-tooltip { position: absolute; z-index: 10; left: 50%; bottom: 54px; width: 255px; max-width: min(255px, calc(100vw - 56px)); max-height: 300px; display: none; overflow-y: auto; padding: 11px; border: 1px solid #505050; border-radius: 8px; color: #ccc; background: #171717; box-shadow: 0 16px 45px rgba(0,0,0,.55); transform: translateX(-50%); font-size: 12px; pointer-events: auto; }
-.vertical-column:first-child .chart-tooltip { left: 0; transform: none; }
-.vertical-column:last-child .chart-tooltip { right: 0; left: auto; transform: none; }
-.vertical-column:first-child:last-child .chart-tooltip { right: auto; left: 0; }
-.vertical-column:hover .chart-tooltip, .vertical-column:focus .chart-tooltip { display: grid; gap: 6px; }
+.chart-tooltip { z-index: 100; width: 280px; max-width: calc(100vw - 24px); max-height: 300px; overflow-y: auto; padding: 11px; border: 1px solid #505050; border-radius: 8px; color: #ccc; background: #171717; box-shadow: 0 16px 45px rgba(0,0,0,.55); font-size: 12px; }
+.chart-cursor-tooltip { position: fixed; display: grid; gap: 6px; transform: translate(-50%, calc(-100% - 14px)); pointer-events: none; }
 .chart-tooltip > strong { margin-bottom: 3px; color: #eee; }
 .chart-tooltip span { min-width: 0; display: grid; grid-template-columns: 8px minmax(0,1fr) auto; align-items: center; gap: 7px; }
 .chart-tooltip span i, .chart-legend span i { width: 8px; height: 8px; border-radius: 2px; }
@@ -401,7 +398,7 @@ h2 { font-size: 19px; }
 .chart-tooltip .tooltip-total { grid-template-columns: minmax(0,1fr) auto; margin-top: 3px; padding-top: 7px; border-top: 1px solid #3a3a3a; }
 .chart-legend { max-height: 124px; overflow-y: auto; display: flex; justify-content: center; gap: 10px 16px; flex-wrap: wrap; padding-top: 13px; color: #aaa; font-size: 12px; }
 .chart-legend span { min-width: 0; max-width: 240px; display: flex; align-items: center; gap: 6px; }
-.cache-efficiency-column { min-width: 0; max-width: 76px; }
+.cache-efficiency-column { min-width: 0; max-width: 86px; }
 .cache-rate-value { color: #7bd8aa; font-weight: 700; }
 .cache-efficiency-stack { flex-direction: column; }
 .cache-read-segment, .cache-read-swatch { background: #62c996 !important; }
@@ -511,8 +508,7 @@ h2 { font-size: 19px; }
   .identity-filter-row { min-width: 0; display: grid; grid-template-columns: 1fr 1fr; align-items: end; }
   .filter-chips { grid-column: 1 / -1; }
   .vertical-chart-wrap { padding: 16px 12px 12px; }
-  .vertical-chart { min-height: 205px; gap: 7px; }
+  .vertical-chart { min-height: 205px; gap: 0; }
   .vertical-column { min-width: 0; max-width: 48px; grid-template-rows: 18px 140px 34px; }
   .vertical-value, .vertical-column > time { font-size: 9px; }
-  .chart-tooltip { left: 0; transform: none; }
 }

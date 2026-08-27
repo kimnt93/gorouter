@@ -5,33 +5,57 @@ import { RangeSelector } from './RangeSelector'
 import { CacheEfficiencyChart, VerticalUsageChart } from './VerticalUsageChart'
 import { groupByForUsageRange } from '../lib/usageResolution'
 
+function chartColumns(root: HTMLElement, label: string) {
+  return within(root).getByLabelText(label).querySelectorAll<HTMLElement>('.vertical-column')
+}
+
 test('renders normalized request bars with stable user breakdown tooltips', () => {
   const rows: UsageActivityBucket[] = [
     { start: '2026-08-25T00:00:00Z', requests: 3, prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 4, cache_write_tokens: 1, cost_usd: 1, input_cost_usd: .2, output_cost_usd: .6, cache_read_cost_usd: .1, cache_write_cost_usd: .1, user_id: 'user-a', username: 'Alice' },
     { start: '2026-08-25T00:00:00Z', requests: 1, prompt_tokens: 5, completion_tokens: 1, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: .5, input_cost_usd: .1, output_cost_usd: .4, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'user-b', username: 'Bob' },
   ]
-  render(<VerticalUsageChart data={rows} metric="requests" groupBy="hour" />)
-  expect(screen.getByLabelText('requests activity trend')).toHaveTextContent('Alice3')
-  expect(screen.getByLabelText('requests activity trend')).toHaveTextContent('Bob1')
-  expect(screen.getByText('Total').parentElement).toHaveTextContent('4 · 100%')
+  const { container } = render(<VerticalUsageChart data={rows} metric="requests" groupBy="hour" />)
+  fireEvent.pointerEnter(chartColumns(container, 'requests activity trend')[0], { clientX: 400, clientY: 500 })
+  const tooltip = within(container).getByRole('tooltip')
+  expect(tooltip).toHaveTextContent('Alice3')
+  expect(tooltip).toHaveTextContent('Bob1')
+  expect(within(tooltip).getByText('Total').parentElement).toHaveTextContent('4 · 100%')
 })
 
 test('shows all four token and cost components in chart tooltips', () => {
   const row: UsageActivityBucket = { start: '2026-08-25T00:00:00Z', requests: 1, prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 4, cache_write_tokens: 1, cost_usd: 1, input_cost_usd: .2, output_cost_usd: .6, cache_read_cost_usd: .1, cache_write_cost_usd: .1, user_id: 'user-a', username: 'Alice' }
   const { rerender } = render(<VerticalUsageChart data={[row]} metric="tokens" groupBy="day" />)
+  fireEvent.pointerEnter(screen.getByLabelText('Aug 25 bucket'), { clientX: 400, clientY: 500 })
   for (const label of ['Input', 'Output', 'Cache read', 'Cache write']) expect(screen.getAllByText(label).length).toBeGreaterThan(0)
   rerender(<VerticalUsageChart data={[row]} metric="cost" groupBy="day" />)
+  fireEvent.pointerEnter(screen.getByLabelText('Aug 25 bucket'), { clientX: 400, clientY: 500 })
   for (const label of ['Input', 'Output', 'Cache read', 'Cache write']) expect(screen.getAllByText(label).length).toBeGreaterThan(0)
 })
 
 test('shows cache-read percentage and total usage for each bucket', () => {
   const row: UsageActivityBucket = { start: '2026-08-25T00:00:00Z', requests: 1, prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 90, cache_write_tokens: 2, cost_usd: 1, input_cost_usd: .2, output_cost_usd: .6, cache_read_cost_usd: .1, cache_write_cost_usd: .1, user_id: 'user-a', username: 'Alice' }
-  render(<CacheEfficiencyChart data={[row]} groupBy="hour" />)
-  const chart = within(screen.getByLabelText('cache read share by time bucket'))
-  expect(chart.getByText('90.0%')).toBeInTheDocument()
-  expect(chart.getByText('Total usage tokens').parentElement).toHaveTextContent('107')
-  expect(chart.getByText('Cache read').parentElement).toHaveTextContent('90 · 90.0%')
-  expect(chart.getByText('Uncached input').parentElement).toHaveTextContent('10 · 10.0%')
+  const { container } = render(<CacheEfficiencyChart data={[row]} groupBy="hour" />)
+  const chart = within(container).getByLabelText('cache read share by time bucket')
+  const chartQueries = within(chart)
+  expect(chartQueries.getByText('90.0%')).toBeInTheDocument()
+  fireEvent.pointerEnter(chartColumns(container, 'cache read share by time bucket')[0], { clientX: 400, clientY: 500 })
+  const tooltip = within(within(container).getByRole('tooltip'))
+  expect(tooltip.getByText('Total usage tokens').parentElement).toHaveTextContent('107')
+  expect(tooltip.getByText('Cache read').parentElement).toHaveTextContent('90 · 90.0%')
+  expect(tooltip.getByText('Uncached input').parentElement).toHaveTextContent('10 · 10.0%')
+})
+
+test('uses the full chart column as a hover target and switches tooltip buckets', () => {
+  const rows: UsageActivityBucket[] = [
+    { start: '2026-08-25T00:00:00Z', requests: 1, prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: .1, input_cost_usd: .1, output_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'a', username: 'Alice' },
+    { start: '2026-08-25T01:00:00Z', requests: 1, prompt_tokens: 1000, completion_tokens: 20, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: 1, input_cost_usd: 1, output_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'a', username: 'Alice' },
+  ]
+  const { container } = render(<VerticalUsageChart data={rows} metric="tokens" groupBy="hour" />)
+  const columns = chartColumns(container, 'tokens activity trend')
+  fireEvent.pointerEnter(columns[0], { clientX: 300, clientY: 600 })
+  expect(within(container).getByRole('tooltip')).toHaveTextContent('Total12')
+  fireEvent.pointerEnter(columns[1], { clientX: 380, clientY: 600 })
+  expect(within(container).getByRole('tooltip')).toHaveTextContent('Total1,020')
 })
 
 test('supports a filter dimension and multiple values without a manual resolution filter', () => {

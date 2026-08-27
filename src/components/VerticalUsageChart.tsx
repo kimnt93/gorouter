@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useState, type FocusEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import type { GroupBy, UsageActivityBucket } from '../api/contracts'
 import { formatDateBucket, formatInteger, formatUSD } from '../lib/format'
 import { TruncatedText } from './SearchableSelect'
@@ -9,6 +9,39 @@ interface Segment { key: string; label: string; value: number; color: string }
 interface Bucket { start: string; segments: Segment[]; total: number }
 
 const colors = ['#a99af4', '#78aaf7', '#62c996', '#e2ad61', '#e47c9f', '#69c6cf', '#c9a4ff', '#8fc16a']
+
+interface TooltipState<T> { item: T; x: number; y: number }
+
+function tooltipPosition(x: number, y: number) {
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+  return { x: Math.max(152, Math.min(viewportWidth - 152, x)), y }
+}
+
+function useChartTooltip<T>() {
+  const [tooltip, setTooltip] = useState<TooltipState<T> | null>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const activate = (item: T, event: PointerEvent<HTMLElement>) => {
+    const position = tooltipPosition(event.clientX, event.clientY)
+    setTooltip({ item, ...position })
+  }
+  const move = (event: PointerEvent<HTMLElement>) => {
+    const element = tooltipRef.current
+    if (!element) return
+    const position = tooltipPosition(event.clientX, event.clientY)
+    element.style.left = `${position.x}px`
+    element.style.top = `${position.y}px`
+  }
+  const focus = (item: T, event: FocusEvent<HTMLElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const position = tooltipPosition(bounds.left + bounds.width / 2, bounds.top + Math.min(56, bounds.height / 2))
+    setTooltip({ item, ...position })
+  }
+  return { tooltip, tooltipRef, activate, move, focus, hide: () => setTooltip(null) }
+}
+
+function CursorTooltip<T>({ state, tooltipRef, children }: { state: TooltipState<T>; tooltipRef: RefObject<HTMLDivElement | null>; children: (item: T) => ReactNode }) {
+  return <div ref={tooltipRef} className="chart-tooltip chart-cursor-tooltip" role="tooltip" style={{ left: state.x, top: state.y }}>{children(state.item)}</div>
+}
 
 function aggregate(data: UsageActivityBucket[], metric: Metric): Bucket[] {
   const grouped = new Map<string, UsageActivityBucket[]>()
@@ -77,25 +110,26 @@ function aggregateCache(data: UsageActivityBucket[]): CacheBucket[] {
 export function CacheEfficiencyChart({ data, groupBy }: { data: UsageActivityBucket[]; groupBy: GroupBy }) {
   const buckets = useMemo(() => aggregateCache(data), [data])
   const maxUsage = Math.max(1, ...buckets.map((bucket) => bucket.usage))
+  const hover = useChartTooltip<CacheBucket>()
   if (buckets.length === 0) return <div className="empty-state"><strong>No cache activity in this range</strong><span>Try a wider range or clear the selected identity values.</span></div>
   return <div className="vertical-chart-wrap cache-efficiency-wrap">
-    <div className="vertical-chart cache-efficiency-chart" aria-label="cache read share by time bucket">
-      {buckets.map((bucket) => <div className="vertical-column cache-efficiency-column" key={bucket.start} tabIndex={0}>
+    <div className="vertical-chart cache-efficiency-chart" aria-label="cache read share by time bucket" onPointerLeave={hover.hide}>
+      {buckets.map((bucket) => <div className="vertical-column cache-efficiency-column" key={bucket.start} tabIndex={0} aria-label={`${formatDateBucket(bucket.start, groupBy)} bucket`} onPointerEnter={(event) => hover.activate(bucket, event)} onPointerMove={hover.move} onFocus={(event) => hover.focus(bucket, event)} onBlur={hover.hide}>
         <div className="vertical-value cache-rate-value">{bucket.rate.toFixed(1)}%</div>
         <div className="vertical-track"><div className="vertical-stack cache-efficiency-stack" style={{ height: `${bucket.usage / maxUsage * 100}%` }}>
           {bucket.input > 0 && <i className="cache-uncached-segment" style={{ height: `${100 - bucket.rate}%` }} />}
           {bucket.read > 0 && <i className="cache-read-segment" style={{ height: `${bucket.rate}%` }} />}
         </div></div>
         <time dateTime={bucket.start}>{formatDateBucket(bucket.start, groupBy)}</time>
-        <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start, groupBy)}</strong>
+      </div>)}
+    </div>
+    {hover.tooltip && <CursorTooltip state={hover.tooltip} tooltipRef={hover.tooltipRef}>{(bucket) => <><strong>{formatDateBucket(bucket.start, groupBy)}</strong>
           <span><i className="cache-read-swatch" /><span>Cache read</span><b>{formatInteger(bucket.read)} · {bucket.rate.toFixed(1)}%</b></span>
           <span><i className="cache-uncached-swatch" /><span>Uncached input</span><b>{formatInteger(bucket.input)} · {(100 - bucket.rate).toFixed(1)}%</b></span>
           <span><i className="cache-write-swatch" /><span>Cache write</span><b>{formatInteger(bucket.write)}</b></span>
           <span><i className="output-swatch" /><span>Output</span><b>{formatInteger(bucket.output)}</b></span>
           <span className="tooltip-total">Total usage tokens<b>{formatInteger(bucket.usage)}</b></span>
-        </div>
-      </div>)}
-    </div>
+        </>}</CursorTooltip>}
     <div className="chart-legend"><span><i className="cache-read-swatch" />Cache read</span><span><i className="cache-uncached-swatch" />Uncached input</span><span className="legend-note">Bar height compares total usage tokens; its split and label show cache-read share of input context. Hover for exact totals.</span></div>
   </div>
 }
@@ -103,6 +137,7 @@ export function CacheEfficiencyChart({ data, groupBy }: { data: UsageActivityBuc
 export function VerticalUsageChart({ data, metric, groupBy }: { data: UsageActivityBucket[]; metric: Metric; groupBy: GroupBy }) {
   const buckets = useMemo(() => aggregate(data, metric), [data, metric])
   const max = Math.max(1, ...buckets.map((bucket) => bucket.total))
+  const hover = useChartTooltip<Bucket>()
   const legend = useMemo(() => {
     const entries = new Map<string, Segment>()
     for (const bucket of buckets) for (const segment of bucket.segments) if (!entries.has(segment.key)) entries.set(segment.key, segment)
@@ -111,19 +146,19 @@ export function VerticalUsageChart({ data, metric, groupBy }: { data: UsageActiv
   if (buckets.length === 0) return <div className="empty-state"><strong>No activity in this range</strong><span>Try a wider range or clear the selected identity values.</span></div>
   const display = (value: number) => metric === 'cost' ? formatUSD(value) : formatInteger(value)
   return <div className="vertical-chart-wrap">
-    <div className="vertical-chart" aria-label={`${metric} activity trend`}>
+    <div className="vertical-chart" aria-label={`${metric} activity trend`} onPointerLeave={hover.hide}>
       {buckets.map((bucket) => {
         const height = metric === 'requests' ? (bucket.total > 0 ? 100 : 0) : bucket.total / max * 100
-        return <div className="vertical-column" key={bucket.start} tabIndex={0}>
+        return <div className="vertical-column" key={bucket.start} tabIndex={0} aria-label={`${formatDateBucket(bucket.start, groupBy)} bucket`} onPointerEnter={(event) => hover.activate(bucket, event)} onPointerMove={hover.move} onFocus={(event) => hover.focus(bucket, event)} onBlur={hover.hide}>
           <div className="vertical-value">{metric === 'requests' ? `${formatInteger(bucket.total)}` : display(bucket.total)}</div>
           <div className="vertical-track"><div className="vertical-stack" style={{ height: `${height}%` }}>
             {bucket.segments.filter((segment) => segment.value > 0).map((segment) => <i key={segment.key} style={{ background: segment.color, height: `${bucket.total ? segment.value / bucket.total * 100 : 0}%` }} />)}
           </div></div>
           <time dateTime={bucket.start}>{formatDateBucket(bucket.start, groupBy)}</time>
-          <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start, groupBy)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></div>
         </div>
       })}
     </div>
+    {hover.tooltip && <CursorTooltip state={hover.tooltip} tooltipRef={hover.tooltipRef}>{(bucket) => <><strong>{formatDateBucket(bucket.start, groupBy)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></>}</CursorTooltip>}
     <div className="chart-legend">{legend.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText></span>)}</div>
   </div>
 }
