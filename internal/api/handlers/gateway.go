@@ -527,13 +527,18 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 	var content strings.Builder
 	finishReason := "stop"
 	responsesMode, _ := c.Locals("responses_mode").(bool)
+	messagesMode, _ := c.Locals("messages_mode").(bool)
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		defer result.Body.Close()
 		streamStatus := fiber.StatusOK
 		var responses *responsesStreamEmitter
+		var messages *messagesStreamEmitter
 		if responsesMode {
 			responses = newResponsesStreamEmitter(model.Name)
 			_ = responses.Created(w)
+		} else if messagesMode {
+			messages = newMessagesStreamEmitter(model.Name)
+			_ = messages.Created(w)
 		}
 		if providerpkg.UsesAnthropicWire(runtime.Provider) {
 			conv := llm.NewAnthropicStreamConverter(model.Name)
@@ -545,6 +550,10 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 				for _, chunk := range chunks {
 					if responses != nil {
 						if err := responses.ChatChunk(w, chunk); err != nil {
+							return err
+						}
+					} else if messages != nil {
+						if err := messages.ChatChunk(w, chunk); err != nil {
 							return err
 						}
 					} else {
@@ -560,7 +569,7 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			if err != nil {
 				streamStatus = fiber.StatusBadGateway
 			}
-			if responses == nil {
+			if responses == nil && messages == nil {
 				_, _ = w.WriteString("data: [DONE]\n\n")
 				_ = w.Flush()
 			}
@@ -583,6 +592,12 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 					}
 					return responses.ChatChunk(w, ev.Data)
 				}
+				if messages != nil {
+					if payload == "[DONE]" {
+						return nil
+					}
+					return messages.ChatChunk(w, ev.Data)
+				}
 				if payload == "" {
 					return nil
 				}
@@ -595,7 +610,7 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			if err != nil {
 				streamStatus = fiber.StatusBadGateway
 			}
-			if !done && responses == nil {
+			if !done && responses == nil && messages == nil {
 				_, _ = w.WriteString("data: [DONE]\n\n")
 				_ = w.Flush()
 			}
@@ -608,6 +623,10 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 		}
 		if responses != nil {
 			if err := responses.Completed(w, usage); err != nil {
+				streamStatus = fiber.StatusBadGateway
+			}
+		} else if messages != nil {
+			if err := messages.Completed(w, usage); err != nil {
 				streamStatus = fiber.StatusBadGateway
 			}
 		}
@@ -639,6 +658,8 @@ func (g *Gateway) replayStream(c fiber.Ctx, e *chat.CacheEntry) error {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
+	messagesMode, _ := c.Locals("messages_mode").(bool)
+	responsesMode, _ := c.Locals("responses_mode").(bool)
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		var resp llm.Response
 		if json.Unmarshal(e.Body, &resp) != nil || len(resp.Choices) == 0 || resp.Choices[0].Message == nil {
@@ -647,6 +668,22 @@ func (g *Gateway) replayStream(c fiber.Ctx, e *chat.CacheEntry) error {
 		content := resp.Choices[0].Message.Content
 		first, _ := json.Marshal(llm.Chunk{ID: resp.ID, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: resp.Model, Choices: []llm.ChunkChoice{{Index: 0, Delta: llm.Delta{Role: "assistant", Content: content}}}})
 		last, _ := json.Marshal(llm.Chunk{ID: resp.ID, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: resp.Model, Choices: []llm.ChunkChoice{{Index: 0, Delta: llm.Delta{}, FinishReason: resp.Choices[0].FinishReason}}, Usage: &resp.Usage})
+		if messagesMode {
+			emitter := newMessagesStreamEmitter(resp.Model)
+			_ = emitter.Created(w)
+			_ = emitter.ChatChunk(w, first)
+			_ = emitter.ChatChunk(w, last)
+			_ = emitter.Completed(w, resp.Usage)
+			return
+		}
+		if responsesMode {
+			emitter := newResponsesStreamEmitter(resp.Model)
+			_ = emitter.Created(w)
+			_ = emitter.ChatChunk(w, first)
+			_ = emitter.ChatChunk(w, last)
+			_ = emitter.Completed(w, resp.Usage)
+			return
+		}
 		_, _ = w.WriteString("data: " + string(first) + "\n\n")
 		_, _ = w.WriteString("data: " + string(last) + "\n\n")
 		_, _ = w.WriteString("data: [DONE]\n\n")

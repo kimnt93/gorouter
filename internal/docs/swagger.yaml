@@ -1055,6 +1055,120 @@ definitions:
       role:
         type: string
     type: object
+  internal_api_handlers.MessagesChoice:
+    properties:
+      disable_parallel_tool_use:
+        type: boolean
+      name:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_api_handlers.MessagesContentBlock:
+    properties:
+      id:
+        type: string
+      input:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+      text:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_api_handlers.MessagesMessage:
+    properties:
+      content:
+        items:
+          type: integer
+        type: array
+      role:
+        type: string
+    type: object
+  internal_api_handlers.MessagesMetadata:
+    properties:
+      user_id:
+        type: string
+    type: object
+  internal_api_handlers.MessagesRequest:
+    properties:
+      max_tokens:
+        type: integer
+      messages:
+        items:
+          $ref: '#/definitions/internal_api_handlers.MessagesMessage'
+        type: array
+      metadata:
+        $ref: '#/definitions/internal_api_handlers.MessagesMetadata'
+      model:
+        type: string
+      stop_sequences:
+        items:
+          type: string
+        type: array
+      stream:
+        type: boolean
+      system:
+        items:
+          type: integer
+        type: array
+      temperature:
+        type: number
+      tool_choice:
+        $ref: '#/definitions/internal_api_handlers.MessagesChoice'
+      tools:
+        items:
+          $ref: '#/definitions/internal_api_handlers.MessagesTool'
+        type: array
+      top_p:
+        type: number
+    type: object
+  internal_api_handlers.MessagesResponse:
+    properties:
+      content:
+        items:
+          $ref: '#/definitions/internal_api_handlers.MessagesContentBlock'
+        type: array
+      id:
+        type: string
+      model:
+        type: string
+      role:
+        type: string
+      stop_reason:
+        type: string
+      stop_sequence:
+        type: string
+      type:
+        type: string
+      usage:
+        $ref: '#/definitions/internal_api_handlers.MessagesUsage'
+    type: object
+  internal_api_handlers.MessagesTool:
+    properties:
+      description:
+        type: string
+      input_schema:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+    type: object
+  internal_api_handlers.MessagesUsage:
+    properties:
+      cache_creation_input_tokens:
+        type: integer
+      cache_read_input_tokens:
+        type: integer
+      input_tokens:
+        type: integer
+      output_tokens:
+        type: integer
+    type: object
   internal_api_handlers.OAuthCompleteRequest:
     properties:
       callback:
@@ -3712,6 +3826,61 @@ paths:
       security:
       - BearerAuth: []
       summary: Create a chat completion
+      tags:
+      - gateway
+  /v1/messages:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Messages request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_handlers.MessagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.MessagesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create an Anthropic message
       tags:
       - gateway
   /v1/models:

@@ -64,6 +64,7 @@ The public runtime endpoints are:
 |---|---|---|
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions, including streaming. |
 | `POST` | `/v1/responses` | OpenAI Responses compatibility for clients such as Codex CLI. |
+| `POST` | `/v1/messages` | Anthropic Messages compatibility for clients such as Claude Code. |
 | `GET` | `/v1/models` | Models visible to and allowed for the supplied API key. |
 | `GET` | `/healthz` | Service health check. |
 
@@ -104,7 +105,7 @@ OpenAI-compatible clients.
 | OpenClaw | Supported | OpenAI-compatible `/v1/chat/completions` |
 | DeepSeek Harness | Supported | OpenAI-compatible `/v1/chat/completions` |
 | Hermes Agent | Supported | OpenAI-compatible `/v1/chat/completions` |
-| Claude Code | Not yet supported | Anthropic `/v1/messages` |
+| Claude Code | Supported | Anthropic `/v1/messages` |
 
 ### OpenCode
 
@@ -144,7 +145,7 @@ returned by GoRouter's `/v1/models` endpoint, then add this to
 
 ```toml
 model_provider = "gorouter"
-model = "cx/gpt-5.4-luna"
+model = "cx/gpt-5.6-luna"
 model_reasoning_effort = "medium"
 model_reasoning_summary = "detailed"
 hide_agent_reasoning = false
@@ -177,14 +178,18 @@ for the current custom-provider contract.
 ### Claude Code
 
 Claude Code connects to LLM gateways through the Anthropic Messages protocol.
-GoRouter does not yet implement `POST /v1/messages`, so setting
-`ANTHROPIC_BASE_URL` to GoRouter will not work yet. After Messages API
-compatibility is added, the connection environment will be:
+Point it at the GoRouter host without appending `/v1`:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8090
 export ANTHROPIC_AUTH_TOKEN="$GOROUTER_API_KEY"
+export ANTHROPIC_MODEL="$GOROUTER_MODEL"
 ```
+
+Reusable one-time migration and client-setup skills are available under
+[`skills/`](skills/). They include dry-run-first scripts for OmniRoute and
+9Router migrations and mergeable configuration examples for supported agent
+harnesses.
 
 See the [Claude Code gateway documentation](https://code.claude.com/docs/en/llm-gateway)
 for the current gateway requirements.

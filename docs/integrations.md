@@ -1,7 +1,7 @@
 # Agent integrations
 
-GoRouter can be used by agents that support an OpenAI-compatible Chat
-Completions endpoint or the OpenAI Responses endpoint. This guide uses a local
+GoRouter can be used by agents that support OpenAI-compatible Chat
+Completions, OpenAI Responses, or Anthropic Messages. This guide uses a local
 gateway at `http://127.0.0.1:8090` and `cx/gpt-5.6-luna` as an example. Replace
 the model with an exact ID visible to your GoRouter API key.
 
@@ -15,10 +15,7 @@ the model with an exact ID visible to your GoRouter API key.
 | DeepSeek Harness (`dsh`) | Supported | `POST /v1/chat/completions` |
 | Hermes Agent | Supported | `POST /v1/chat/completions` |
 | Other OpenAI-compatible agents | Usually supported | `POST /v1/chat/completions` |
-| Claude Code | Not yet supported directly | Requires `POST /v1/messages` |
-
-GoRouter does not currently implement Anthropic's Messages protocol. Claude
-Code cannot connect directly until `/v1/messages` compatibility is added.
+| Claude Code | Supported | `POST /v1/messages` |
 
 ## Gateway URL, API key, and model
 
@@ -65,10 +62,11 @@ prefixes such as `cx/gpt-5.6-luna` or
 | `GET` | `http://127.0.0.1:8090/v1/models` | Models visible to the supplied key. |
 | `POST` | `http://127.0.0.1:8090/v1/chat/completions` | OpenAI-compatible chat, tools, and streaming. |
 | `POST` | `http://127.0.0.1:8090/v1/responses` | OpenAI Responses compatibility used by Codex CLI. |
+| `POST` | `http://127.0.0.1:8090/v1/messages` | Anthropic Messages compatibility used by Claude Code. |
 | `GET` | `http://127.0.0.1:8090/healthz` | Service health. |
 
 The base URL used by OpenAI-compatible client libraries is normally
-`http://127.0.0.1:8090/v1`. Do not append `/chat/completions` or `/responses`
+`http://127.0.0.1:8090/v1`. Do not append `/chat/completions`, `/responses`, or `/messages`
 when a client asks for a *base URL*; the client adds the endpoint path.
 
 Test Chat Completions directly:
@@ -91,7 +89,7 @@ Codex custom model providers use the Responses API. Add this to the user-level
 
 ```toml
 model_provider = "gorouter"
-model = "cx/gpt-5.4-luna"
+model = "cx/gpt-5.6-luna"
 model_reasoning_effort = "medium"
 model_reasoning_summary = "detailed"
 hide_agent_reasoning = false
@@ -304,19 +302,20 @@ the gateway key with an unrelated OpenAI client.
 
 ## Claude Code
 
-Claude Code's LLM gateway contract uses Anthropic Messages, including
-`POST /v1/messages`. GoRouter currently exposes Chat Completions and Responses,
-but not Messages, so this configuration is intentionally unavailable today.
-Setting `ANTHROPIC_BASE_URL=http://127.0.0.1:8090` will fail until GoRouter adds
-that endpoint.
-
-Once Messages compatibility exists, Claude Code's gateway environment will
-use this shape:
+Claude Code uses Anthropic Messages, including tools and SSE streaming. Point
+it at the GoRouter host without appending `/v1`:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
 export ANTHROPIC_AUTH_TOKEN="$GOROUTER_API_KEY"
+export ANTHROPIC_MODEL="$GOROUTER_MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$GOROUTER_MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$GOROUTER_MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$GOROUTER_MODEL"
 ```
+
+`ANTHROPIC_AUTH_TOKEN` sends the GoRouter key as bearer authentication. Avoid
+setting a different `ANTHROPIC_API_KEY` in the same process.
 
 See the [Claude Code LLM gateway
 documentation](https://code.claude.com/docs/en/llm-gateway) for the upstream

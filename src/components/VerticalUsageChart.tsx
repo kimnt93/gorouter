@@ -3,7 +3,7 @@ import type { UsageActivityBucket } from '../api/contracts'
 import { formatDateBucket, formatInteger, formatUSD } from '../lib/format'
 import { TruncatedText } from './SearchableSelect'
 
-type Metric = 'requests' | 'tokens' | 'cost' | 'cache'
+type Metric = 'requests' | 'tokens' | 'cost'
 
 interface Segment { key: string; label: string; value: number; color: string }
 interface Bucket { start: string; segments: Segment[]; total: number }
@@ -32,14 +32,11 @@ function aggregate(data: UsageActivityBucket[], metric: Metric): Bucket[] {
         { key: 'output', label: 'Output', value: sum((row) => row.completion_tokens), color: colors[1] },
         { key: 'cache-read', label: 'Cache read', value: sum((row) => row.cache_read_tokens), color: colors[2] },
         { key: 'cache-write', label: 'Cache write', value: sum((row) => row.cache_write_tokens), color: colors[3] },
-      ] : metric === 'cost' ? [
+      ] : [
         { key: 'input', label: 'Input', value: sum((row) => row.input_cost_usd), color: colors[0] },
         { key: 'output', label: 'Output', value: sum((row) => row.output_cost_usd), color: colors[1] },
         { key: 'cache-read', label: 'Cache read', value: sum((row) => row.cache_read_cost_usd), color: colors[2] },
         { key: 'cache-write', label: 'Cache write', value: sum((row) => row.cache_write_cost_usd), color: colors[3] },
-      ] : [
-        { key: 'cache-read', label: 'Cache read', value: sum((row) => row.cache_read_tokens), color: colors[2] },
-        { key: 'cache-write', label: 'Cache write', value: sum((row) => row.cache_write_tokens), color: colors[3] },
       ]
       if (metric === 'cost') {
         const recordedTotal = sum((row) => row.cost_usd)
@@ -50,6 +47,57 @@ function aggregate(data: UsageActivityBucket[], metric: Metric): Bucket[] {
     }
     return { start, segments, total: segments.reduce((sum, segment) => sum + segment.value, 0) }
   })
+}
+
+interface CacheBucket {
+  start: string
+  input: number
+  output: number
+  read: number
+  write: number
+  context: number
+  usage: number
+  rate: number
+}
+
+function aggregateCache(data: UsageActivityBucket[]): CacheBucket[] {
+  const grouped = new Map<string, UsageActivityBucket[]>()
+  for (const row of data) grouped.set(row.start, [...(grouped.get(row.start) ?? []), row])
+  return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([start, rows]) => {
+    const sum = (pick: (row: UsageActivityBucket) => number) => rows.reduce((total, row) => total + pick(row), 0)
+    const input = sum((row) => row.prompt_tokens)
+    const output = sum((row) => row.completion_tokens)
+    const read = sum((row) => row.cache_read_tokens)
+    const write = sum((row) => row.cache_write_tokens)
+    const context = input + read
+    return { start, input, output, read, write, context, usage: context + output + write, rate: context ? read / context * 100 : 0 }
+  })
+}
+
+export function CacheEfficiencyChart({ data }: { data: UsageActivityBucket[] }) {
+  const buckets = useMemo(() => aggregateCache(data), [data])
+  const maxUsage = Math.max(1, ...buckets.map((bucket) => bucket.usage))
+  if (buckets.length === 0) return <div className="empty-state"><strong>No cache activity in this range</strong><span>Try a wider range or clear the selected identity values.</span></div>
+  return <div className="vertical-chart-wrap cache-efficiency-wrap">
+    <div className="vertical-chart cache-efficiency-chart" aria-label="cache read share by time bucket">
+      {buckets.map((bucket) => <div className="vertical-column cache-efficiency-column" key={bucket.start} tabIndex={0}>
+        <div className="vertical-value cache-rate-value">{bucket.rate.toFixed(1)}%</div>
+        <div className="vertical-track"><div className="vertical-stack cache-efficiency-stack" style={{ height: `${bucket.usage / maxUsage * 100}%` }}>
+          {bucket.input > 0 && <i className="cache-uncached-segment" style={{ height: `${100 - bucket.rate}%` }} />}
+          {bucket.read > 0 && <i className="cache-read-segment" style={{ height: `${bucket.rate}%` }} />}
+        </div></div>
+        <time dateTime={bucket.start}>{formatDateBucket(bucket.start)}</time>
+        <div className="chart-tooltip"><strong>{formatDateBucket(bucket.start)}</strong>
+          <span><i className="cache-read-swatch" /><span>Cache read</span><b>{formatInteger(bucket.read)} · {bucket.rate.toFixed(1)}%</b></span>
+          <span><i className="cache-uncached-swatch" /><span>Uncached input</span><b>{formatInteger(bucket.input)} · {(100 - bucket.rate).toFixed(1)}%</b></span>
+          <span><i className="cache-write-swatch" /><span>Cache write</span><b>{formatInteger(bucket.write)}</b></span>
+          <span><i className="output-swatch" /><span>Output</span><b>{formatInteger(bucket.output)}</b></span>
+          <span className="tooltip-total">Total usage tokens<b>{formatInteger(bucket.usage)}</b></span>
+        </div>
+      </div>)}
+    </div>
+    <div className="chart-legend"><span><i className="cache-read-swatch" />Cache read</span><span><i className="cache-uncached-swatch" />Uncached input</span><span className="legend-note">Bar height compares total usage tokens; its split and label show cache-read share of input context. Hover for exact totals.</span></div>
+  </div>
 }
 
 export function VerticalUsageChart({ data, metric }: { data: UsageActivityBucket[]; metric: Metric }) {

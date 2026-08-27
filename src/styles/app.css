@@ -402,6 +402,15 @@ h2 { font-size: 19px; }
 .chart-tooltip .tooltip-total { grid-template-columns: minmax(0,1fr) auto; margin-top: 3px; padding-top: 7px; border-top: 1px solid #3a3a3a; }
 .chart-legend { max-height: 124px; overflow-y: auto; display: flex; justify-content: center; gap: 10px 16px; flex-wrap: wrap; padding-top: 13px; color: #aaa; font-size: 12px; }
 .chart-legend span { min-width: 0; max-width: 240px; display: flex; align-items: center; gap: 6px; }
+.cache-efficiency-column { min-width: 46px; flex-basis: clamp(46px, 5.5vw, 76px); }
+.cache-rate-value { color: #7bd8aa; font-weight: 700; }
+.cache-efficiency-stack { flex-direction: column; }
+.cache-read-segment, .cache-read-swatch { background: #62c996 !important; }
+.cache-uncached-segment, .cache-uncached-swatch { background: #3d4654 !important; }
+.cache-write-swatch { background: #e2ad61 !important; }
+.output-swatch { background: #78aaf7 !important; }
+.chart-legend .legend-note { max-width: none; flex-basis: 100%; justify-content: center; color: #8f8f8f; text-align: center; }
+.panel-header p { max-width: 720px; margin: 5px 0 0; color: #999; font-size: 12px; }
 
 /* Shared compact text and searchable dropdowns */
 .truncate-hover { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

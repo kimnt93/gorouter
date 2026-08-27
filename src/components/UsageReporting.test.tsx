@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import type { UsageActivityBucket, UsageFilters } from '../api/contracts'
 import { RangeSelector } from './RangeSelector'
-import { VerticalUsageChart } from './VerticalUsageChart'
+import { CacheEfficiencyChart, VerticalUsageChart } from './VerticalUsageChart'
 
 test('renders normalized request bars with stable user breakdown tooltips', () => {
   const rows: UsageActivityBucket[] = [
@@ -21,6 +21,16 @@ test('shows all four token and cost components in chart tooltips', () => {
   for (const label of ['Input', 'Output', 'Cache read', 'Cache write']) expect(screen.getAllByText(label).length).toBeGreaterThan(0)
   rerender(<VerticalUsageChart data={[row]} metric="cost" />)
   for (const label of ['Input', 'Output', 'Cache read', 'Cache write']) expect(screen.getAllByText(label).length).toBeGreaterThan(0)
+})
+
+test('shows cache-read percentage and total usage for each bucket', () => {
+  const row: UsageActivityBucket = { start: '2026-08-25T00:00:00Z', requests: 1, prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 90, cache_write_tokens: 2, cost_usd: 1, input_cost_usd: .2, output_cost_usd: .6, cache_read_cost_usd: .1, cache_write_cost_usd: .1, user_id: 'user-a', username: 'Alice' }
+  render(<CacheEfficiencyChart data={[row]} />)
+  const chart = within(screen.getByLabelText('cache read share by time bucket'))
+  expect(chart.getByText('90.0%')).toBeInTheDocument()
+  expect(chart.getByText('Total usage tokens').parentElement).toHaveTextContent('107')
+  expect(chart.getByText('Cache read').parentElement).toHaveTextContent('90 · 90.0%')
+  expect(chart.getByText('Uncached input').parentElement).toHaveTextContent('10 · 10.0%')
 })
 
 test('supports a filter dimension, multiple values, and visible resolution buttons', () => {
