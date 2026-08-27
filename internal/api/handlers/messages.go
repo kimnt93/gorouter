@@ -35,9 +35,10 @@ type MessagesMessage struct {
 }
 
 type MessagesTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description,omitempty"`
+	InputSchema  json.RawMessage   `json:"input_schema"`
+	CacheControl *llm.CacheControl `json:"cache_control,omitempty"`
 }
 
 type MessagesChoice struct {
@@ -132,7 +133,7 @@ func (r MessagesRequest) chatRequest() (*llm.ChatRequest, error) {
 		req.Stop, _ = json.Marshal(r.StopSequences)
 	}
 	if system := messagesText(r.System); system != "" {
-		req.Messages = append(req.Messages, llm.Message{Role: "developer", Content: quotedRaw(system)})
+		req.Messages = append(req.Messages, llm.Message{Role: "developer", Content: quotedRaw(system), CacheControl: messagesCacheControl(r.System)})
 	}
 	for _, message := range r.Messages {
 		if message.Role != "user" && message.Role != "assistant" {
@@ -149,18 +150,23 @@ func (r MessagesRequest) chatRequest() (*llm.ChatRequest, error) {
 		}
 		var textParts []string
 		var toolCalls []llm.ToolCall
+		var cacheControl *llm.CacheControl
 		flushText := func() {
 			if len(textParts) == 0 {
 				return
 			}
-			req.Messages = append(req.Messages, llm.Message{Role: message.Role, Content: quotedRaw(strings.Join(textParts, "\n")), ToolCalls: toolCalls})
+			req.Messages = append(req.Messages, llm.Message{Role: message.Role, Content: quotedRaw(strings.Join(textParts, "\n")), ToolCalls: toolCalls, CacheControl: cacheControl})
 			textParts = nil
 			toolCalls = nil
+			cacheControl = nil
 		}
 		for _, block := range blocks {
 			switch block.Type {
 			case "text":
 				textParts = append(textParts, block.Text)
+				if block.CacheControl != nil {
+					cacheControl = block.CacheControl
+				}
 			case "tool_use":
 				input := block.Input
 				if !json.Valid(input) {
@@ -169,7 +175,7 @@ func (r MessagesRequest) chatRequest() (*llm.ChatRequest, error) {
 				toolCalls = append(toolCalls, llm.ToolCall{ID: block.ID, Type: "function", Function: llm.ToolFunction{Name: block.Name, Arguments: string(input)}})
 			case "tool_result":
 				flushText()
-				req.Messages = append(req.Messages, llm.Message{Role: "tool", ToolCallID: block.ToolUseID, Content: quotedRaw(messagesText(block.Content))})
+				req.Messages = append(req.Messages, llm.Message{Role: "tool", ToolCallID: block.ToolUseID, Content: quotedRaw(messagesText(block.Content)), CacheControl: block.CacheControl})
 			}
 		}
 		flushText()
@@ -185,7 +191,7 @@ func (r MessagesRequest) chatRequest() (*llm.ChatRequest, error) {
 		if !json.Valid(schema) {
 			schema = json.RawMessage(`{"type":"object"}`)
 		}
-		req.Tools = append(req.Tools, llm.Tool{Type: "function", Function: llm.ToolFunction{Name: tool.Name, Description: tool.Description, Parameters: schema}})
+		req.Tools = append(req.Tools, llm.Tool{Type: "function", Function: llm.ToolFunction{Name: tool.Name, Description: tool.Description, Parameters: schema}, CacheControl: tool.CacheControl})
 	}
 	if r.ToolChoice != nil {
 		switch r.ToolChoice.Type {
@@ -206,13 +212,29 @@ func (r MessagesRequest) chatRequest() (*llm.ChatRequest, error) {
 }
 
 type messagesInputBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
+	Type         string            `json:"type"`
+	Text         string            `json:"text,omitempty"`
+	ID           string            `json:"id,omitempty"`
+	Name         string            `json:"name,omitempty"`
+	Input        json.RawMessage   `json:"input,omitempty"`
+	ToolUseID    string            `json:"tool_use_id,omitempty"`
+	Content      json.RawMessage   `json:"content,omitempty"`
+	CacheControl *llm.CacheControl `json:"cache_control,omitempty"`
+}
+
+func messagesCacheControl(raw json.RawMessage) *llm.CacheControl {
+	var blocks []struct {
+		CacheControl *llm.CacheControl `json:"cache_control"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return nil
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if blocks[i].CacheControl != nil {
+			return blocks[i].CacheControl
+		}
+	}
+	return nil
 }
 
 func messagesText(raw json.RawMessage) string {

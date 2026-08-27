@@ -273,12 +273,21 @@ def usage_from_body(body: bytes, stream: bool) -> tuple[int | None, int | None, 
     prompt = usage.get("prompt_tokens", usage.get("input_tokens"))
     completion = usage.get("completion_tokens", usage.get("output_tokens"))
     details = usage.get("prompt_tokens_details", usage.get("input_tokens_details", {}))
-    cache_read = usage.get("cache_read_tokens")
+    cache_read = usage.get("cache_read_tokens", usage.get("prompt_cache_hit_tokens", usage.get("cache_read_input_tokens")))
     if cache_read is None and isinstance(details, dict):
         cache_read = details.get("cached_tokens")
-    cache_write = usage.get("cache_write_tokens")
+    cache_write = usage.get("cache_write_tokens", usage.get("cache_creation_input_tokens"))
     if cache_write is None and isinstance(details, dict):
         cache_write = details.get("cache_write_tokens", details.get("cache_creation_tokens"))
+    # OpenAI token-detail fields are subsets of prompt/input_tokens. Normalize
+    # them to GoRouter's internal contract (uncached + cache read/write) so the
+    # same cache-rate formula is valid for direct and routed responses.
+    if prompt is not None and isinstance(details, dict):
+        detailed_read = details.get("cached_tokens") or 0
+        detailed_write = details.get("cache_write_tokens", details.get("cache_creation_tokens")) or 0
+        prompt = max(0, int(prompt) - int(detailed_read) - int(detailed_write))
+    if prompt is not None and usage.get("prompt_cache_miss_tokens") is not None:
+        prompt = int(usage["prompt_cache_miss_tokens"])
     return (
         int(prompt) if prompt is not None else None,
         int(completion) if completion is not None else None,
@@ -448,10 +457,7 @@ def main() -> int:
             p95_index = min(len(durations) - 1, max(0, round(0.95 * len(durations) - 1)))
             prompt_total = sum(result.prompt_tokens or 0 for result in group)
             cache_read_total = sum(result.cache_read_tokens or 0 for result in group)
-            # gorouter exposes uncached input and cache-read input separately.
-            # The direct OpenAI-compatible endpoint follows the OpenAI shape,
-            # where prompt_tokens already includes cached_tokens.
-            provider_input_total = prompt_total if target == "direct" else prompt_total + cache_read_total
+            provider_input_total = prompt_total + cache_read_total
             summary["groups"].append({
                 "target": target, "model": model, "mode": mode,
                 "concurrency": concurrency, "repetition": repetition,

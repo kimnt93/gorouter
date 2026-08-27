@@ -71,7 +71,7 @@ func (a *CopilotAdapter) headers(cr *entities.CredentialRuntime, stream bool) ma
 }
 func (a *CopilotAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, model string, raw []byte) (*entities.UpstreamResult, error) {
 	a.refreshToken(ctx, cr)
-	body, stream, err := prepareOpenAIRequest(raw, model)
+	body, stream, err := prepareOpenAIRequest(raw, model, false)
 	if err != nil {
 		return nil, err
 	}

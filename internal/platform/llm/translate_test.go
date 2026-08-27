@@ -16,11 +16,22 @@ func TestToAnthropicUsesTypedPayload(t *testing.T) {
 		Tools: []Tool{{Type: "function", Function: ToolFunction{Name: "lookup", Description: "look up a value", Parameters: json.RawMessage(`{"type":"object"}`)}}},
 	}
 	got := ToAnthropic(req)
-	if got.Model != "public" || got.System != "be concise" || len(got.Messages) != 1 || len(got.Tools) != 1 {
+	if got.Model != "public" || len(got.System) != 1 || got.System[0].Text != "be concise" || len(got.Messages) != 1 || len(got.Tools) != 1 {
 		t.Fatalf("translation incomplete: %+v", got)
+	}
+	if got.System[0].CacheControl == nil || got.Messages[0].Content[0].CacheControl == nil || got.Tools[0].CacheControl == nil {
+		t.Fatalf("prompt cache breakpoints missing: %+v", got)
 	}
 	if !json.Valid(got.Tools[0].InputSchema) {
 		t.Fatalf("tool input schema is invalid: %s", got.Tools[0].InputSchema)
+	}
+}
+
+func TestToAnthropicPreservesClientCacheControl(t *testing.T) {
+	req := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}]`)}, {Role: "user", Content: json.RawMessage(`"next"`)}}}
+	got := ToAnthropic(req)
+	if got.System[0].CacheControl == nil || got.System[0].CacheControl.TTL != "1h" {
+		t.Fatalf("system cache control = %+v", got.System)
 	}
 }
 

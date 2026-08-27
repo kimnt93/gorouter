@@ -231,6 +231,16 @@ func TestToCodexRequestUsesBackendSafeDefaults(t *testing.T) {
 	}
 }
 
+func TestToCodexRequestUsesStablePromptCacheKey(t *testing.T) {
+	first := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable coding instructions"`)}, {Role: "user", Content: json.RawMessage(`"first"`)}}}
+	second := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable coding instructions"`)}, {Role: "user", Content: json.RawMessage(`"second"`)}}}
+	firstKey := toCodexRequest(first, "gpt-5.5").PromptCacheKey
+	secondKey := toCodexRequest(second, "gpt-5.5").PromptCacheKey
+	if firstKey == "" || firstKey != secondKey {
+		t.Fatalf("unstable prompt cache keys: %q %q", firstKey, secondKey)
+	}
+}
+
 func codexToolEvents() string {
 	return "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-tools\"}}\n\n" +
 		"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"fc-1\",\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n" +

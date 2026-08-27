@@ -3879,6 +3879,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_kimnt93_gorouter_internal_platform_llm.CacheControl": {
+            "type": "object",
+            "properties": {
+                "ttl": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_kimnt93_gorouter_internal_platform_llm.ChatRequest": {
             "type": "object",
             "properties": {
@@ -3905,6 +3916,9 @@ const docTemplate = `{
                 },
                 "presence_penalty": {
                     "type": "number"
+                },
+                "prompt_cache_key": {
+                    "type": "string"
                 },
                 "reasoning": {
                     "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.Reasoning"
@@ -4111,6 +4125,9 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_internal_platform_llm.Message": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CacheControl"
+                },
                 "content": {
                     "type": "array",
                     "items": {
@@ -4253,6 +4270,9 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_internal_platform_llm.Tool": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CacheControl"
+                },
                 "function": {
                     "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ToolFunction"
                 },
@@ -5697,6 +5717,9 @@ const docTemplate = `{
         "internal_api_handlers.MessagesTool": {
             "type": "object",
             "properties": {
+                "cache_control": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CacheControl"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -6180,6 +6203,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "model": {
+                    "type": "string"
+                },
+                "prompt_cache_key": {
                     "type": "string"
                 },
                 "reasoning": {

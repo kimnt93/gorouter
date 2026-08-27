@@ -72,7 +72,7 @@ type OpenAIAdapter struct {
 // Send forwards an OpenAI Chat Completions body to the upstream, rewriting the
 // model name and forcing usage reporting on streams.
 func (a *OpenAIAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, upstreamModel string, rawBody []byte) (*entities.UpstreamResult, error) {
-	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel)
+	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel, cr.Provider == "openai")
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func openAIEndpoint(baseURL, endpoint string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(endpoint, "/")
 }
 
-func prepareOpenAIRequest(rawBody []byte, upstreamModel string) ([]byte, bool, error) {
+func prepareOpenAIRequest(rawBody []byte, upstreamModel string, injectPromptCacheKey bool) ([]byte, bool, error) {
 	var request ChatRequest
 	if err := json.Unmarshal(rawBody, &request); err != nil {
 		return nil, false, fmt.Errorf("parse OpenAI request: %w", err)
@@ -145,6 +145,13 @@ func prepareOpenAIRequest(rawBody []byte, upstreamModel string) ([]byte, bool, e
 	}
 	model, _ := json.Marshal(upstreamModel)
 	fields["model"] = model
+	if injectPromptCacheKey {
+		if _, exists := fields["prompt_cache_key"]; !exists {
+			if key := StablePromptCacheKey(&request); key != "" {
+				fields["prompt_cache_key"], _ = json.Marshal(key)
+			}
+		}
+	}
 	if request.Stream {
 		var options map[string]json.RawMessage
 		if rawOptions, ok := fields["stream_options"]; ok {

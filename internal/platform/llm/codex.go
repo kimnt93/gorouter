@@ -52,14 +52,15 @@ type codexTool struct {
 }
 
 type codexRequest struct {
-	Model        string          `json:"model"`
-	Instructions string          `json:"instructions,omitempty"`
-	Input        []codexInput    `json:"input"`
-	Tools        []codexTool     `json:"tools,omitempty"`
-	ToolChoice   json.RawMessage `json:"tool_choice,omitempty"`
-	Reasoning    *Reasoning      `json:"reasoning,omitempty"`
-	Stream       bool            `json:"stream"`
-	Store        bool            `json:"store"`
+	Model          string          `json:"model"`
+	Instructions   string          `json:"instructions,omitempty"`
+	Input          []codexInput    `json:"input"`
+	Tools          []codexTool     `json:"tools,omitempty"`
+	ToolChoice     json.RawMessage `json:"tool_choice,omitempty"`
+	Reasoning      *Reasoning      `json:"reasoning,omitempty"`
+	Stream         bool            `json:"stream"`
+	Store          bool            `json:"store"`
+	PromptCacheKey string          `json:"prompt_cache_key,omitempty"`
 }
 
 func codexBase(baseURL string) string {
@@ -161,7 +162,11 @@ func codexMessageContent(raw json.RawMessage, role string) []codexContent {
 }
 
 func toCodexRequest(request *ChatRequest, model string) codexRequest {
-	out := codexRequest{Model: model, Stream: true, Store: false, Reasoning: request.Reasoning}
+	cacheKey := request.PromptCacheKey
+	if cacheKey == "" {
+		cacheKey = StablePromptCacheKey(request)
+	}
+	out := codexRequest{Model: model, Stream: true, Store: false, Reasoning: request.Reasoning, PromptCacheKey: cacheKey}
 	out.ToolChoice = codexToolChoice(request.ToolChoice)
 	var instructions []string
 	knownCallIDs := make(map[string]bool)

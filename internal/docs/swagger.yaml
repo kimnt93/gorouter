@@ -14,6 +14,13 @@ definitions:
       error:
         $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorDetail'
     type: object
+  github_com_kimnt93_gorouter_internal_platform_llm.CacheControl:
+    properties:
+      ttl:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_kimnt93_gorouter_internal_platform_llm.ChatRequest:
     properties:
       frequency_penalty:
@@ -32,6 +39,8 @@ definitions:
         type: integer
       presence_penalty:
         type: number
+      prompt_cache_key:
+        type: string
       reasoning:
         $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.Reasoning'
       seed:
@@ -167,6 +176,8 @@ definitions:
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.Message:
     properties:
+      cache_control:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CacheControl'
       content:
         items:
           type: integer
@@ -259,6 +270,8 @@ definitions:
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.Tool:
     properties:
+      cache_control:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CacheControl'
       function:
         $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.ToolFunction'
       type:
@@ -1203,6 +1216,8 @@ definitions:
     type: object
   internal_api_handlers.MessagesTool:
     properties:
+      cache_control:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.CacheControl'
       description:
         type: string
       input_schema:
@@ -1518,6 +1533,8 @@ definitions:
       max_output_tokens:
         type: integer
       model:
+        type: string
+      prompt_cache_key:
         type: string
       reasoning:
         $ref: '#/definitions/github_com_kimnt93_gorouter_internal_platform_llm.Reasoning'

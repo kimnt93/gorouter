@@ -106,3 +106,28 @@ func TestOpenAIAdapterUsesTypedForwardPayload(t *testing.T) {
 	}
 	result.Body.Close()
 }
+
+func TestOpenAIAdapterInjectsStablePromptCacheKeyOnlyForOpenAI(t *testing.T) {
+	var keys []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, request.PromptCacheKey)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	adapter := &OpenAIAdapter{HTTP: server.Client()}
+	raw := []byte(`{"model":"public","messages":[{"role":"developer","content":"stable instructions"},{"role":"user","content":"question"}]}`)
+	for _, provider := range []string{"openai", entities.ProviderOpenAICompatible} {
+		result, err := adapter.Send(context.Background(), &entities.CredentialRuntime{Kind: entities.KindAPIKey, Provider: provider, BaseURL: server.URL, APIKey: "secret"}, "upstream", raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Body.Close()
+	}
+	if len(keys) != 2 || keys[0] == "" || keys[1] != "" {
+		t.Fatalf("prompt cache keys = %#v", keys)
+	}
+}

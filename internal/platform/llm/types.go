@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
@@ -25,16 +28,18 @@ type ToolFunction struct {
 }
 
 type Tool struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
+	Type         string        `json:"type"`
+	Function     ToolFunction  `json:"function"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 type Message struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+	Role         string          `json:"role"`
+	Content      json.RawMessage `json:"content,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	ToolCallID   string          `json:"tool_call_id,omitempty"`
+	ToolCalls    []ToolCall      `json:"tool_calls,omitempty"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
 type ChatRequest struct {
@@ -54,7 +59,38 @@ type ChatRequest struct {
 	Tools               []Tool          `json:"tools,omitempty"`
 	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
 	User                string          `json:"user,omitempty"`
+	PromptCacheKey      string          `json:"prompt_cache_key,omitempty"`
 	Reasoning           *Reasoning      `json:"reasoning,omitempty"`
+}
+
+type CacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+func StablePromptCacheKey(req *ChatRequest) string {
+	if req == nil {
+		return ""
+	}
+	var prefix strings.Builder
+	for _, message := range req.Messages {
+		if message.Role != "system" && message.Role != "developer" {
+			break
+		}
+		prefix.WriteString(message.Role)
+		prefix.WriteByte(0)
+		prefix.Write(message.Content)
+		prefix.WriteByte(0)
+	}
+	if len(req.Tools) > 0 {
+		encoded, _ := json.Marshal(req.Tools)
+		prefix.Write(encoded)
+	}
+	if prefix.Len() == 0 {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(prefix.String()))
+	return fmt.Sprintf("gorouter-%x", sum[:16])
 }
 
 // Reasoning stays request-scoped. It is never encoded in a public model ID.
@@ -78,6 +114,81 @@ type Usage struct {
 	CompletionTokens int64 `json:"completion_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+}
+
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	type wireUsage struct {
+		PromptTokens             int64 `json:"prompt_tokens"`
+		CompletionTokens         int64 `json:"completion_tokens"`
+		InputTokens              int64 `json:"input_tokens"`
+		OutputTokens             int64 `json:"output_tokens"`
+		CacheReadTokens          int64 `json:"cache_read_tokens"`
+		CacheWriteTokens         int64 `json:"cache_write_tokens"`
+		CachedTokens             int64 `json:"cached_tokens"`
+		PromptCacheHitTokens     int64 `json:"prompt_cache_hit_tokens"`
+		PromptCacheMissTokens    int64 `json:"prompt_cache_miss_tokens"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+		PromptDetails            struct {
+			CachedTokens        int64 `json:"cached_tokens"`
+			CacheWriteTokens    int64 `json:"cache_write_tokens"`
+			CacheCreationTokens int64 `json:"cache_creation_tokens"`
+		} `json:"prompt_tokens_details"`
+		InputDetails struct {
+			CachedTokens        int64 `json:"cached_tokens"`
+			CacheWriteTokens    int64 `json:"cache_write_tokens"`
+			CacheCreationTokens int64 `json:"cache_creation_tokens"`
+		} `json:"input_tokens_details"`
+	}
+	var wire wireUsage
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	totalInput := wire.PromptTokens
+	if totalInput == 0 {
+		totalInput = wire.InputTokens
+	}
+	cacheRead := wire.CacheReadTokens
+	cacheWrite := wire.CacheWriteTokens
+	if cacheRead == 0 {
+		cacheRead = max(wire.PromptCacheHitTokens, wire.CacheReadInputTokens)
+	}
+	if cacheWrite == 0 {
+		cacheWrite = wire.CacheCreationInputTokens
+	}
+	detailsRead := wire.PromptDetails.CachedTokens
+	detailsWrite := max(wire.PromptDetails.CacheWriteTokens, wire.PromptDetails.CacheCreationTokens)
+	if wire.InputDetails.CachedTokens > 0 || wire.InputDetails.CacheWriteTokens > 0 || wire.InputDetails.CacheCreationTokens > 0 {
+		detailsRead = wire.InputDetails.CachedTokens
+		detailsWrite = max(wire.InputDetails.CacheWriteTokens, wire.InputDetails.CacheCreationTokens)
+	}
+	if detailsRead > 0 {
+		cacheRead = detailsRead
+	}
+	if detailsWrite > 0 {
+		cacheWrite = detailsWrite
+	}
+	if cacheRead == 0 {
+		cacheRead = wire.CachedTokens
+	}
+	// Standard OpenAI details report cached and created tokens as subsets of
+	// prompt/input_tokens. Store only the uncached remainder in PromptTokens so
+	// provider-cache rates and costs do not double-count the cached prefix.
+	if detailsRead > 0 || detailsWrite > 0 {
+		totalInput = max(int64(0), totalInput-detailsRead-detailsWrite)
+	} else if wire.PromptCacheMissTokens > 0 {
+		totalInput = wire.PromptCacheMissTokens
+	} else if wire.PromptCacheHitTokens > 0 {
+		totalInput = max(int64(0), totalInput-wire.PromptCacheHitTokens)
+	}
+	u.PromptTokens = totalInput
+	u.CompletionTokens = wire.CompletionTokens
+	if u.CompletionTokens == 0 {
+		u.CompletionTokens = wire.OutputTokens
+	}
+	u.CacheReadTokens = cacheRead
+	u.CacheWriteTokens = cacheWrite
+	return nil
 }
 
 func (u Usage) Total() int64 {
@@ -207,16 +318,16 @@ type ReasoningLevel struct {
 }
 
 type AnthropicRequest struct {
-	Model         string             `json:"model"`
-	MaxTokens     int64              `json:"max_tokens"`
-	Messages      []AnthropicMessage `json:"messages"`
-	System        string             `json:"system,omitempty"`
-	Temperature   *float64           `json:"temperature,omitempty"`
-	TopP          *float64           `json:"top_p,omitempty"`
-	StopSequences []string           `json:"stop_sequences,omitempty"`
-	Stream        bool               `json:"stream"`
-	Tools         []AnthropicTool    `json:"tools,omitempty"`
-	Metadata      *AnthropicMetadata `json:"metadata,omitempty"`
+	Model         string                  `json:"model"`
+	MaxTokens     int64                   `json:"max_tokens"`
+	Messages      []AnthropicMessage      `json:"messages"`
+	System        []AnthropicContentBlock `json:"system,omitempty"`
+	Temperature   *float64                `json:"temperature,omitempty"`
+	TopP          *float64                `json:"top_p,omitempty"`
+	StopSequences []string                `json:"stop_sequences,omitempty"`
+	Stream        bool                    `json:"stream"`
+	Tools         []AnthropicTool         `json:"tools,omitempty"`
+	Metadata      *AnthropicMetadata      `json:"metadata,omitempty"`
 }
 
 type AnthropicMetadata struct {
@@ -229,17 +340,19 @@ type AnthropicMessage struct {
 }
 
 type AnthropicContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
 type AnthropicTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }

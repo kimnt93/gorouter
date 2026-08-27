@@ -14,31 +14,33 @@ const (
 
 func ToAnthropic(req *ChatRequest) *AnthropicRequest {
 	body := &AnthropicRequest{}
-	var sys strings.Builder
 	var msgs []AnthropicMessage
 
-	textBlock := func(s string) AnthropicContentBlock { return AnthropicContentBlock{Type: "text", Text: s} }
+	textBlock := func(s string, cacheControl *CacheControl) AnthropicContentBlock {
+		return AnthropicContentBlock{Type: "text", Text: s, CacheControl: normalizedCacheControl(cacheControl)}
+	}
 
-	appendUserText := func(role, text string) {
+	appendUserText := func(role, text string, cacheControl *CacheControl) {
 		if text == "" {
 			return
 		}
-		msgs = append(msgs, AnthropicMessage{Role: role, Content: []AnthropicContentBlock{textBlock(text)}})
+		msgs = append(msgs, AnthropicMessage{Role: role, Content: []AnthropicContentBlock{textBlock(text, cacheControl)}})
 	}
 
 	for i := range req.Messages {
 		m := &req.Messages[i]
 		switch m.Role {
 		case "system", "developer":
-			sys.WriteString(contentText(m.Content))
-			sys.WriteString("\n")
+			if text := contentText(m.Content); text != "" {
+				body.System = append(body.System, textBlock(text, messageCacheControl(m)))
+			}
 		case "tool":
-			block := AnthropicContentBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: contentText(m.Content)}
+			block := AnthropicContentBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: contentText(m.Content), CacheControl: normalizedCacheControl(messageCacheControl(m))}
 			msgs = append(msgs, AnthropicMessage{Role: "user", Content: []AnthropicContentBlock{block}})
 		case "assistant":
 			var content []AnthropicContentBlock
 			if txt := contentText(m.Content); txt != "" {
-				content = append(content, textBlock(txt))
+				content = append(content, textBlock(txt, messageCacheControl(m)))
 			}
 			for _, tc := range m.ToolCalls {
 				input := json.RawMessage(tc.Function.Arguments)
@@ -48,20 +50,17 @@ func ToAnthropic(req *ChatRequest) *AnthropicRequest {
 				content = append(content, AnthropicContentBlock{Type: "tool_use", ID: tc.ID, Name: tc.Function.Name, Input: input})
 			}
 			if len(content) == 0 {
-				content = append(content, textBlock(""))
+				content = append(content, textBlock("", messageCacheControl(m)))
 			}
 			msgs = append(msgs, AnthropicMessage{Role: "assistant", Content: content})
 		default:
-			appendUserText("user", contentText(m.Content))
+			appendUserText("user", contentText(m.Content), messageCacheControl(m))
 		}
 	}
 
 	body.Model = req.Model
 	body.MaxTokens = maxTokensOf(req)
 	body.Messages = msgs
-	if s := strings.TrimSpace(sys.String()); s != "" {
-		body.System = s
-	}
 	body.Temperature = req.Temperature
 	body.TopP = req.TopP
 	if stops := stopsOf(req); len(stops) > 0 {
@@ -75,11 +74,88 @@ func ToAnthropic(req *ChatRequest) *AnthropicRequest {
 			if !json.Valid(schema) {
 				schema = json.RawMessage(`{"type":"object"}`)
 			}
-			tools = append(tools, AnthropicTool{Name: t.Function.Name, Description: t.Function.Description, InputSchema: schema})
+			tools = append(tools, AnthropicTool{Name: t.Function.Name, Description: t.Function.Description, InputSchema: schema, CacheControl: normalizedCacheControl(t.CacheControl)})
 		}
 		body.Tools = tools
 	}
+	applyAnthropicPromptCache(body)
 	return body
+}
+
+func normalizedCacheControl(value *CacheControl) *CacheControl {
+	if value == nil {
+		return nil
+	}
+	control := *value
+	if strings.TrimSpace(control.Type) == "" {
+		control.Type = "ephemeral"
+	}
+	if control.Type != "ephemeral" {
+		return nil
+	}
+	if control.TTL != "" && control.TTL != "5m" && control.TTL != "1h" {
+		control.TTL = ""
+	}
+	return &control
+}
+
+func messageCacheControl(message *Message) *CacheControl {
+	if message.CacheControl != nil {
+		return message.CacheControl
+	}
+	var blocks []struct {
+		CacheControl *CacheControl `json:"cache_control"`
+	}
+	if json.Unmarshal(message.Content, &blocks) == nil {
+		for i := len(blocks) - 1; i >= 0; i-- {
+			if blocks[i].CacheControl != nil {
+				return blocks[i].CacheControl
+			}
+		}
+	}
+	return nil
+}
+
+func applyAnthropicPromptCache(body *AnthropicRequest) {
+	const maxBreakpoints = 4
+	breakpoints := 0
+	keep := func(target **CacheControl) {
+		if *target == nil {
+			return
+		}
+		if breakpoints >= maxBreakpoints {
+			*target = nil
+			return
+		}
+		breakpoints++
+	}
+	for i := range body.System {
+		keep(&body.System[i].CacheControl)
+	}
+	for i := range body.Tools {
+		keep(&body.Tools[i].CacheControl)
+	}
+	for i := range body.Messages {
+		for j := range body.Messages[i].Content {
+			keep(&body.Messages[i].Content[j].CacheControl)
+		}
+	}
+	add := func(target **CacheControl) {
+		if breakpoints < maxBreakpoints && *target == nil {
+			*target = &CacheControl{Type: "ephemeral"}
+			breakpoints++
+		}
+	}
+	if len(body.System) > 0 {
+		add(&body.System[len(body.System)-1].CacheControl)
+	}
+	if len(body.Tools) > 0 {
+		add(&body.Tools[len(body.Tools)-1].CacheControl)
+	}
+	if len(body.Messages) > 0 && len(body.Messages[len(body.Messages)-1].Content) > 0 {
+		last := &body.Messages[len(body.Messages)-1].Content
+		add(&(*last)[len(*last)-1].CacheControl)
+	}
 }
 
 func maxTokensOf(req *ChatRequest) int64 {

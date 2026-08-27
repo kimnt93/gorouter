@@ -24,13 +24,13 @@ func TestMessagesRequestTranslatesSystemToolsAndToolResults(t *testing.T) {
 	var input MessagesRequest
 	body := `{
 		"model":"model-a","max_tokens":512,
-		"system":[{"type":"text","text":"be concise"}],
+		"system":[{"type":"text","text":"be concise","cache_control":{"type":"ephemeral","ttl":"1h"}}],
 		"messages":[
 			{"role":"user","content":[{"type":"text","text":"hello"}]},
 			{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"lookup","input":{"q":"go"}}]},
 			{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"found"}]}
 		],
-		"tools":[{"name":"lookup","description":"search","input_schema":{"type":"object"}}],
+		"tools":[{"name":"lookup","description":"search","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],
 		"tool_choice":{"type":"tool","name":"lookup"}
 	}`
 	if err := json.Unmarshal([]byte(body), &input); err != nil {
@@ -45,6 +45,9 @@ func TestMessagesRequestTranslatesSystemToolsAndToolResults(t *testing.T) {
 	}
 	if req.Messages[0].Role != "developer" || string(req.Messages[0].Content) != `"be concise"` || req.Messages[2].ToolCalls[0].Function.Arguments != `{"q":"go"}` || req.Messages[3].Role != "tool" {
 		t.Fatalf("messages = %+v", req.Messages)
+	}
+	if req.Messages[0].CacheControl == nil || req.Messages[0].CacheControl.TTL != "1h" || req.Tools[0].CacheControl == nil {
+		t.Fatalf("cache control was not preserved: messages=%+v tools=%+v", req.Messages, req.Tools)
 	}
 	if !strings.Contains(string(req.ToolChoice), `"name":"lookup"`) {
 		t.Fatalf("tool choice = %s", req.ToolChoice)

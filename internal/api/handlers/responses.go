@@ -25,6 +25,7 @@ type ResponsesRequest struct {
 	ToolChoice      json.RawMessage `json:"tool_choice,omitempty"`
 	Reasoning       *llm.Reasoning  `json:"reasoning,omitempty"`
 	MaxOutputTokens *int64          `json:"max_output_tokens,omitempty"`
+	PromptCacheKey  string          `json:"prompt_cache_key,omitempty"`
 }
 
 // ResponsesTool uses the flat function-tool shape from the Responses API.
@@ -146,7 +147,7 @@ func responseText(r llm.Response) string {
 }
 
 func (r ResponsesRequest) chatRequest() (*llm.ChatRequest, error) {
-	request := &llm.ChatRequest{Model: r.Model, Reasoning: r.Reasoning, MaxCompletionTokens: r.MaxOutputTokens}
+	request := &llm.ChatRequest{Model: r.Model, Reasoning: r.Reasoning, MaxCompletionTokens: r.MaxOutputTokens, PromptCacheKey: r.PromptCacheKey}
 	for _, tool := range r.Tools {
 		if tool.Type != "function" || strings.TrimSpace(tool.Name) == "" {
 			continue
