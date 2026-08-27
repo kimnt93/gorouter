@@ -705,8 +705,6 @@ definitions:
         type: string
       quota_usd:
         type: number
-      rpm:
-        type: integer
       scopes:
         items:
           type: string
@@ -1220,11 +1218,30 @@ definitions:
       user:
         $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.User'
     type: object
+  internal_api_handlers.UserListItem:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      memberships:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Membership'
+        type: array
+      normalized_username:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
   internal_api_handlers.UserListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.User'
+          $ref: '#/definitions/internal_api_handlers.UserListItem'
         type: array
       next_cursor:
         type: string
@@ -1256,6 +1273,10 @@ paths:
       - description: Context organization ID
         in: query
         name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
         type: string
       - description: enabled or disabled
         in: query
@@ -1496,6 +1517,10 @@ paths:
         in: query
         name: organization_id
         type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       - description: Actor ID
         in: query
         name: actor_id
@@ -1581,6 +1606,14 @@ paths:
   /admin/credentials:
     get:
       parameters:
+      - description: Organization context
+        in: query
+        name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       - description: Required for POST
         in: body
         name: request
@@ -1620,6 +1653,14 @@ paths:
       - credentials
     post:
       parameters:
+      - description: Organization context
+        in: query
+        name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       - description: Required for POST
         in: body
         name: request
@@ -1987,6 +2028,15 @@ paths:
       - credentials
   /admin/models:
     get:
+      parameters:
+      - description: Organization context
+        in: query
+        name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       responses:
         "200":
           description: OK
@@ -2187,6 +2237,14 @@ paths:
         in: query
         name: status
         type: string
+      - description: Organization context for user View As
+        in: query
+        name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       - description: Required for POST
         in: body
         name: request
@@ -2245,6 +2303,14 @@ paths:
       - description: Status filter
         in: query
         name: status
+        type: string
+      - description: Organization context for user View As
+        in: query
+        name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
         type: string
       - description: Required for POST
         in: body
@@ -2921,6 +2987,10 @@ paths:
         in: query
         name: api_key_id
         type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       responses:
         "200":
           description: OK
@@ -2958,6 +3028,10 @@ paths:
       - description: Organization context
         in: query
         name: organization_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
         type: string
       responses:
         "200":
@@ -3026,6 +3100,10 @@ paths:
         in: query
         name: status
         type: integer
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
+        type: string
       responses:
         "200":
           description: OK
@@ -3066,6 +3144,10 @@ paths:
       - description: User filter
         in: query
         name: user_id
+        type: string
+      - description: Master-only user View As filter
+        in: query
+        name: view_user_id
         type: string
       responses:
         "200":
@@ -3113,6 +3195,10 @@ paths:
       - description: Status filter
         in: query
         name: status
+        type: string
+      - description: Organization context for exact-email member lookup
+        in: query
+        name: organization_id
         type: string
       - description: Required for POST
         in: body
@@ -3172,6 +3258,10 @@ paths:
       - description: Status filter
         in: query
         name: status
+        type: string
+      - description: Organization context for exact-email member lookup
+        in: query
+        name: organization_id
         type: string
       - description: Required for POST
         in: body

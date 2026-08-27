@@ -59,7 +59,6 @@ type APIKeyCreateRequest struct {
 	Scopes                []string `json:"scopes"`
 	QuotaUSD              *float64 `json:"quota_usd"`
 	QuotaPeriod           string   `json:"quota_period"`
-	RPM                   *int     `json:"rpm"`
 	OwnerType             string   `json:"owner_type"`
 	OwnerUserID           string   `json:"owner_user_id"`
 	OwnerOrganizationID   string   `json:"owner_organization_id"`
@@ -132,9 +131,13 @@ type UsageActivityResponse struct {
 	Summary *entities.UsageSummary         `json:"summary"`
 }
 type UserListResponse struct {
-	Object     string          `json:"object"`
-	Data       []entities.User `json:"data"`
-	NextCursor string          `json:"next_cursor,omitempty"`
+	Object     string         `json:"object"`
+	Data       []UserListItem `json:"data"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+}
+type UserListItem struct {
+	entities.User
+	Memberships []entities.Membership `json:"memberships"`
 }
 type OrganizationListResponse struct {
 	Object     string                 `json:"object"`

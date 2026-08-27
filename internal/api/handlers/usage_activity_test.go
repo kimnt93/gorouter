@@ -18,6 +18,60 @@ type activityRepository struct {
 	groupBy string
 }
 
+type viewIdentityRepository struct{}
+
+func (*viewIdentityRepository) CreateUser(context.Context, entities.User) error { return nil }
+func (*viewIdentityRepository) UserByID(_ context.Context, id string) (*entities.User, error) {
+	if id != "user_view" {
+		return nil, entities.ErrNotFound
+	}
+	return &entities.User{ID: id, Username: "view@example.com", Status: entities.StatusActive}, nil
+}
+func (*viewIdentityRepository) UserByNormalizedUsername(context.Context, string) (*entities.User, error) {
+	return nil, entities.ErrNotFound
+}
+func (*viewIdentityRepository) ListUsers(context.Context, entities.PageQuery) ([]entities.User, string, error) {
+	return nil, "", nil
+}
+func (*viewIdentityRepository) UpdateUserStatus(context.Context, string, string, time.Time) error {
+	return nil
+}
+func (*viewIdentityRepository) CreateOrganization(context.Context, entities.Organization) error {
+	return nil
+}
+func (*viewIdentityRepository) OrganizationByID(_ context.Context, id string) (*entities.Organization, error) {
+	if id != "org_view" {
+		return nil, entities.ErrNotFound
+	}
+	return &entities.Organization{ID: id, Name: "View Org", Status: entities.StatusActive}, nil
+}
+func (*viewIdentityRepository) OrganizationByNormalizedName(context.Context, string) (*entities.Organization, error) {
+	return nil, entities.ErrNotFound
+}
+func (*viewIdentityRepository) ListOrganizations(context.Context, entities.PageQuery) ([]entities.Organization, string, error) {
+	return nil, "", nil
+}
+func (*viewIdentityRepository) UpdateOrganization(context.Context, entities.Organization) error {
+	return nil
+}
+func (*viewIdentityRepository) PutMembership(context.Context, entities.Membership) error { return nil }
+func (*viewIdentityRepository) Membership(_ context.Context, organizationID, userID string) (*entities.Membership, error) {
+	if organizationID != "org_view" || userID != "user_view" {
+		return nil, entities.ErrNotFound
+	}
+	return &entities.Membership{OrganizationID: organizationID, UserID: userID, Role: entities.MembershipMember}, nil
+}
+func (*viewIdentityRepository) ListMemberships(context.Context, string) ([]entities.Membership, error) {
+	return nil, nil
+}
+func (*viewIdentityRepository) ListMembershipsForUser(context.Context, string) ([]entities.Membership, error) {
+	return nil, nil
+}
+func (*viewIdentityRepository) CountActiveOrganizationAdmins(context.Context, string) (int, error) {
+	return 1, nil
+}
+func (*viewIdentityRepository) DeleteMembership(context.Context, string, string) error { return nil }
+
 func (*activityRepository) InsertBatch(context.Context, []entities.UsageEvent) error { return nil }
 func (*activityRepository) SpendForKeySince(context.Context, string, time.Time) (float64, error) {
 	return 0, nil
@@ -114,5 +168,29 @@ func TestUsageActivityRejectsIncompleteCustomRange(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != fiber.StatusBadRequest {
 		t.Fatalf("status=%d", response.StatusCode)
+	}
+}
+
+func TestUsageActivityMasterViewAsMemberUsesMemberVisibility(t *testing.T) {
+	repository := &activityRepository{}
+	service := usage.NewService(repository, 1, nil)
+	t.Cleanup(service.Close)
+	admin := &Admin{UsageSvc: service, IdentityRepo: &viewIdentityRepository{}}
+	app := fiber.New()
+	app.Get("/activity", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster})
+		return c.Next()
+	}, admin.UsageActivity)
+	response, err := app.Test(httptest.NewRequest("GET", "/activity?range=7d&view_user_id=user_view&organization_id=org_view", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != fiber.StatusOK {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	visibility := repository.query.Visibility
+	if visibility.PrincipalType != entities.PrincipalUser || visibility.UserID != "user_view" || visibility.OrganizationID != "org_view" || visibility.OrganizationWide {
+		t.Fatalf("visibility=%+v", visibility)
 	}
 }

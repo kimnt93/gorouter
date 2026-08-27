@@ -47,6 +47,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "enabled or disabled",
                         "name": "status",
                         "in": "query"
@@ -422,6 +428,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Actor ID",
                         "name": "actor_id",
                         "in": "query"
@@ -558,6 +570,18 @@ const docTemplate = `{
                 "summary": "List or create credentials",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Organization context",
+                        "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Required for POST",
                         "name": "request",
                         "in": "body",
@@ -619,6 +643,18 @@ const docTemplate = `{
                 ],
                 "summary": "List or create credentials",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization context",
+                        "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
+                    },
                     {
                         "description": "Required for POST",
                         "name": "request",
@@ -1198,6 +1234,20 @@ const docTemplate = `{
                     "models"
                 ],
                 "summary": "List configured models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Organization context",
+                        "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1512,6 +1562,18 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Organization context for user View As",
+                        "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
+                    },
+                    {
                         "description": "Required for POST",
                         "name": "request",
                         "in": "body",
@@ -1600,6 +1662,18 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Status filter",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Organization context for user View As",
+                        "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
                         "in": "query"
                     },
                     {
@@ -2663,6 +2737,12 @@ const docTemplate = `{
                         "description": "API-key filter",
                         "name": "api_key_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2722,6 +2802,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Organization context",
                         "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
                         "in": "query"
                     }
                 ],
@@ -2826,6 +2912,12 @@ const docTemplate = `{
                         "description": "HTTP status filter",
                         "name": "status",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2890,6 +2982,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "User filter",
                         "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As filter",
+                        "name": "view_user_id",
                         "in": "query"
                     }
                 ],
@@ -2963,6 +3061,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Status filter",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Organization context for exact-email member lookup",
+                        "name": "organization_id",
                         "in": "query"
                     },
                     {
@@ -3054,6 +3158,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Status filter",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Organization context for exact-email member lookup",
+                        "name": "organization_id",
                         "in": "query"
                     },
                     {
@@ -4529,9 +4639,6 @@ const docTemplate = `{
                 "quota_usd": {
                     "type": "number"
                 },
-                "rpm": {
-                    "type": "integer"
-                },
                 "scopes": {
                     "type": "array",
                     "items": {
@@ -5322,13 +5429,42 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_handlers.UserListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "memberships": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Membership"
+                    }
+                },
+                "normalized_username": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_handlers.UserListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.User"
+                        "$ref": "#/definitions/internal_api_handlers.UserListItem"
                     }
                 },
                 "next_cursor": {

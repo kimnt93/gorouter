@@ -261,6 +261,8 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 // @Summary List or create credentials
 // @Tags credentials
 // @Security BearerAuth
+// @Param organization_id query string false "Organization context"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Param request body CredentialCreateRequest false "Required for POST"
 // @Success 200 {array} entities.Credential
 // @Success 201 {object} entities.Credential
@@ -273,7 +275,26 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 		if err != nil {
 			return responseapi.For(c).InternalError("failed to load credentials").Send()
 		}
-		if sess := SessionFrom(c); sess != nil {
+		if strings.TrimSpace(c.Query("view_user_id")) != "" {
+			actor, readErr := a.principalForRead(c)
+			if readErr != nil {
+				return principalReadError(c, readErr)
+			}
+			filtered := make([]entities.Credential, 0, len(v))
+			for _, credential := range v {
+				switch {
+				case credential.OwnerUserID == actor.UserID:
+					filtered = append(filtered, credential)
+				case credential.OwnerUserID != "":
+					continue
+				case credential.OwnerTenantID == nil:
+					filtered = append(filtered, credential)
+				case actor.MembershipRole == entities.MembershipAdmin && actor.OrganizationID != "" && *credential.OwnerTenantID == actor.OrganizationID:
+					filtered = append(filtered, credential)
+				}
+			}
+			v = filtered
+		} else if sess := SessionFrom(c); sess != nil {
 			requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
 			if requestedOrganization != "" {
 				if !sess.IsMaster() && sess.OrganizationID != requestedOrganization {
@@ -427,6 +448,7 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 // @Param owner_type query string false "user or organization"
 // @Param owner_id query string false "Owner user or organization ID"
 // @Param organization_id query string false "Context organization ID"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Param status query string false "enabled or disabled"
 // @Param cursor query string false "Opaque cursor"
 // @Param limit query int false "Page size" default(100) maximum(500)
@@ -435,7 +457,11 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 // @Router /admin/api-keys [get]
 func (a *Admin) KeysList(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	actor := principalFromSession(sess)
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
+	viewingAsUser := strings.TrimSpace(c.Query("view_user_id")) != ""
 	v, err := a.KeysSvc.List(c.Context())
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load API keys").Send()
@@ -457,7 +483,7 @@ func (a *Admin) KeysList(c fiber.Ctx) error {
 	}
 	filtered := make([]entities.ApiKey, 0, len(v))
 	for _, key := range v {
-		if !sess.IsMaster() && policy.ViewKeyMetadata(actor, key) != nil {
+		if (!sess.IsMaster() || viewingAsUser) && policy.ViewKeyMetadata(actor, key) != nil {
 			continue
 		}
 		if ownerType != "" && key.OwnerType != ownerType {
@@ -678,7 +704,7 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 			return responseapi.For(c).BadRequest("selected user must be an active member of the organization").Send()
 		}
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, RPM: b.RPM, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID}
 	v, err := a.KeysSvc.Create(c.Context(), in)
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
@@ -821,6 +847,8 @@ func keyCreatedResponse(v *entities.ApiKey) createdAPIKeyResponse {
 // @Summary List configured models
 // @Tags models
 // @Security BearerAuth
+// @Param organization_id query string false "Organization context"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Success 200 {array} entities.ModelDef
 // @Failure 401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/models [get]
@@ -829,27 +857,40 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
-	if sess := SessionFrom(c); sess != nil && (!sess.IsMaster() || strings.TrimSpace(c.Query("organization_id")) != "") {
+	viewingAsUser := strings.TrimSpace(c.Query("view_user_id")) != ""
+	if sess := SessionFrom(c); sess != nil && (!sess.IsMaster() || strings.TrimSpace(c.Query("organization_id")) != "" || viewingAsUser) {
 		credentials, listErr := a.CredsSvc.List(c.Context())
 		if listErr != nil {
 			return responseapi.For(c).InternalError("failed to filter model routes").Send()
 		}
 		requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
+		visibleCredentials := credentials
+		if viewingAsUser {
+			actor, readErr := a.principalForRead(c)
+			if readErr != nil {
+				return principalReadError(c, readErr)
+			}
+			visibleCredentials = credentials[:0]
+			for _, credential := range credentials {
+				if credential.OwnerUserID == actor.UserID || credential.OwnerUserID == "" && (credential.OwnerTenantID == nil || actor.MembershipRole == entities.MembershipAdmin && actor.OrganizationID != "" && *credential.OwnerTenantID == actor.OrganizationID) {
+					visibleCredentials = append(visibleCredentials, credential)
+				}
+			}
+		}
 		if requestedOrganization != "" && !sess.IsMaster() && sess.OrganizationID != requestedOrganization {
 			membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, sess.UserID)
 			if membershipErr != nil || membership.Role != entities.MembershipAdmin {
 				return responseapi.For(c).Forbidden("organization context is not accessible").Send()
 			}
 		}
-		visibleCredentials := credentials
-		if requestedOrganization != "" {
+		if requestedOrganization != "" && !viewingAsUser {
 			visibleCredentials = visibleCredentials[:0]
 			for _, credential := range credentials {
 				if credential.OwnerTenantID != nil && *credential.OwnerTenantID == requestedOrganization {
 					visibleCredentials = append(visibleCredentials, credential)
 				}
 			}
-		} else {
+		} else if !viewingAsUser {
 			visibleCredentials = filterCredentialsForSession(credentials, sess)
 		}
 		allowed := map[string]bool{}
@@ -979,6 +1020,7 @@ func (a *Admin) Prices(c fiber.Ctx) error {
 // @Param range query string false "24h, 7d, or 30d"
 // @Param organization_id query string false "Organization filter"
 // @Param user_id query string false "User filter"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Success 200 {object} entities.UsageSummary
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/summary [get]
@@ -990,7 +1032,10 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	case "30d":
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	actor := principalFromSession(SessionFrom(c))
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
 	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
 		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
@@ -1026,11 +1071,15 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 // @Param model query string false "Model filter"
 // @Param api_key_id query string false "API-key filter"
 // @Param status query int false "HTTP status filter"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Success 200 {object} UsageRecentResponse
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/recent [get]
 func (a *Admin) UsageRecent(c fiber.Ctx) error {
-	actor := principalFromSession(SessionFrom(c))
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
 	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
 		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
@@ -1087,11 +1136,15 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 // @Security BearerAuth
 // @Param id path string true "Usage event ID"
 // @Param organization_id query string false "Organization context"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Success 200 {object} entities.UsageDetail
 // @Failure 401,403,404,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/events/{id} [get]
 func (a *Admin) UsageDetail(c fiber.Ctx) error {
-	actor := principalFromSession(SessionFrom(c))
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
 	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
 		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
@@ -1127,11 +1180,15 @@ func (a *Admin) UsageDetail(c fiber.Ctx) error {
 // @Param organization_id query string false "Organization filter"
 // @Param user_id query string false "User filter"
 // @Param api_key_id query string false "API-key filter"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Success 200 {object} UsageActivityResponse
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/activity [get]
 func (a *Admin) UsageActivity(c fiber.Ctx) error {
-	actor := principalFromSession(SessionFrom(c))
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
 	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
 		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()

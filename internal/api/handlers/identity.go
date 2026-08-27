@@ -28,6 +28,43 @@ func principalFromSession(session *entities.Session) entities.Principal {
 	return entities.Principal{Type: typeName, KeyID: session.KeyID, UserID: session.UserID, Username: session.Username, OrganizationID: session.OrganizationID, MembershipRole: session.MembershipRole, Scopes: append([]string(nil), session.Scopes...)}
 }
 
+// principalForRead applies the master's optional user inspection lens. The
+// selected organization must be one of the selected user's active memberships;
+// URL parameters can only narrow the master's visibility.
+func (a *Admin) principalForRead(c fiber.Ctx) (entities.Principal, error) {
+	actor := principalFromSession(SessionFrom(c))
+	viewUserID := strings.TrimSpace(c.Query("view_user_id"))
+	if viewUserID == "" {
+		return actor, nil
+	}
+	if actor.Type != entities.PrincipalMaster || a.IdentityRepo == nil {
+		return entities.Principal{}, policy.ErrForbidden
+	}
+	user, err := a.IdentityRepo.UserByID(c.Context(), viewUserID)
+	if err != nil || user.Status != entities.StatusActive {
+		return entities.Principal{}, entities.ErrNotFound
+	}
+	actor = entities.Principal{Type: entities.PrincipalUser, UserID: user.ID, Username: user.Username, Scopes: append([]string(nil), entities.AllScopes...)}
+	if organizationID := strings.TrimSpace(c.Query("organization_id")); organizationID != "" {
+		membership, membershipErr := a.IdentityRepo.Membership(c.Context(), organizationID, user.ID)
+		organization, organizationErr := a.IdentityRepo.OrganizationByID(c.Context(), organizationID)
+		if membershipErr != nil || organizationErr != nil || organization.Status != entities.StatusActive {
+			return entities.Principal{}, entities.ErrNotFound
+		}
+		actor.OrganizationID = organizationID
+		actor.OrganizationName = organization.Name
+		actor.MembershipRole = membership.Role
+	}
+	return actor, nil
+}
+
+func principalReadError(c fiber.Ctx, err error) error {
+	if errors.Is(err, policy.ErrForbidden) {
+		return responseapi.For(c).Forbidden("user View As is available only to master").Send()
+	}
+	return responseapi.For(c).NotFound("View As user or organization was not found").Send()
+}
+
 func pageQuery(c fiber.Ctx) entities.PageQuery {
 	limit, _ := strconv.Atoi(c.Query("limit", "100"))
 	return entities.PageQuery{Cursor: c.Query("cursor"), Limit: limit, Query: c.Query("q"), Status: c.Query("status")}
@@ -41,6 +78,7 @@ func pageQuery(c fiber.Ctx) entities.PageQuery {
 // @Param limit query int false "Page size" default(100) maximum(500)
 // @Param q query string false "Username search"
 // @Param status query string false "Status filter"
+// @Param organization_id query string false "Organization context for exact-email member lookup"
 // @Param request body UserCreateRequest false "Required for POST"
 // @Success 200 {object} UserListResponse
 // @Success 201 {object} UserCreateResponse
@@ -49,23 +87,74 @@ func pageQuery(c fiber.Ctx) entities.PageQuery {
 // @Router /admin/users [post]
 func (a *Admin) Users(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
-	if err := policy.ManageUsers(actor); err != nil {
-		return responseapi.For(c).Forbidden("only master may manage users").Send()
-	}
 	if a.IdentitySvc == nil || a.IdentityRepo == nil {
 		return responseapi.For(c).InternalError("identity service unavailable").Send()
 	}
 	if c.Method() == fiber.MethodGet {
+		if actor.Type != entities.PrincipalMaster {
+			email := strings.TrimSpace(c.Query("q"))
+			organizationID := strings.TrimSpace(c.Query("organization_id"))
+			if actor.Type == entities.PrincipalUser && actor.OrganizationID == "" {
+				if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), organizationID, actor.UserID); membershipErr == nil {
+					actor.OrganizationID, actor.MembershipRole = organizationID, membership.Role
+				}
+			}
+			if normalized, normalizeErr := entities.NormalizeUsername(email); normalizeErr != nil || normalized != strings.ToLower(email) || policy.ManageMembers(actor, organizationID) != nil {
+				return responseapi.For(c).Forbidden("exact email lookup requires organization membership administration").Send()
+			}
+		}
 		users, next, err := a.IdentityRepo.ListUsers(c.Context(), pageQuery(c))
 		if err != nil {
 			return responseapi.For(c).InternalError("failed to list users").Send()
 		}
+		membershipsByUser := map[string][]entities.Membership{}
+		if actor.Type == entities.PrincipalMaster {
+			organizations, _, organizationErr := a.IdentityRepo.ListOrganizations(c.Context(), entities.PageQuery{Limit: 500})
+			if organizationErr != nil {
+				return responseapi.For(c).InternalError("failed to load user organizations").Send()
+			}
+			for _, organization := range organizations {
+				memberships, membershipErr := a.IdentityRepo.ListMemberships(c.Context(), organization.ID)
+				if membershipErr != nil {
+					return responseapi.For(c).InternalError("failed to load user memberships").Send()
+				}
+				for _, membership := range memberships {
+					membershipsByUser[membership.UserID] = append(membershipsByUser[membership.UserID], membership)
+				}
+			}
+		}
+		items := make([]UserListItem, 0, len(users))
+		for _, user := range users {
+			if actor.Type != entities.PrincipalMaster && !strings.EqualFold(user.Username, strings.TrimSpace(c.Query("q"))) {
+				continue
+			}
+			memberships := membershipsByUser[user.ID]
+			if actor.Type != entities.PrincipalMaster {
+				var membershipErr error
+				memberships, membershipErr = a.IdentityRepo.ListMembershipsForUser(c.Context(), user.ID)
+				if membershipErr != nil {
+					return responseapi.For(c).InternalError("failed to load user memberships").Send()
+				}
+				organizationID := strings.TrimSpace(c.Query("organization_id"))
+				visible := memberships[:0]
+				for _, membership := range memberships {
+					if membership.OrganizationID == organizationID {
+						visible = append(visible, membership)
+					}
+				}
+				memberships = visible
+			}
+			items = append(items, UserListItem{User: user, Memberships: memberships})
+		}
 		return responseapi.For(c).Response().
 			Status(fiber.StatusOK).
 			Object("list").
-			Data(users).
+			Data(items).
 			Next(next).
 			Send()
+	}
+	if err := policy.ManageUsers(actor); err != nil {
+		return responseapi.For(c).Forbidden("only master may manage users").Send()
 	}
 	var body UserCreateRequest
 	if err := c.Bind().Body(&body); err != nil {
@@ -154,6 +243,8 @@ func (a *Admin) UserByID(c fiber.Ctx) error {
 // @Param limit query int false "Page size" default(100) maximum(500)
 // @Param q query string false "Name search"
 // @Param status query string false "Status filter"
+// @Param organization_id query string false "Organization context for user View As"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Param request body OrganizationCreateRequest false "Required for POST"
 // @Success 200 {object} OrganizationListResponse
 // @Success 201 {object} entities.Organization
@@ -178,6 +269,10 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 			return identityError(c, err)
 		}
 		return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(organization).Send()
+	}
+	var readErr error
+	if actor, readErr = a.principalForRead(c); readErr != nil {
+		return principalReadError(c, readErr)
 	}
 	organizations, next, err := a.IdentityRepo.ListOrganizations(c.Context(), pageQuery(c))
 	if err != nil {
@@ -286,6 +381,12 @@ func (a *Admin) OrganizationByID(c fiber.Ctx) error {
 func (a *Admin) Members(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	organizationID := c.Params("id")
+	if c.Method() == fiber.MethodGet {
+		var readErr error
+		if actor, readErr = a.principalForRead(c); readErr != nil {
+			return principalReadError(c, readErr)
+		}
+	}
 	if err := policy.ManageMembers(actor, organizationID); err != nil {
 		return responseapi.For(c).Forbidden("membership administration is not allowed").Send()
 	}
@@ -361,6 +462,7 @@ func (a *Admin) MemberByID(c fiber.Ctx) error {
 // @Param since query string false "RFC3339 lower time bound"
 // @Param until query string false "RFC3339 upper time bound"
 // @Param organization_id query string false "Organization filter"
+// @Param view_user_id query string false "Master-only user View As filter"
 // @Param actor_id query string false "Actor ID"
 // @Param action query string false "Action"
 // @Param target_type query string false "Target type"
@@ -369,7 +471,10 @@ func (a *Admin) MemberByID(c fiber.Ctx) error {
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/audit/events [get]
 func (a *Admin) AuditEvents(c fiber.Ctx) error {
-	actor := principalFromSession(SessionFrom(c))
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
 	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
 	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
 		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
