@@ -4725,6 +4725,15 @@ const docTemplate = `{
                 "oauth_refresh": {
                     "type": "string"
                 },
+                "owner_organization_id": {
+                    "type": "string"
+                },
+                "owner_type": {
+                    "type": "string"
+                },
+                "owner_user_id": {
+                    "type": "string"
+                },
                 "provider": {
                     "type": "string"
                 }
@@ -4892,6 +4901,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "owner_organization_id": {
+                    "type": "string"
+                },
+                "owner_type": {
                     "type": "string"
                 }
             }
