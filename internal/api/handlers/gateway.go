@@ -202,6 +202,8 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	candidates := make([]chat.Candidate, 0, len(routes))
 	runtimes := make(map[string]*entities.CredentialRuntime, len(routes))
+	credentialIDs := make(map[string]string, len(routes))
+	upstreamModels := make(map[string]string, len(routes))
 	fillFirstProvider := ""
 	fillFirst := true
 	for _, route := range routes {
@@ -220,7 +222,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			g.Health.Report(route.CredentialID, false)
 			continue
 		}
-		runtimes[route.CredentialID] = runtime
+		candidateID := route.CredentialID + "\x00" + route.UpstreamModel
+		runtimes[candidateID] = runtime
+		credentialIDs[candidateID] = route.CredentialID
+		upstreamModels[candidateID] = route.UpstreamModel
 		definition, knownProvider := providerpkg.Lookup(runtime.Provider)
 		if !knownProvider || !definition.QuotaSupported {
 			fillFirst = false
@@ -229,7 +234,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		} else if fillFirstProvider != runtime.Provider {
 			fillFirst = false
 		}
-		candidates = append(candidates, chat.Candidate{ID: route.CredentialID, Priority: route.Priority, Weight: route.Weight})
+		candidates = append(candidates, chat.Candidate{ID: candidateID, Priority: route.Priority, Weight: route.Weight})
 	}
 	strategy := model.Strategy
 	if fillFirst && fillFirstProvider != "" {
@@ -250,30 +255,34 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials").Send()
 	}
-	upstreamModel := model.UpstreamModel
-	if upstreamModel == "" {
-		upstreamModel = model.Name
-	}
 	lastStatus := fiber.StatusBadGateway
 	lastCredential := ""
 	for _, candidate := range candidates {
-		lastCredential = candidate.ID
+		credentialID := credentialIDs[candidate.ID]
+		lastCredential = credentialID
 		runtime := runtimes[candidate.ID]
 		adapter, ok := g.adapter(runtime.Provider)
 		if !ok || adapter == nil {
-			g.Health.Report(candidate.ID, false)
+			g.Health.Report(credentialID, false)
 			continue
+		}
+		upstreamModel := upstreamModels[candidate.ID]
+		if upstreamModel == "" {
+			upstreamModel = model.UpstreamModel
+		}
+		if upstreamModel == "" {
+			upstreamModel = model.Name
 		}
 		result, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
 		if rerr != nil {
-			g.Health.Report(candidate.ID, false)
+			g.Health.Report(credentialID, false)
 			continue
 		}
 		if result.StatusCode == fiber.StatusTooManyRequests || result.StatusCode == fiber.StatusPaymentRequired {
 			lastStatus = result.StatusCode
 			drainAndClose(result.Body)
 			if g.ProviderQuotas != nil {
-				g.ProviderQuotas.MarkExhausted(candidate.ID)
+				g.ProviderQuotas.MarkExhausted(credentialID)
 			}
 			continue
 		}
@@ -287,21 +296,23 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if result.StatusCode < 200 || result.StatusCode >= 300 {
 			lastStatus = result.StatusCode
 			drainAndClose(result.Body)
-			g.Health.Report(candidate.ID, false)
+			g.Health.Report(credentialID, false)
 			continue
 		}
-		g.Health.Report(candidate.ID, true)
+		g.Health.Report(credentialID, true)
 		if strategy == chat.StrategyRoundRobin {
 			g.Selector.BindAffinity(c.Context(), routeAffinity, candidate.ID)
 		}
 		if g.ProviderQuotas != nil {
-			g.ProviderQuotas.MarkInUse(candidate.ID)
+			g.ProviderQuotas.MarkInUse(credentialID)
 		}
+		routedModel := *model
+		routedModel.UpstreamModel = upstreamModel
 		if req.Stream {
 			streamOwnsReservation = true
-			return g.stream(c, key, model, runtime, result, raw, deterministic, started, pricePtr, reservation)
+			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
 		}
-		return g.nonStream(c, key, model, runtime, result, raw, deterministic, started, pricePtr, reservation)
+		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
 	}
 	c.Set("X-Cache", "bypass")
 	g.recordError(key, model, lastCredential, lastStatus, started, "all credentials failed")

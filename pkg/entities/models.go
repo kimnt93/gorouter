@@ -125,10 +125,11 @@ const (
 )
 
 type ModelRoute struct {
-	CredentialID string `json:"credential_id"`
-	Priority     int    `json:"priority"`
-	Weight       int    `json:"weight"`
-	Enabled      bool   `json:"enabled"`
+	CredentialID  string `json:"credential_id"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	Priority      int    `json:"priority"`
+	Weight        int    `json:"weight"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type ModelReasoningLevel struct {

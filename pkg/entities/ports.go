@@ -51,11 +51,12 @@ type CredentialRepository interface {
 }
 
 type RouteCandidate struct {
-	CredentialID string
-	Priority     int
-	Weight       int
-	OwnerTenant  *string
-	OwnerUserID  string
+	CredentialID  string
+	UpstreamModel string
+	Priority      int
+	Weight        int
+	OwnerTenant   *string
+	OwnerUserID   string
 }
 
 type ApiKeyRepository interface {

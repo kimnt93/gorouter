@@ -48,9 +48,12 @@ func TestUpsertValidatesModelAndRoutes(t *testing.T) {
 	if err := service.Upsert(context.Background(), entities.ModelDef{Name: "model", Strategy: "random"}); !errors.Is(err, ErrModelStrategy) {
 		t.Fatalf("invalid strategy error=%v", err)
 	}
-	duplicate := []entities.ModelRoute{{CredentialID: "c", Weight: 1}, {CredentialID: "c", Weight: 1}}
+	duplicate := []entities.ModelRoute{{CredentialID: "c", UpstreamModel: "same", Weight: 1}, {CredentialID: "c", UpstreamModel: "same", Weight: 1}}
 	if err := service.Upsert(context.Background(), entities.ModelDef{Name: "model", Routes: duplicate}); !errors.Is(err, ErrCredentialRoute) {
 		t.Fatalf("duplicate route error=%v", err)
+	}
+	if err := service.Upsert(context.Background(), entities.ModelDef{Name: "blend", Routes: []entities.ModelRoute{{CredentialID: "c", UpstreamModel: "first", Weight: 1}, {CredentialID: "c", UpstreamModel: "second", Weight: 1}}}); err != nil {
+		t.Fatalf("same credential with distinct upstream models: %v", err)
 	}
 }
 

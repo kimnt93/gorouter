@@ -123,7 +123,7 @@ func (s *CatalogSync) Refresh(ctx context.Context) error {
 			hasRoute := false
 			nextPriority := 0
 			for _, route := range model.Routes {
-				if route.CredentialID == connection.ID {
+				if route.CredentialID == connection.ID && (route.UpstreamModel == "" || route.UpstreamModel == model.UpstreamModel) {
 					hasRoute = true
 				}
 				if route.Priority <= nextPriority {
@@ -131,7 +131,7 @@ func (s *CatalogSync) Refresh(ctx context.Context) error {
 				}
 			}
 			if !hasRoute {
-				model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: connection.ID, Priority: nextPriority, Weight: 1, Enabled: true})
+				model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: connection.ID, UpstreamModel: model.UpstreamModel, Priority: nextPriority, Weight: 1, Enabled: true})
 			}
 			model.Metadata = credential.MetadataSnapshot(runtime.Provider, connection.ID, item, time.Now().UTC())
 			byName[name] = model

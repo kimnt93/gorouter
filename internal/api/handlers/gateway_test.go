@@ -108,6 +108,7 @@ func (r gatewayModelRepo) ListPrices(context.Context) (map[string]entities.Price
 type gatewayUpstream struct {
 	statuses map[string]int
 	calls    []string
+	models   []string
 }
 
 type gatewayStreamUpstream struct{}
@@ -466,11 +467,32 @@ func TestGatewayCapturesBoundedConversationAndMarksFreeCostPriced(t *testing.T) 
 	}
 }
 
-func (u *gatewayUpstream) Send(_ context.Context, runtime *entities.CredentialRuntime, _ string, _ []byte) (*entities.UpstreamResult, error) {
+func (u *gatewayUpstream) Send(_ context.Context, runtime *entities.CredentialRuntime, upstreamModel string, _ []byte) (*entities.UpstreamResult, error) {
 	u.calls = append(u.calls, runtime.ID)
+	u.models = append(u.models, upstreamModel)
 	status := u.statuses[runtime.ID]
 	body := `{"id":"ok","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	return &entities.UpstreamResult{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func TestGatewayBlendRoutesDifferentUpstreamModels(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", Models: []string{"blend"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	runtime := &entities.CredentialRuntime{ID: "cred-a", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusOK}}
+	gateway := &Gateway{Keys: apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }), Creds: credential.NewService(gatewayCredRepo{routes: []entities.RouteCandidate{{CredentialID: "cred-a", UpstreamModel: "provider-model-b", Priority: 1}}, runtimes: map[string]*entities.CredentialRuntime{"cred-a": runtime}}, nil), Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "blend", UpstreamModel: "provider-model-a", Strategy: chat.StrategyPriority, Enabled: true}}), OpenAI: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth()}
+	app := fiber.New()
+	app.Post("/", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"blend","messages":[{"role":"user","content":"hi"}]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || len(upstream.models) != 1 || upstream.models[0] != "provider-model-b" {
+		t.Fatalf("status=%d models=%v", response.StatusCode, upstream.models)
+	}
 }
 
 func testGatewayApp(statuses map[string]int) (*fiber.App, *gatewayUpstream) {

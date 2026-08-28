@@ -571,6 +571,8 @@ definitions:
         type: boolean
       priority:
         type: integer
+      upstream_model:
+        type: string
       weight:
         type: integer
     type: object
@@ -822,6 +824,30 @@ definitions:
       quota_supported:
         type: boolean
     type: object
+  github_com_kimnt93_gorouter_pkg_providerquota.ResetCredit:
+    properties:
+      description:
+        type: string
+      expires_at:
+        type: string
+      reset_type:
+        type: string
+      selection_token:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_pkg_providerquota.ResetCreditList:
+    properties:
+      available_count:
+        type: integer
+      credits:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.ResetCredit'
+        type: array
+    type: object
   github_com_kimnt93_gorouter_pkg_providerquota.Snapshot:
     properties:
       account:
@@ -942,6 +968,13 @@ definitions:
       next_cursor:
         type: string
       object:
+        type: string
+    type: object
+  internal_api_handlers.CodexResetCreditRequest:
+    properties:
+      request_id:
+        type: string
+      selection_token:
         type: string
     type: object
   internal_api_handlers.CreatedAPIKeyResponse:
@@ -2508,6 +2541,111 @@ paths:
       security:
       - BearerAuth: []
       summary: Get or refresh credential quota
+      tags:
+      - credentials
+  /admin/credentials/{id}/reset-credits:
+    get:
+      description: Lists available banked reset credits or consumes one selected credit
+        for the credential account.
+      parameters:
+      - description: Credential ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Selected reset credit
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.CodexResetCreditRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.ResetCreditList'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Manage Codex reset credits
+      tags:
+      - credentials
+    post:
+      description: Lists available banked reset credits or consumes one selected credit
+        for the credential account.
+      parameters:
+      - description: Credential ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Selected reset credit
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.CodexResetCreditRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.ResetCreditList'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Manage Codex reset credits
       tags:
       - credentials
   /admin/credentials/{id}/test:

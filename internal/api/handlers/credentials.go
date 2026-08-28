@@ -153,7 +153,7 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 		hasRoute := false
 		nextPriority := 0
 		for _, route := range model.Routes {
-			if route.CredentialID == runtime.ID {
+			if route.CredentialID == runtime.ID && (route.UpstreamModel == "" || route.UpstreamModel == upstream) {
 				hasRoute = true
 				break
 			}
@@ -162,7 +162,7 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 			}
 		}
 		if !hasRoute {
-			model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: runtime.ID, Priority: nextPriority, Weight: 1, Enabled: true})
+			model.Routes = append(model.Routes, entities.ModelRoute{CredentialID: runtime.ID, UpstreamModel: upstream, Priority: nextPriority, Weight: 1, Enabled: true})
 		}
 		model.Metadata = credential.MetadataSnapshot(runtime.Provider, runtime.ID, discoveredModel, time.Now())
 		if err := h.ModelRoutes.Upsert(c.Context(), model); err != nil {
@@ -472,4 +472,41 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 			return w.Flush()
 		})
 	})
+}
+
+// CodexResetCredits lists or consumes banked rate-limit reset credits for one authorized Codex account.
+// @Summary Manage Codex reset credits
+// @Description Lists available banked reset credits or consumes one selected credit for the credential account.
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Param request body CodexResetCreditRequest false "Selected reset credit"
+// @Success 200 {object} providerquota.ResetCreditList
+// @Failure 400,401,403,404,409,500,502 {object} responseapi.ErrorResponse
+// @Router /admin/credentials/{id}/reset-credits [get]
+// @Router /admin/credentials/{id}/reset-credits [post]
+func (h *CredentialConnectivity) CodexResetCredits(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if !h.authorize(c) {
+		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	if h.Quotas == nil {
+		return responseapi.For(c).InternalError("provider quota service is unavailable").Send()
+	}
+	if c.Method() == fiber.MethodGet {
+		result, err := h.Quotas.ListCodexResetCredits(c.Context(), c.Params("id"))
+		if err != nil {
+			return responseapi.For(c).Error(fiber.StatusBadGateway, "failed to load Codex reset credits", "upstream_error", "reset_credit_list_failed").Send()
+		}
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(result).Send()
+	}
+	var input CodexResetCreditRequest
+	if err := c.Bind().Body(&input); err != nil || strings.TrimSpace(input.SelectionToken) == "" || strings.TrimSpace(input.RequestID) == "" {
+		return responseapi.For(c).BadRequest("selected reset credit and request ID are required").Send()
+	}
+	result, err := h.Quotas.ConsumeCodexResetCredit(c.Context(), c.Params("id"), input.SelectionToken, input.RequestID)
+	if err != nil {
+		return responseapi.For(c).Error(fiber.StatusBadGateway, "failed to redeem Codex reset credit", "upstream_error", "reset_credit_failed").Send()
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(result).Send()
 }

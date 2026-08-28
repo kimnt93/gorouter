@@ -112,6 +112,10 @@ export interface ProviderDefinition {
 }
 
 export interface ProviderQuotaWindow { name: string; used_percent: number; remaining_percent: number; reset_at?: string }
+export interface CodexResetCredit { selection_token: string; reset_type?: string; status?: string; title?: string; description?: string; expires_at?: string }
+export interface CodexResetCreditList { credits: CodexResetCredit[]; available_count: number }
+export interface CodexResetCreditResult { outcome: string; quota: ProviderQuotaSnapshot }
+
 export interface ProviderQuotaSnapshot {
   credential_id: string; provider: string; account: string; plan?: string; fetched_at?: string
   available: boolean; windows: ProviderQuotaWindow[]; message?: string; in_use?: boolean
@@ -128,7 +132,7 @@ export interface ProviderModelsResponse { object: 'list'; provider: string; defa
 export interface OAuthStartResponse { flow_id: string; flow_type: string; authorize_url: string; verification_uri?: string; verification_uri_complete?: string; user_code?: string; interval?: number; expires_in?: number; instructions: string }
 export interface OAuthCompleteResponse { id?: string; provider?: string; name?: string; status?: string }
 
-export interface ModelRoute { credential_id: string; priority: number; weight: number; enabled: boolean }
+export interface ModelRoute { credential_id: string; upstream_model?: string; priority: number; weight: number; enabled: boolean }
 export interface Price { input_per_m: number; output_per_m: number; cached_input_per_m: number; cache_write_per_m: number }
 export interface ModelDefinition { name: string; strategy: string; upstream_model: string; enabled: boolean; routes: ModelRoute[]; price?: Price }
 export interface CatalogPrice { model: string; name?: string; provider?: string; context_length?: number; cache_supported: boolean; price: Price; source: string; updated_at: string }

@@ -288,7 +288,7 @@ func (r *CredentialRepo) UpdateOAuthTokens(ctx context.Context, box entities.Sec
 
 func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]entities.RouteCandidate, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT mr.credential_id, mr.priority, mr.weight, c.owner_tenant_id, coalesce(c.owner_user_id,'')
+		SELECT mr.credential_id, mr.upstream_model, mr.priority, mr.weight, c.owner_tenant_id, coalesce(c.owner_user_id,'')
 		FROM model_routes mr JOIN credentials c ON c.id = mr.credential_id
 		WHERE mr.model=$1 AND mr.enabled AND c.status='active'
 		ORDER BY mr.priority DESC, mr.credential_id`, model)
@@ -300,7 +300,7 @@ func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]en
 	for rows.Next() {
 		var rc entities.RouteCandidate
 		var w int
-		if err := rows.Scan(&rc.CredentialID, &rc.Priority, &w, &rc.OwnerTenant, &rc.OwnerUserID); err != nil {
+		if err := rows.Scan(&rc.CredentialID, &rc.UpstreamModel, &rc.Priority, &w, &rc.OwnerTenant, &rc.OwnerUserID); err != nil {
 			return nil, err
 		}
 		rc.Weight = w

@@ -282,3 +282,7 @@ type OAuthCompleteResponse struct {
 	Provider string `json:"provider"`
 	Name     string `json:"name"`
 }
+type CodexResetCreditRequest struct {
+	SelectionToken string `json:"selection_token"`
+	RequestID      string `json:"request_id"`
+}

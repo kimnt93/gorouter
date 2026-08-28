@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -515,4 +516,109 @@ func maskAccount(runtime *entities.CredentialRuntime) string {
 		return value[:4] + "…" + value[len(value)-3:]
 	}
 	return "••••"
+}
+
+type ResetCredit struct {
+	SelectionToken string     `json:"selection_token"`
+	ResetType      string     `json:"reset_type,omitempty"`
+	Status         string     `json:"status,omitempty"`
+	Title          string     `json:"title,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+}
+
+type ResetCreditList struct {
+	Credits        []ResetCredit `json:"credits"`
+	AvailableCount int           `json:"available_count"`
+}
+
+type ResetCreditResult struct {
+	Outcome string   `json:"outcome"`
+	Quota   Snapshot `json:"quota"`
+}
+
+func (s *Service) ListCodexResetCredits(ctx context.Context, id string) (ResetCreditList, error) {
+	runtime, err := s.credentials.Runtime(ctx, id)
+	if err != nil {
+		return ResetCreditList{}, err
+	}
+	if runtime.Provider != "codex" || runtime.Kind != entities.KindOAuth {
+		return ResetCreditList{}, fmt.Errorf("reset credits require an OpenAI Codex OAuth account")
+	}
+	payload, err := s.fetch(ctx, runtime, http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", nil, map[string]string{"chatgpt-account-id": runtime.OAuthAccount, "originator": "codex_cli_rs"})
+	if err != nil {
+		return ResetCreditList{}, err
+	}
+	candidates := arrayAny(payload, "credits", "reset_credits", "resetCredits", "rate_limit_reset_credits", "rateLimitResetCredits", "items", "data")
+	out := ResetCreditList{Credits: []ResetCredit{}}
+	for _, candidate := range candidates {
+		record, _ := candidate.(map[string]any)
+		id := textAny(record, "credit_id", "creditId", "id")
+		status := strings.ToLower(textAny(record, "status", "state"))
+		if id == "" || boolAny(record, "consumed", "redeemed") || status == "consumed" || status == "redeemed" || status == "used" || status == "expired" || status == "unavailable" {
+			continue
+		}
+		expires := parseTime(first(record, "expires_at", "expiresAt", "expiration_at", "expirationAt"))
+		if expires != nil && !expires.After(time.Now()) {
+			continue
+		}
+		out.Credits = append(out.Credits, ResetCredit{SelectionToken: id, ResetType: textAny(record, "reset_type", "resetType"), Status: status, Title: text(record, "title"), Description: text(record, "description"), ExpiresAt: expires})
+	}
+	sort.SliceStable(out.Credits, func(i, j int) bool {
+		if out.Credits[i].ExpiresAt == nil {
+			return false
+		}
+		if out.Credits[j].ExpiresAt == nil {
+			return true
+		}
+		return out.Credits[i].ExpiresAt.Before(*out.Credits[j].ExpiresAt)
+	})
+	out.AvailableCount = int(number(first(payload, "available_count", "availableCount")))
+	if out.AvailableCount < len(out.Credits) {
+		out.AvailableCount = len(out.Credits)
+	}
+	return out, nil
+}
+
+func (s *Service) ConsumeCodexResetCredit(ctx context.Context, id, selectionToken, requestID string) (ResetCreditResult, error) {
+	if strings.TrimSpace(selectionToken) == "" || strings.TrimSpace(requestID) == "" {
+		return ResetCreditResult{}, fmt.Errorf("reset credit and request ID are required")
+	}
+	runtime, err := s.credentials.Runtime(ctx, id)
+	if err != nil {
+		return ResetCreditResult{}, err
+	}
+	if runtime.Provider != "codex" || runtime.Kind != entities.KindOAuth {
+		return ResetCreditResult{}, fmt.Errorf("reset credits require an OpenAI Codex OAuth account")
+	}
+	payload, err := s.fetch(ctx, runtime, http.MethodPost, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", map[string]any{"redeem_request_id": requestID, "credit_id": selectionToken}, map[string]string{"chatgpt-account-id": runtime.OAuthAccount, "originator": "codex_cli_rs"})
+	if err != nil {
+		return ResetCreditResult{}, err
+	}
+	outcome := strings.ToLower(strings.ReplaceAll(textAny(payload, "outcome", "status", "result", "code", "type"), "_", ""))
+	if outcome != "reset" && outcome != "alreadyredeemed" {
+		return ResetCreditResult{}, fmt.Errorf("Codex did not redeem the reset credit")
+	}
+	quota, err := s.Refresh(ctx, id)
+	if err != nil {
+		return ResetCreditResult{}, err
+	}
+	return ResetCreditResult{Outcome: outcome, Quota: quota}, nil
+}
+
+func arrayAny(value map[string]any, keys ...string) []any {
+	for _, key := range keys {
+		if result, ok := value[key].([]any); ok {
+			return result
+		}
+	}
+	return nil
+}
+func boolAny(value map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if result, ok := value[key].(bool); ok && result {
+			return true
+		}
+	}
+	return false
 }

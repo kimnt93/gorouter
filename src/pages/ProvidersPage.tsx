@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
-import type { Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
+import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, getCodexResetCredits, redeemCodexResetCredit, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
+import type { CodexResetCredit, Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
 import { Modal } from '../components/Modal'
 import { PageLoading } from '../components/PageState'
@@ -54,6 +54,7 @@ function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh
   const [busy, setBusy] = useState(false)
   const [quota, setQuota] = useState<ProviderQuotaSnapshot | null>(null)
   const [quotaBusy, setQuotaBusy] = useState(false)
+  const [resetCredits, setResetCredits] = useState<CodexResetCredit[] | null>(null)
   useEffect(() => {
     if (!quotaSupported) return
     let active = true
@@ -62,9 +63,16 @@ function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh
   }, [credential.id, quotaSupported])
   const run = async (action: () => Promise<void>) => { setBusy(true); setResult(''); try { await action() } catch (reason) { setResult((reason as Error).message) } finally { setBusy(false) } }
   const reloadQuota = async () => { setQuotaBusy(true); setResult(''); try { setQuota(await refreshCredentialQuota(credential.id)) } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) } }
+  const loadResetCredits = async () => { setQuotaBusy(true); setResult(''); try { setResetCredits((await getCodexResetCredits(credential.id)).credits) } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) } }
+  const redeem = async (credit: CodexResetCredit) => {
+    if (!window.confirm(`Redeem this banked reset for ${credential.name}? It immediately resets eligible Codex usage windows and permanently consumes this credit.`)) return
+    setQuotaBusy(true); setResult('')
+    try { const response = await redeemCodexResetCredit(credential.id, credit.selection_token, crypto.randomUUID()); setQuota(response.quota); setResetCredits((await getCodexResetCredits(credential.id)).credits); setResult('Codex reset credit redeemed') } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) }
+  }
   const displayName = maskEmail(credential.name)
   return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{displayName}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div>
     {quotaSupported && <QuotaPanel quota={quota} accountFallback={displayName} busy={quotaBusy} onReload={() => void reloadQuota()} />}
+    {credential.provider === 'codex' && credential.kind === 'oauth' && <div className="reset-credit-panel"><button disabled={quotaBusy} onClick={() => void loadResetCredits()}>{resetCredits == null ? 'Banked resets' : 'Reload resets'}</button>{resetCredits?.map((credit, index) => <button className="button secondary small" disabled={quotaBusy} key={credit.selection_token} onClick={() => void redeem(credit)}>{credit.title || `Redeem reset ${index + 1}`}{credit.expires_at ? ` · expires ${relativeTime(credit.expires_at)}` : ''}</button>)}{resetCredits?.length === 0 && <small>No banked reset credits available</small>}</div>}
     <div className="compact-actions">
     <button disabled={busy} onClick={() => void run(async () => { const response = await testCredential(credential.id); setResult(response.ok ? `Healthy · ${response.status ?? 'OK'} · ${response.latency_ms} ms` : 'Health check failed') })}>Test</button>
     <button onClick={onModels}>Models</button><button onClick={onChat}>Chat</button>

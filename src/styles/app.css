@@ -512,3 +512,5 @@ h2 { font-size: 19px; }
   .vertical-column { min-width: 0; max-width: 48px; grid-template-rows: 18px 140px 34px; }
   .vertical-value, .vertical-column > time { font-size: 9px; }
 }
+.reset-credit-panel { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; margin: .5rem 0; }
+.reset-credit-panel small { color: var(--muted); }

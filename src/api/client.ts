@@ -1,4 +1,4 @@
-import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
 import { groupByForUsageRange } from '../lib/usageResolution'
 
 export class APIError extends Error {
@@ -125,7 +125,7 @@ export const addMember = (id: string, userId: string, role: string): Promise<Mem
 export const updateMember = (id: string, userId: string, role: string): Promise<{ ok: boolean }> => request(`/admin/organizations/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ role }) })
 export const deleteMember = (id: string, userId: string): Promise<{ ok: boolean }> => request(`/admin/organizations/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' })
 
-export const createUser = (username: string, generateInitialKey: boolean): Promise<UserCreateResponse> => request('/admin/users', { method: 'POST', body: JSON.stringify({ username, generate_initial_key: generateInitialKey, initial_key: { name: 'Initial login key', models: [], scopes: ['usage:read'] } }) })
+export const createUser = (username: string, generateInitialKey: boolean, models: string[] = []): Promise<UserCreateResponse> => request('/admin/users', { method: 'POST', body: JSON.stringify({ username, generate_initial_key: generateInitialKey, initial_key: { name: 'Initial user key', models, scopes: ['chat'] } }) })
 export const setUserStatus = (id: string, status: string): Promise<{ ok: boolean }> => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) })
 
 export const createAPIKey = (body: object): Promise<CreatedAPIKey> => request('/admin/api-keys', { method: 'POST', body: JSON.stringify(body) })
@@ -173,3 +173,6 @@ export const getAuditEvents = (filters: AuditFilters, cursor = ''): Promise<List
   return request<ListResponse<AuditEvent>>(`/admin/audit/events?${params}`).then(normalizeList)
 }
 export const flushRouterCache = (): Promise<{ ok: boolean }> => request('/admin/cache/flush', { method: 'POST' })
+
+export const getCodexResetCredits = (id: string): Promise<import("./contracts").CodexResetCreditList> => request(`/admin/credentials/${encodeURIComponent(id)}/reset-credits`, { cache: "no-store" })
+export const redeemCodexResetCredit = (id: string, selectionToken: string, requestId: string): Promise<import("./contracts").CodexResetCreditResult> => request(`/admin/credentials/${encodeURIComponent(id)}/reset-credits`, { method: "POST", body: JSON.stringify({ selection_token: selectionToken, request_id: requestId }) })

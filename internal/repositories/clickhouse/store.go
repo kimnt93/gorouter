@@ -362,7 +362,7 @@ func (r *CredentialRepo) RoutesForModel(ctx context.Context, model string) ([]en
 		}
 		c, e := r.stored(ctx, rt.CredentialID)
 		if e == nil && c.Status == "active" {
-			out = append(out, entities.RouteCandidate{CredentialID: rt.CredentialID, Priority: rt.Priority, Weight: rt.Weight, OwnerTenant: c.OwnerTenantID, OwnerUserID: c.OwnerUserID})
+			out = append(out, entities.RouteCandidate{CredentialID: rt.CredentialID, UpstreamModel: rt.UpstreamModel, Priority: rt.Priority, Weight: rt.Weight, OwnerTenant: c.OwnerTenantID, OwnerUserID: c.OwnerUserID})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

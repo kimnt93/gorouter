@@ -46,6 +46,9 @@ func (s *Service) Upsert(ctx context.Context, m entities.ModelDef) error {
 	if m.Name == "" {
 		return ErrModelName
 	}
+	if m.UpstreamModel == "" {
+		m.UpstreamModel = m.Name
+	}
 	if m.Strategy == "" {
 		m.Strategy = chat.StrategyPriority
 	}
@@ -55,13 +58,18 @@ func (s *Service) Upsert(ctx context.Context, m entities.ModelDef) error {
 	seen := make(map[string]struct{}, len(m.Routes))
 	for i := range m.Routes {
 		m.Routes[i].CredentialID = strings.TrimSpace(m.Routes[i].CredentialID)
-		if m.Routes[i].CredentialID == "" || m.Routes[i].Weight <= 0 {
+		m.Routes[i].UpstreamModel = strings.TrimSpace(m.Routes[i].UpstreamModel)
+		if m.Routes[i].UpstreamModel == "" {
+			m.Routes[i].UpstreamModel = m.UpstreamModel
+		}
+		if m.Routes[i].CredentialID == "" || m.Routes[i].UpstreamModel == "" || m.Routes[i].Weight <= 0 {
 			return ErrCredentialRoute
 		}
-		if _, exists := seen[m.Routes[i].CredentialID]; exists {
+		routeKey := m.Routes[i].CredentialID + "\x00" + m.Routes[i].UpstreamModel
+		if _, exists := seen[routeKey]; exists {
 			return ErrCredentialRoute
 		}
-		seen[m.Routes[i].CredentialID] = struct{}{}
+		seen[routeKey] = struct{}{}
 	}
 	return s.repo.Upsert(ctx, m)
 }

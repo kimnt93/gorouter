@@ -47,9 +47,9 @@ func (r *ModelRouteRepo) Upsert(ctx context.Context, m entities.ModelDef) error 
 		if w <= 0 {
 			w = 1
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_routes (model,credential_id,priority,weight,enabled) VALUES ($1,$2,$3,$4,$5)
-			ON CONFLICT (model,credential_id) DO UPDATE SET priority=EXCLUDED.priority, weight=EXCLUDED.weight, enabled=EXCLUDED.enabled`,
-			m.Name, rt.CredentialID, rt.Priority, w, rt.Enabled); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO model_routes (model,credential_id,upstream_model,priority,weight,enabled) VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (model,credential_id,upstream_model) DO UPDATE SET upstream_model=EXCLUDED.upstream_model, priority=EXCLUDED.priority, weight=EXCLUDED.weight, enabled=EXCLUDED.enabled`,
+			m.Name, rt.CredentialID, rt.UpstreamModel, rt.Priority, w, rt.Enabled); err != nil {
 			return err
 		}
 	}
@@ -96,7 +96,7 @@ func (r *ModelRouteRepo) List(ctx context.Context) ([]entities.ModelDef, error) 
 	if err != nil {
 		return nil, err
 	}
-	routeRows, err := r.db.Pool.Query(ctx, `SELECT model,credential_id,priority,weight,enabled FROM model_routes ORDER BY priority DESC`)
+	routeRows, err := r.db.Pool.Query(ctx, `SELECT model,credential_id,upstream_model,priority,weight,enabled FROM model_routes ORDER BY priority DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (r *ModelRouteRepo) List(ctx context.Context) ([]entities.ModelDef, error) 
 	for routeRows.Next() {
 		var name string
 		var rt entities.ModelRoute
-		if err := routeRows.Scan(&name, &rt.CredentialID, &rt.Priority, &rt.Weight, &rt.Enabled); err != nil {
+		if err := routeRows.Scan(&name, &rt.CredentialID, &rt.UpstreamModel, &rt.Priority, &rt.Weight, &rt.Enabled); err != nil {
 			return nil, err
 		}
 		byModel[name] = append(byModel[name], rt)
