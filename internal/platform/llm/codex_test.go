@@ -94,6 +94,41 @@ func TestCodexAdapterStreamingAndModelDiscovery(t *testing.T) {
 	}
 }
 
+func TestCodexAdapterRefreshesAuthorizationHeaderAfter401(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			if r.Header.Get("Authorization") != "Bearer old-token" {
+				t.Fatalf("first authorization = %q", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer new-token" {
+			t.Fatalf("refreshed authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, codexTestEvents())
+	}))
+	defer server.Close()
+
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, BaseURL: server.URL, OAuthAccess: "old-token"}
+	body, _ := json.Marshal(ChatRequest{Model: "cx/gpt-5.5", Messages: []Message{{Role: "user", Content: json.RawMessage(`"hi"`)}}})
+	adapter := &CodexAdapter{HTTP: server.Client(), Refresh: func(_ context.Context, cr *entities.CredentialRuntime) error {
+		cr.OAuthAccess = "new-token"
+		return nil
+	}}
+	result, err := adapter.Send(context.Background(), runtime, "gpt-5.5", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Body.Close()
+	if calls != 2 {
+		t.Fatalf("request count = %d", calls)
+	}
+}
+
 func TestCodexModelDiscoveryNormalizesOpenAIStyleCatalog(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/codex/models" {

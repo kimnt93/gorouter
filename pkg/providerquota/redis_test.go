@@ -30,6 +30,12 @@ func TestRedisStateSharesSnapshotExhaustionAndActiveAccount(t *testing.T) {
 	if shared, err := b.ExhaustedUntil(ctx, "cred-a"); err != nil || !shared.Equal(until) {
 		t.Fatalf("shared exhaustion=%s err=%v", shared, err)
 	}
+	if err := b.ClearExhausted(ctx, "cred-a"); err != nil {
+		t.Fatal(err)
+	}
+	if shared, err := a.ExhaustedUntil(ctx, "cred-a"); err != nil || !shared.IsZero() {
+		t.Fatalf("cleared exhaustion=%s err=%v", shared, err)
+	}
 	if err := a.MarkActive(ctx, "codex", "cred-a"); err != nil {
 		t.Fatal(err)
 	}

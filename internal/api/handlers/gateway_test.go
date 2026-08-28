@@ -630,15 +630,30 @@ func (q *gatewayProviderQuota) MarkExhausted(id string) {
 func (q *gatewayProviderQuota) MarkInUse(string) {}
 
 func TestGatewayQuotaFillFirstAndExhaustionFailover(t *testing.T) {
-	app, upstream := testGatewayApp(map[string]int{"cred-a": http.StatusTooManyRequests, "cred-b": http.StatusOK})
-	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}}
+	app, upstream := testGatewayApp(map[string]int{
+		"cred-a": http.StatusTooManyRequests,
+		"cred-b": http.StatusTooManyRequests,
+		"cred-c": http.StatusTooManyRequests,
+		"cred-d": http.StatusTooManyRequests,
+		"cred-e": http.StatusOK,
+	})
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true, "cred-c": true, "cred-d": true, "cred-e": true}}
 
 	// Install the state on the gateway captured by a dedicated test route.
 	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
-	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 10}, {CredentialID: "cred-b", Priority: 5}}
+	routes := []entities.RouteCandidate{
+		{CredentialID: "cred-a", Priority: 10},
+		{CredentialID: "cred-b", Priority: 9},
+		{CredentialID: "cred-c", Priority: 8},
+		{CredentialID: "cred-d", Priority: 7},
+		{CredentialID: "cred-e", Priority: 6},
+	}
 	runtimes := map[string]*entities.CredentialRuntime{
 		"cred-a": {ID: "cred-a", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
 		"cred-b": {ID: "cred-b", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
+		"cred-c": {ID: "cred-c", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
+		"cred-d": {ID: "cred-d", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
+		"cred-e": {ID: "cred-e", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
 	}
 	gateway := &Gateway{
 		Keys:           apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
@@ -666,10 +681,10 @@ func TestGatewayQuotaFillFirstAndExhaustionFailover(t *testing.T) {
 			t.Fatalf("request %d status=%d", i, response.StatusCode)
 		}
 	}
-	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-b,cred-b"; got != want {
+	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-b,cred-c,cred-d,cred-e,cred-e"; got != want {
 		t.Fatalf("calls=%s want=%s", got, want)
 	}
-	if len(quotaState.marked) != 1 || quotaState.marked[0] != "cred-a" {
+	if got, want := strings.Join(quotaState.marked, ","), "cred-a,cred-b,cred-c,cred-d"; got != want {
 		t.Fatalf("marked=%v", quotaState.marked)
 	}
 }

@@ -51,6 +51,7 @@ type StateCache interface {
 	PutSnapshot(ctx context.Context, snapshot Snapshot) error
 	ExhaustedUntil(ctx context.Context, credentialID string) (time.Time, error)
 	MarkExhausted(ctx context.Context, credentialID string, until time.Time) error
+	ClearExhausted(ctx context.Context, credentialID string) error
 	ActiveCredential(ctx context.Context, provider string) (string, error)
 	MarkActive(ctx context.Context, provider, credentialID string) error
 }
@@ -334,6 +335,11 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 	}
 	s.mu.Unlock()
 	if s.state != nil {
+		if usableRefresh && snapshot.Available {
+			if clearErr := s.state.ClearExhausted(ctx, id); clearErr != nil {
+				return Snapshot{}, fmt.Errorf("clear quota exhaustion: %w", clearErr)
+			}
+		}
 		if stateErr := s.state.PutSnapshot(ctx, snapshot); stateErr != nil {
 			return Snapshot{}, fmt.Errorf("cache quota snapshot: %w", stateErr)
 		}

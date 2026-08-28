@@ -57,6 +57,10 @@ func (r *RedisState) MarkExhausted(ctx context.Context, id string, until time.Ti
 	return r.client.Set(ctx, quotaStatePrefix+"exhausted:"+id, strconv.FormatInt(until.Unix(), 10), ttl).Err()
 }
 
+func (r *RedisState) ClearExhausted(ctx context.Context, id string) error {
+	return r.client.Del(ctx, quotaStatePrefix+"exhausted:"+id).Err()
+}
+
 func (r *RedisState) ActiveCredential(ctx context.Context, provider string) (string, error) {
 	value, err := r.client.Get(ctx, quotaStatePrefix+"active:"+provider).Result()
 	if err == redis.Nil {

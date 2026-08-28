@@ -302,6 +302,10 @@ func (a *CodexAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime,
 		if err := a.Refresh(ctx, cr); err != nil {
 			return nil, fmt.Errorf("Codex OAuth refresh failed: %w", err)
 		}
+		headers = codexHeaders(cr)
+		if sessionID := ProviderPromptCacheKey(&request); sessionID != "" {
+			headers["session_id"] = sessionID
+		}
 		result, err = send()
 		if err != nil {
 			return nil, err
