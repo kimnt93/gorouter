@@ -1,6 +1,6 @@
 # GoRouter Installation
 
-This file is the installation contract for human operators and AI/harness
+This file is the installation contract for human operators and AI Agent
 installers. Read it before installing or upgrading GoRouter. The installation
 section in `README.md` is intentionally unchanged; use this file for the
 complete Docker procedure.
@@ -104,9 +104,9 @@ Use the equivalent ClickHouse file when that is the active backend. For a
 released image, set the image to the pinned release tag before running the
 same application-only update; never replace a release with an unpinned image.
 
-## Required AI/harness completion response
+## Required AI Agent completion response
 
-After a successful installation, the AI or harness must tell the user:
+After a successful installation, the AI Agent must tell the user:
 
 - the installed release tag or image;
 - the selected backend;
@@ -115,7 +115,7 @@ After a successful installation, the AI or harness must tell the user:
 - whether this was a new installation, an upgrade, or a next-port install;
 - that the master key was generated and stored in `.env` with mode `0600`.
 
-The AI/harness must also provide the master key to the user **only after
+The AI Agent must also provide the master key to the user **only after
 confirming that the response channel is private**. Reveal it once, never put
 it in logs, shell history, or a public deployment report, and advise the user
 to rotate it after disclosure. If privacy cannot be confirmed, do not echo the
