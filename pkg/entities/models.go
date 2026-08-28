@@ -177,6 +177,7 @@ type UsageEvent struct {
 	TenantID          string    `json:"tenant_id"`
 	ApiKeyID          string    `json:"api_key_id"`
 	CredentialID      string    `json:"credential_id"`
+	Provider          string    `json:"provider"`
 	Model             string    `json:"model"`
 	UpstreamModel     string    `json:"upstream_model"`
 	PromptTokens      int64     `json:"prompt_tokens"`
@@ -197,9 +198,6 @@ type UsageEvent struct {
 	UserID            string    `json:"user_id"`
 	Username          string    `json:"username"`
 	OrganizationID    string    `json:"organization_id"`
-	RequestBody       string    `json:"-"`
-	ResponseBody      string    `json:"-"`
-	ContentTruncated  bool      `json:"-"`
 }
 
 type RecentEvent struct {
@@ -208,6 +206,7 @@ type RecentEvent struct {
 	TenantID         string    `json:"tenant_id"`
 	KeyID            string    `json:"api_key_id"`
 	CredentialID     string    `json:"credential_id"`
+	Provider         string    `json:"provider"`
 	Model            string    `json:"model"`
 	UpstreamModel    string    `json:"upstream_model"`
 	PromptTokens     int64     `json:"prompt_tokens"`
@@ -226,11 +225,17 @@ type RecentEvent struct {
 	OrganizationID   string    `json:"organization_id"`
 }
 
-type UsageDetail struct {
-	RecentEvent
-	RequestBody      string `json:"request_body"`
-	ResponseBody     string `json:"response_body"`
-	ContentTruncated bool   `json:"content_truncated"`
+type UsageHealthMetric struct {
+	Dimension      string  `json:"dimension"`
+	ID             string  `json:"id"`
+	Requests       int64   `json:"requests"`
+	Successes      int64   `json:"successes"`
+	ClientErrors   int64   `json:"client_errors"`
+	ProviderErrors int64   `json:"provider_errors"`
+	SuccessRate    float64 `json:"success_rate"`
+	AverageMS      float64 `json:"average_ms"`
+	P95MS          float64 `json:"p95_ms"`
+	CacheReadRate  float64 `json:"cache_read_rate"`
 }
 
 type UsageSummary struct {

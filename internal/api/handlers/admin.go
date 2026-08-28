@@ -1151,47 +1151,6 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 		Send()
 }
 
-// UsageDetail returns one policy-constrained request, including its captured
-// conversation bodies. Secrets and credential material are never captured.
-// @Summary Get usage request detail
-// @Description Returns one visible usage event, including bounded captured conversation content when available.
-// @Tags usage
-// @Security BearerAuth
-// @Param id path string true "Usage event ID"
-// @Param organization_id query string false "Organization context"
-// @Param view_user_id query string false "Master-only user View As filter"
-// @Success 200 {object} entities.UsageDetail
-// @Failure 401,403,404,500 {object} responseapi.ErrorResponse
-// @Router /admin/usage/events/{id} [get]
-func (a *Admin) UsageDetail(c fiber.Ctx) error {
-	actor, readErr := a.principalForRead(c)
-	if readErr != nil {
-		return principalReadError(c, readErr)
-	}
-	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
-		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
-	}
-	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
-		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
-			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
-		}
-	}
-	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
-	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
-	if policyErr != nil {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
-	}
-	detail, err := a.UsageSvc.Detail(c.Context(), c.Params("id"), visibility)
-	if errors.Is(err, entities.ErrNotFound) {
-		return responseapi.For(c).NotFound("usage event not found").Send()
-	}
-	if err != nil {
-		return responseapi.For(c).InternalError("failed to load usage detail").Send()
-	}
-	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(detail).Send()
-}
-
 // UsageActivity returns policy-constrained time buckets for the analysis UI.
 // @Summary Get usage activity
 // @Description Returns time-bucketed usage activity and its aggregate summary for the analysis dashboard.
@@ -1274,7 +1233,11 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load usage breakdown").Send()
 	}
-	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(UsageActivityResponse{GroupBy: groupBy, Data: buckets, Summary: summary}).Send()
+	health, err := a.UsageSvc.Health(c.Context(), query)
+	if err != nil {
+		return responseapi.For(c).InternalError("failed to load provider health").Send()
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(UsageActivityResponse{GroupBy: groupBy, Data: buckets, Summary: summary, Health: health}).Send()
 }
 
 // CacheStats returns safe prompt-cache counters.

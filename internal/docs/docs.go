@@ -3048,73 +3048,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/usage/events/{id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Returns one visible usage event, including bounded captured conversation content when available.",
-                "tags": [
-                    "usage"
-                ],
-                "summary": "Get usage request detail",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Usage event ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Organization context",
-                        "name": "organization_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Master-only user View As filter",
-                        "name": "view_user_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageDetail"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/admin/usage/recent": {
             "get": {
                 "security": [
@@ -5020,6 +4953,9 @@ const docTemplate = `{
                 "prompt_tokens": {
                     "type": "integer"
                 },
+                "provider": {
+                    "type": "string"
+                },
                 "status_code": {
                     "type": "integer"
                 },
@@ -5084,80 +5020,38 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_kimnt93_gorouter_pkg_entities.UsageDetail": {
+        "github_com_kimnt93_gorouter_pkg_entities.UsageHealthMetric": {
             "type": "object",
             "properties": {
-                "actor_type": {
-                    "type": "string"
-                },
-                "api_key_id": {
-                    "type": "string"
-                },
-                "cache_hit": {
-                    "type": "boolean"
-                },
-                "cache_read_tokens": {
-                    "type": "integer"
-                },
-                "cache_write_tokens": {
-                    "type": "integer"
-                },
-                "completion_tokens": {
-                    "type": "integer"
-                },
-                "content_truncated": {
-                    "type": "boolean"
-                },
-                "cost_usd": {
+                "average_ms": {
                     "type": "number"
                 },
-                "credential_id": {
-                    "type": "string"
+                "cache_read_rate": {
+                    "type": "number"
                 },
-                "duration_ms": {
+                "client_errors": {
                     "type": "integer"
                 },
-                "error": {
+                "dimension": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
-                "model": {
-                    "type": "string"
+                "p95_ms": {
+                    "type": "number"
                 },
-                "organization_id": {
-                    "type": "string"
-                },
-                "priced": {
-                    "type": "boolean"
-                },
-                "prompt_tokens": {
+                "provider_errors": {
                     "type": "integer"
                 },
-                "request_body": {
-                    "type": "string"
-                },
-                "response_body": {
-                    "type": "string"
-                },
-                "status_code": {
+                "requests": {
                     "type": "integer"
                 },
-                "tenant_id": {
-                    "type": "string"
+                "success_rate": {
+                    "type": "number"
                 },
-                "ts": {
-                    "type": "string"
-                },
-                "upstream_model": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
+                "successes": {
+                    "type": "integer"
                 }
             }
         },
@@ -6534,6 +6428,12 @@ const docTemplate = `{
                 },
                 "group_by": {
                     "type": "string"
+                },
+                "health": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageHealthMetric"
+                    }
                 },
                 "summary": {
                     "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"

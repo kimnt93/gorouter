@@ -26,14 +26,14 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if ev.ActorType == "" {
 			ev.ActorType, ev.Username, ev.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, ev.TenantID
 		}
-		b.Queue(`INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,
+		b.Queue(`INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 			prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,
-			actor_type,user_id,username,organization_id,request_body,response_body,content_truncated)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
-			ev.ID, ev.TS, ev.TenantID, ev.ApiKeyID, ev.CredentialID, ev.Model, ev.UpstreamModel,
+			actor_type,user_id,username,organization_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+			ev.ID, ev.TS, ev.TenantID, ev.ApiKeyID, ev.CredentialID, ev.Provider, ev.Model, ev.UpstreamModel,
 			ev.PromptTokens, ev.CompletionTokens, ev.CacheReadTokens, ev.CacheWriteTokens,
 			ev.CostUSD, ev.InputCostUSD, ev.OutputCostUSD, ev.CacheReadCostUSD, ev.CacheWriteCostUSD, ev.Priced, ev.CacheHit, ev.StatusCode, ev.DurationMS, ev.Error,
-			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID, ev.RequestBody, ev.ResponseBody, ev.ContentTruncated)
+			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID)
 	}
 	return r.db.Pool.SendBatch(ctx, b).Close()
 }
@@ -91,7 +91,7 @@ func (r *UsageRepo) RecentForTenant(ctx context.Context, tenantID string, limit 
 		limit = 100
 	}
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,
+		SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,
 		       cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
 		       actor_type,user_id,username,organization_id
 		FROM usage_events WHERE tenant_id=$1 ORDER BY ts DESC,event_id DESC LIMIT $2`, tenantID, limit)
@@ -102,7 +102,7 @@ func (r *UsageRepo) RecentForTenant(ctx context.Context, tenantID string, limit 
 	var out []entities.RecentEvent
 	for rows.Next() {
 		var ev entities.RecentEvent
-		if err := rows.Scan(&ev.ID, &ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.UpstreamModel,
+		if err := rows.Scan(&ev.ID, &ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Provider, &ev.Model, &ev.UpstreamModel,
 			&ev.PromptTokens, &ev.CompletionTokens, &ev.CacheReadTokens, &ev.CacheWriteTokens,
 			&ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error,
 			&ev.ActorType, &ev.UserID, &ev.Username, &ev.OrganizationID); err != nil {
@@ -130,7 +130,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	if hasStatus {
 		status = *query.StatusCode
 	}
-	rows, err := r.db.Pool.Query(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,model,upstream_model,
+	rows, err := r.db.Pool.Query(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
 		actor_type,user_id,username,organization_id FROM usage_events WHERE
 		($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND
@@ -148,7 +148,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	page := &entities.UsagePage{Data: make([]entities.RecentEvent, 0, limit)}
 	for rows.Next() {
 		var event entities.RecentEvent
-		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Model, &event.UpstreamModel,
+		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
 			&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
 			&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID); err != nil {
 			return nil, err
@@ -164,28 +164,6 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 		page.Data = page.Data[:limit]
 	}
 	return page, nil
-}
-
-func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
-	master := visibility.PrincipalType == entities.PrincipalMaster
-	organizationWide := visibility.OrganizationWide && visibility.OrganizationID != ""
-	var event entities.UsageDetail
-	err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,model,upstream_model,
-		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-		actor_type,user_id,username,organization_id,request_body,response_body,content_truncated
-		FROM usage_events WHERE COALESCE(event_id,'legacy_' || seq::text)=$1 AND
-		($2 OR ($3 AND organization_id=$4) OR (NOT $3 AND user_id=$5))`, id, master, organizationWide, visibility.OrganizationID, visibility.UserID).Scan(
-		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Model, &event.UpstreamModel,
-		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID,
-		&event.RequestBody, &event.ResponseBody, &event.ContentTruncated)
-	if err == pgx.ErrNoRows {
-		return nil, entities.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &event, nil
 }
 
 func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
@@ -247,6 +225,38 @@ func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery
 		out = append(out, bucket)
 	}
 	return out, rows.Err()
+}
+
+func (r *UsageRepo) HealthUsage(ctx context.Context, query entities.UsageQuery) ([]entities.UsageHealthMetric, error) {
+	filter, args := postgresUsageFilter(query)
+	const selectMetrics = `count(*),count(*) FILTER (WHERE status_code>=200 AND status_code<400),count(*) FILTER (WHERE status_code>=400 AND status_code<500 AND status_code NOT IN (402,429)),count(*) FILTER (WHERE status_code>=500 OR status_code IN (402,429)),coalesce(avg(duration_ms),0),coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms),0),coalesce(sum(cache_read_tokens)::double precision/nullif(sum(prompt_tokens+cache_read_tokens),0),0)`
+	dimensions := []struct{ name, column, condition string }{
+		{"provider", "provider", "provider<>''"}, {"model", "model", "model<>''"}, {"credential", "credential_id", "credential_id<>''"},
+	}
+	out := make([]entities.UsageHealthMetric, 0)
+	for _, dimension := range dimensions {
+		rows, err := r.db.Pool.Query(ctx, `SELECT `+dimension.column+`,`+selectMetrics+` FROM usage_events WHERE `+filter+` AND `+dimension.condition+` GROUP BY `+dimension.column+` ORDER BY count(*) DESC LIMIT 200`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			metric := entities.UsageHealthMetric{Dimension: dimension.name}
+			if err := rows.Scan(&metric.ID, &metric.Requests, &metric.Successes, &metric.ClientErrors, &metric.ProviderErrors, &metric.AverageMS, &metric.P95MS, &metric.CacheReadRate); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if attempts := metric.Successes + metric.ProviderErrors; attempts > 0 {
+				metric.SuccessRate = float64(metric.Successes) / float64(attempts)
+			}
+			out = append(out, metric)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
 }
 
 func postgresUsageFilter(query entities.UsageQuery) (string, []any) {

@@ -20,6 +20,7 @@ type IdentityKeyRepository interface {
 
 type IdentityUsageRepository interface {
 	entities.PrincipalUsageRepository
+	entities.UsageHealthRepository
 	InsertBatch(context.Context, []entities.UsageEvent) error
 }
 
@@ -138,7 +139,7 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	events := []entities.UsageEvent{
-		{ID: entities.NewID("usage"), TS: now, ApiKeyID: personal.ID, Model: "personal", Priced: true, StatusCode: 200, ActorType: entities.ActorUser, UserID: user1.ID, Username: user1.Username},
+		{ID: entities.NewID("usage"), TS: now, ApiKeyID: personal.ID, CredentialID: "cred-openai", Provider: "openai", Model: "personal", Priced: true, StatusCode: 200, ActorType: entities.ActorUser, UserID: user1.ID, Username: user1.Username},
 		{ID: entities.NewID("usage"), TS: now, ApiKeyID: scoped.ID, TenantID: organization1.ID, Model: "scoped", Priced: true, StatusCode: 200, ActorType: entities.ActorUser, UserID: user1.ID, Username: user1.Username, OrganizationID: organization1.ID},
 		{ID: entities.NewID("usage"), TS: now, ApiKeyID: organizationKey.ID, TenantID: organization1.ID, Model: "shared", Priced: true, StatusCode: 200, ActorType: entities.ActorOrganization, Username: "org:" + organization1.Name, OrganizationID: organization1.ID},
 		{ID: entities.NewID("usage"), TS: now, Model: "master", Priced: true, StatusCode: 200, ActorType: entities.ActorMaster, Username: "master"},
@@ -154,6 +155,20 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 	if err != nil || len(organizationPage.Data) != 2 {
 		t.Fatalf("organization visibility=%+v err=%v", organizationPage, err)
 	}
+	health, err := backend.Usage.HealthUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundProvider := false
+	for _, metric := range health {
+		if metric.Dimension == "provider" && metric.ID == "openai" && metric.Requests >= 1 && metric.Successes == metric.Requests && metric.SuccessRate == 1 {
+			foundProvider = true
+		}
+	}
+	if !foundProvider {
+		t.Fatalf("provider health=%+v", health)
+	}
+
 	masterPage, err := backend.Usage.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, Limit: 2})
 	if err != nil || len(masterPage.Data) != 2 || masterPage.NextCursor == "" {
 		t.Fatalf("master first page=%+v err=%v", masterPage, err)

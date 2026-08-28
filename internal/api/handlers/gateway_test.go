@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -449,7 +450,7 @@ func TestGatewayRecordsPrincipalAttributionForSuccessCacheStreamAndError(t *test
 	}
 }
 
-func TestGatewayCapturesBoundedConversationAndMarksFreeCostPriced(t *testing.T) {
+func TestGatewayDoesNotCaptureConversationAndMarksFreeCostPriced(t *testing.T) {
 	repository := &captureUsageRepository{}
 	service := usage.NewService(repository, 16, nil)
 	gateway := &Gateway{Usage: service}
@@ -462,7 +463,7 @@ func TestGatewayCapturesBoundedConversationAndMarksFreeCostPriced(t *testing.T) 
 		t.Fatalf("events=%+v", repository.events)
 	}
 	event := repository.events[0]
-	if !event.Priced || event.CostUSD != 0 || event.RequestBody != string(request) || event.ResponseBody != string(response) || event.ContentTruncated {
+	if !event.Priced || event.CostUSD != 0 {
 		t.Fatalf("captured event=%+v", event)
 	}
 }
@@ -735,5 +736,25 @@ func TestReplayStreamHasRequiredHeadersUsageAndDone(t *testing.T) {
 	text := string(got)
 	if !strings.Contains(text, `"prompt_tokens":7`) || !strings.Contains(text, "data: [DONE]\n\n") {
 		t.Fatalf("invalid replay stream: %s", text)
+	}
+}
+
+func TestGatewayCacheAffinityPinsReusablePrefixWithoutExplicitSession(t *testing.T) {
+	app, upstream := testGatewayAppWithStrategy(map[string]int{"cred-a": http.StatusOK, "cred-b": http.StatusOK}, chat.StrategyCacheAffinity)
+	request := func(user string) {
+		body := fmt.Sprintf(`{"model":"model-a","messages":[{"role":"developer","content":"stable coding instructions"},{"role":"user","content":%q}],"temperature":0.7}`, user)
+		res, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d", res.StatusCode)
+		}
+	}
+	request("turn one")
+	request("turn two")
+	if len(upstream.calls) != 2 || upstream.calls[0] != upstream.calls[1] {
+		t.Fatalf("cache-affinity calls=%v", upstream.calls)
 	}
 }

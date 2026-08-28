@@ -129,6 +129,7 @@ type UsageActivityResponse struct {
 	GroupBy string                         `json:"group_by"`
 	Data    []entities.UsageActivityBucket `json:"data"`
 	Summary *entities.UsageSummary         `json:"summary"`
+	Health  []entities.UsageHealthMetric   `json:"health"`
 }
 type UserListResponse struct {
 	Object     string         `json:"object"`

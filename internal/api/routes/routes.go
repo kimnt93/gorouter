@@ -201,7 +201,6 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Delete("/prices/:model", handlers.Require(d.Auth, "models:manage"), admin.Price)
 	mgmt.Get("/usage/summary", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageSummary)
 	mgmt.Get("/usage/recent", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageRecent)
-	mgmt.Get("/usage/events/:id", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageDetail)
 	mgmt.Get("/usage/activity", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageActivity)
 	mgmt.Get("/cache/stats", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.CacheStats)
 	mgmt.Post("/cache/flush", handlers.Require(d.Auth, "cache:purge"), admin.CacheFlush)

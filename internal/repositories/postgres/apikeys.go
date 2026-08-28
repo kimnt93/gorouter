@@ -184,7 +184,7 @@ func (r *CredentialRepo) Update(ctx context.Context, box entities.SecretBox, id 
 }
 
 func (r *CredentialRepo) List(ctx context.Context) ([]entities.Credential, error) {
-	rows, err := r.db.Pool.Query(ctx, `SELECT `+credColumns+` FROM credentials ORDER BY created_at DESC`)
+	rows, err := r.db.Pool.Query(ctx, `SELECT id,name,provider,kind,base_url,key_preview,''::bytea,''::bytea,status,owner_tenant_id,coalesce(owner_user_id,''),created_at FROM credentials ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}

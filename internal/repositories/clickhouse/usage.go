@@ -2,9 +2,7 @@ package clickhouse
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 
@@ -25,7 +23,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 	if len(events) == 0 {
 		return nil
 	}
-	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,request_body,response_body,content_truncated)`)
+	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id)`)
 	if e != nil {
 		return e
 	}
@@ -41,7 +39,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if v.ActorType == "" {
 			v.ActorType, v.Username, v.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, v.TenantID
 		}
-		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.InputCostUSD, v.OutputCostUSD, v.CacheReadCostUSD, v.CacheWriteCostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID, v.RequestBody, v.ResponseBody, v.ContentTruncated); e != nil {
+		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Provider, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.InputCostUSD, v.OutputCostUSD, v.CacheReadCostUSD, v.CacheWriteCostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID); e != nil {
 			return e
 		}
 	}
@@ -110,7 +108,7 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	q := `SELECT event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id FROM usage_events`
+	q := `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id FROM usage_events`
 	args := []any{}
 	if tenant != "" {
 		q += ` WHERE tenant_id=?`
@@ -127,7 +125,7 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	for rows.Next() {
 		var v entities.RecentEvent
 		var statusCode int32
-		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &statusCode, &v.DurationMS, &v.Error, &v.ActorType, &v.UserID, &v.Username, &v.OrganizationID); e != nil {
+		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Provider, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &statusCode, &v.DurationMS, &v.Error, &v.ActorType, &v.UserID, &v.Username, &v.OrganizationID); e != nil {
 			return nil, e
 		}
 		v.StatusCode = int(statusCode)
@@ -167,7 +165,7 @@ func usageWhere(query entities.UsageQuery, includeCursor bool) ([]string, []any)
 	if includeCursor {
 		cursor := clickhouseAuditCursorDecode(query.Cursor)
 		if !cursor.TS.IsZero() {
-			clauses, args = append(clauses, "(ts,event_id)<(?,?)"), append(args, cursor.TS, cursor.ID)
+			clauses, args = append(clauses, "(ts<? OR (ts=? AND event_id<?))"), append(args, cursor.TS, cursor.TS, cursor.ID)
 		}
 	}
 	return clauses, args
@@ -177,7 +175,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	clauses, args := usageWhere(query, true)
 	limit := boundedConfigLimit(query.Limit)
 	args = append(args, limit+1)
-	rows, err := r.s.Conn.Query(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` ORDER BY ts DESC,event_id DESC LIMIT ?`, args...)
+	rows, err := r.s.Conn.Query(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` ORDER BY ts DESC,event_id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +184,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	for rows.Next() {
 		var event entities.RecentEvent
 		var status int32
-		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Model, &event.UpstreamModel, &event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced, &event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID); err != nil {
+		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel, &event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced, &event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID); err != nil {
 			return nil, err
 		}
 		event.StatusCode = int(status)
@@ -201,27 +199,6 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 		page.Data = page.Data[:limit]
 	}
 	return page, nil
-}
-
-func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
-	clauses, args := usageWhere(entities.UsageQuery{Visibility: visibility}, false)
-	clauses = append(clauses, "event_id=?")
-	args = append(args, id)
-	var event entities.UsageDetail
-	var status int32
-	err := r.s.Conn.QueryRow(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,request_body,response_body,content_truncated FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` LIMIT 1`, args...).Scan(
-		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Model, &event.UpstreamModel,
-		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-		&event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID,
-		&event.RequestBody, &event.ResponseBody, &event.ContentTruncated)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, entities.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	event.StatusCode = int(status)
-	return &event, nil
 }
 
 func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
@@ -269,6 +246,40 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 		summary.ByKey[name] = value
 	}
 	return summary, rows.Err()
+}
+
+func (r *UsageRepo) HealthUsage(ctx context.Context, query entities.UsageQuery) ([]entities.UsageHealthMetric, error) {
+	clauses, args := usageWhere(query, false)
+	where := strings.Join(clauses, " AND ")
+	dimensions := []struct{ name, column, condition string }{
+		{"provider", "provider", "provider!=''"}, {"model", "model", "model!=''"}, {"credential", "credential_id", "credential_id!=''"},
+	}
+	out := make([]entities.UsageHealthMetric, 0)
+	for _, dimension := range dimensions {
+		rows, err := r.s.Conn.Query(ctx, `SELECT `+dimension.column+`,count(),countIf(status_code>=200 AND status_code<400),countIf(status_code>=400 AND status_code<500 AND status_code NOT IN (402,429)),countIf(status_code>=500 OR status_code IN (402,429)),avg(duration_ms),quantile(0.95)(duration_ms),if(sum(prompt_tokens+cache_read_tokens)>0,sum(cache_read_tokens)/sum(prompt_tokens+cache_read_tokens),0) FROM usage_events WHERE `+where+` AND `+dimension.condition+` GROUP BY `+dimension.column+` ORDER BY count() DESC LIMIT 200`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			metric := entities.UsageHealthMetric{Dimension: dimension.name}
+			var requests, successes, clientErrors, providerErrors uint64
+			if err := rows.Scan(&metric.ID, &requests, &successes, &clientErrors, &providerErrors, &metric.AverageMS, &metric.P95MS, &metric.CacheReadRate); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			metric.Requests, metric.Successes, metric.ClientErrors, metric.ProviderErrors = int64(requests), int64(successes), int64(clientErrors), int64(providerErrors)
+			if attempts := metric.Successes + metric.ProviderErrors; attempts > 0 {
+				metric.SuccessRate = float64(metric.Successes) / float64(attempts)
+			}
+			out = append(out, metric)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
 }
 
 func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {

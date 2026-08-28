@@ -151,11 +151,14 @@ type UsagePage struct {
 type PrincipalUsageRepository interface {
 	QueryUsage(ctx context.Context, query UsageQuery) (*UsagePage, error)
 	SummaryUsage(ctx context.Context, query UsageQuery) (*UsageSummary, error)
-	UsageDetail(ctx context.Context, id string, visibility UsageVisibility) (*UsageDetail, error)
 }
 
 type UsageActivityRepository interface {
 	ActivityUsage(ctx context.Context, query UsageQuery, groupBy string) ([]UsageActivityBucket, error)
+}
+
+type UsageHealthRepository interface {
+	HealthUsage(ctx context.Context, query UsageQuery) ([]UsageHealthMetric, error)
 }
 
 type AuditQuery struct {

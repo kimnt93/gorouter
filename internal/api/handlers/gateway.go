@@ -249,6 +249,12 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			}
 		}
 	}
+	if strategy == chat.StrategyCacheAffinity && affinityValue == "" {
+		// This opt-in mode intentionally maps a reusable system/developer/tool
+		// prefix to one eligible credential. Scope, tenant, and model remain part
+		// of the rendezvous seed so private cache locality cannot cross boundaries.
+		affinityValue = llm.StablePromptCacheKey(req)
+	}
 	routeAffinity := chat.RouteAffinity{ScopeID: key.ID, TenantID: key.TenantID, Model: model.Name, Value: affinityValue}
 	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
 	if len(candidates) == 0 {
@@ -308,6 +314,11 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 		routedModel := *model
 		routedModel.UpstreamModel = upstreamModel
+		routedModel.Metadata = cloneModelMetadata(model.Metadata)
+		if routedModel.Metadata == nil {
+			routedModel.Metadata = &entities.ModelMetadata{}
+		}
+		routedModel.Metadata.Provider = runtime.Provider
 		if req.Stream {
 			streamOwnsReservation = true
 			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
@@ -339,6 +350,17 @@ func (g *Gateway) adapter(provider string) (entities.Upstream, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func cloneModelMetadata(metadata *entities.ModelMetadata) *entities.ModelMetadata {
+	if metadata == nil {
+		return nil
+	}
+	clone := *metadata
+	clone.InputModalities = append([]string(nil), metadata.InputModalities...)
+	clone.OutputModalities = append([]string(nil), metadata.OutputModalities...)
+	clone.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...)
+	return &clone
 }
 
 func retryableStatus(status int) bool {
@@ -789,8 +811,8 @@ func (g *Gateway) recordCost(key *GatewayAccessContext, model *entities.ModelDef
 	g.recordCostConversation(key, model, cred, u, hit, status, started, cost, nil, nil)
 }
 
-func (g *Gateway) recordCostConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, requestBody, responseBody []byte) {
-	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, "", requestBody, responseBody)
+func (g *Gateway) recordCostConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, _, _ []byte) {
+	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, "")
 }
 
 func (g *Gateway) recordError(key *GatewayAccessContext, model *entities.ModelDef, cred string, status int, started time.Time, summary string) {
@@ -798,19 +820,10 @@ func (g *Gateway) recordError(key *GatewayAccessContext, model *entities.ModelDe
 }
 
 func (g *Gateway) recordCostError(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
-	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, summary, nil, nil)
+	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, summary)
 }
 
-const maxStoredConversationBytes = 8 << 20
-
-func storedConversationBody(body []byte) (string, bool) {
-	if len(body) <= maxStoredConversationBytes {
-		return string(body), false
-	}
-	return string(body[:maxStoredConversationBytes]), true
-}
-
-func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string, requestBody, responseBody []byte) {
+func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
 	if g.Usage == nil {
 		return
 	}
@@ -818,9 +831,11 @@ func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *
 	if key.StoredKey != nil {
 		apiKeyID = key.StoredKey.ID
 	}
-	requestText, requestTruncated := storedConversationBody(requestBody)
-	responseText, responseTruncated := storedConversationBody(responseBody)
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, RequestBody: requestText, ResponseBody: responseText, ContentTruncated: requestTruncated || responseTruncated})
+	providerID := ""
+	if model.Metadata != nil {
+		providerID = model.Metadata.Provider
+	}
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

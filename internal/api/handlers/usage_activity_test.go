@@ -98,8 +98,8 @@ func (*activityRepository) QueryUsage(context.Context, entities.UsageQuery) (*en
 func (*activityRepository) SummaryUsage(context.Context, entities.UsageQuery) (*entities.UsageSummary, error) {
 	return &entities.UsageSummary{ByModel: map[string]entities.ModelU{}}, nil
 }
-func (*activityRepository) UsageDetail(context.Context, string, entities.UsageVisibility) (*entities.UsageDetail, error) {
-	return nil, entities.ErrNotFound
+func (*activityRepository) HealthUsage(context.Context, entities.UsageQuery) ([]entities.UsageHealthMetric, error) {
+	return []entities.UsageHealthMetric{{Dimension: "provider", ID: "openai", Requests: 2, Successes: 2, SuccessRate: 1}}, nil
 }
 
 func TestUsageActivityParsesFiltersAndReturnsTypedBuckets(t *testing.T) {
@@ -124,7 +124,7 @@ func TestUsageActivityParsesFiltersAndReturnsTypedBuckets(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.GroupBy != "week" || len(body.Data) != 1 || body.Data[0].CacheWriteTokens != 12 {
+	if body.GroupBy != "week" || len(body.Data) != 1 || body.Data[0].CacheWriteTokens != 12 || len(body.Health) != 1 || body.Health[0].ID != "openai" {
 		t.Fatalf("response=%+v", body)
 	}
 	if repository.groupBy != "week" || repository.query.UserID != "user_1" || repository.query.APIKeyID != "key_1" || repository.query.Since == nil {
