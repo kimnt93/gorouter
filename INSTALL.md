@@ -53,7 +53,8 @@ Choose exactly one backend. PostgreSQL is the default recommendation.
 3. Check the requested host port before starting. `8090` is the default. If it
    is already used by anything other than this GoRouter installation, choose
    the next free port (`8091`, then `8092`, and so on), set `ROUTER_PORT` in
-   `.env`, and continue. Do not stop the service using the original port.
+   `.env` for PostgreSQL or `CLICKHOUSE_ROUTER_PORT` for ClickHouse, and
+   continue. Do not stop the service using the original port.
 
 4. Start the PostgreSQL stack:
 
@@ -71,9 +72,14 @@ Choose exactly one backend. PostgreSQL is the default recommendation.
 
    ```bash
    curl -fsS http://127.0.0.1:${ROUTER_PORT:-8090}/healthz
+
+   # For ClickHouse use CLICKHOUSE_ROUTER_PORT (default 18091).
+   curl -fsS http://127.0.0.1:${CLICKHOUSE_ROUTER_PORT:-18091}/healthz
    ```
 
-The dashboard is available at `http://localhost:${ROUTER_PORT:-8090}/`.
+The dashboard is available at `http://localhost:${ROUTER_PORT:-8090}/` for
+PostgreSQL or `http://localhost:${CLICKHOUSE_ROUTER_PORT:-18091}/` for
+ClickHouse.
 
 ## Duplicate services and upgrades
 
@@ -103,6 +109,32 @@ docker compose --env-file .env -f docker-compose.postgres.yml up -d --build goro
 Use the equivalent ClickHouse file when that is the active backend. For a
 released image, set the image to the pinned release tag before running the
 same application-only update; never replace a release with an unpinned image.
+
+## Provider quota and retry behavior
+
+For Codex CLI-compatible OAuth connections, GoRouter uses the account binding
+from the OAuth token and sends requests through the Codex-compatible backend
+API. A provider `429` or `402` is treated as a provider-account limit, not as
+the GoRouter API-key quota. GoRouter does not move to another account on the
+first transient failure: it retries the current account using the configured
+`ROUTE_RETRIES` value (default `2`, in addition to the first attempt), with a
+bounded backoff and any short `Retry-After` hint. Only after those attempts
+fail does it mark that account exhausted and move to the next eligible account.
+
+Accounts are tried in the selected routing order. With quota-aware provider
+accounts, priority order is preserved so one account is used until it succeeds
+or is exhausted before the next account is selected. The request returns a
+provider error only after all eligible accounts have failed or are currently
+known to be out of quota. A previously recorded exhausted account is skipped
+until its provider quota reset; refresh quota data or wait for the reset before
+trying it again. Set `ROUTE_RETRIES=0` to disable same-account retries.
+
+A `429` from the provider can still be expected when there is only one account
+and that account has no remaining quota: retries cannot create quota. Check the
+account's provider quota/reset time and connect another account if failover is
+required. Do not use a Codex CLI token from a different account or omit the
+account binding when diagnosing routing; the account identity is part of the
+OAuth connection.
 
 ## Required AI Agent completion response
 

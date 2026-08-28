@@ -279,6 +279,7 @@ func main() {
 		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerUpstreams,
 		Selector: selector, Health: health, Quota: quotaSvc,
 		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
+		RouteRetries: cfg.RouteRetries,
 	}
 	app := routes.New(routes.Dependencies{
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,

@@ -30,6 +30,7 @@ type Config struct {
 	SessionSecret                string
 	RequestLimit                 int64
 	RequestTimeout               time.Duration
+	RouteRetries                 int
 	Cache                        CacheConfig
 	Quota                        QuotaConfig
 	Pricing                      PricingConfig
@@ -79,6 +80,7 @@ func Load() (*Config, error) {
 		MasterKey:                    os.Getenv("MASTER_KEY"),
 		RequestLimit:                 20 << 20,
 		RequestTimeout:               5 * time.Minute,
+		RouteRetries:                 2,
 		OAuthClientID:                env("ANTHROPIC_OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
 		OAuthTokenURL:                os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL"),
 		CodexOAuthClientID:           env("CODEX_OAUTH_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
@@ -210,6 +212,13 @@ func Load() (*Config, error) {
 			return nil, errors.New("REQUEST_TIMEOUT must be a positive duration")
 		}
 		cfg.RequestTimeout = d
+	}
+	if v := os.Getenv("ROUTE_RETRIES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, errors.New("ROUTE_RETRIES must be a non-negative integer")
+		}
+		cfg.RouteRetries = n
 	}
 	if v := os.Getenv("CACHE_MAX_ENTRY_BYTES"); v != "" {
 		n, err := strconv.Atoi(v)

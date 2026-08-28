@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +42,11 @@ type Gateway struct {
 	Quota          quota.Coordinator
 	Pricing        PriceResolver
 	ProviderQuotas ProviderQuotaRouter
+	// RouteRetries bounds how many times a single account is retried for a
+	// retryable failure before routing moves to the next account. The production
+	// composition root supplies the configured value; zero means no retry for
+	// lightweight/unit gateway constructions.
+	RouteRetries int
 }
 
 type ProviderQuotaRouter interface {
@@ -263,6 +270,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	lastStatus := fiber.StatusBadGateway
 	lastCredential := ""
+	// Attempt every eligible account fully before moving on: an account is only
+	// abandoned after its own bounded retries are exhausted. A single account
+	// runs to completion (success or true exhaustion) before the next one is
+	// tried, and the request only fails once every account is exhausted.
 	for _, candidate := range candidates {
 		credentialID := credentialIDs[candidate.ID]
 		lastCredential = credentialID
@@ -279,30 +290,73 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if upstreamModel == "" {
 			upstreamModel = model.Name
 		}
-		result, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
-		if rerr != nil {
-			g.Health.Report(credentialID, false)
-			continue
+		var (
+			result       *entities.UpstreamResult
+			transportErr bool
+			exhausted    bool
+		)
+		attempts := g.routeAttempts()
+		for attempt := 0; attempt < attempts; attempt++ {
+			sent, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
+			if rerr != nil {
+				result, transportErr = nil, true
+				if attempt < attempts-1 && !sleepCtx(c.Context(), retryBackoff(attempt+1)) {
+					break
+				}
+				continue
+			}
+			transportErr = false
+			if sent.StatusCode == fiber.StatusTooManyRequests || sent.StatusCode == fiber.StatusPaymentRequired {
+				lastStatus = sent.StatusCode
+				wait := retryAfter(sent.Header)
+				drainAndClose(sent.Body)
+				result = nil
+				exhausted = true
+				// Retry this account before moving on. A provider reset hint is
+				// preferred when it is short; otherwise use the bounded local
+				// backoff. Even without a hint, do not immediately abandon an
+				// account: a 429 can be a transient burst limit rather than quota
+				// exhaustion. Mark it exhausted only after all attempts fail.
+				if attempt < attempts-1 {
+					delay := retryBackoff(attempt + 1)
+					if wait > 0 && wait <= maxRetryAfter {
+						delay = wait
+					}
+					if !sleepCtx(c.Context(), delay) {
+						break
+					}
+					continue
+				}
+				break
+			}
+			if (sent.StatusCode < 200 || sent.StatusCode >= 300) && !retryableStatus(sent.StatusCode) {
+				status := sent.StatusCode
+				drainAndClose(sent.Body)
+				g.recordError(key, model, runtime.ID, status, started, "upstream rejected request")
+				c.Set("X-Cache", "bypass")
+				return responseapi.For(c).Error(status, "upstream rejected the request", "upstream_error", "upstream_rejected").Send()
+			}
+			if sent.StatusCode < 200 || sent.StatusCode >= 300 {
+				lastStatus = sent.StatusCode
+				drainAndClose(sent.Body)
+				result = nil
+				if attempt < attempts-1 && !sleepCtx(c.Context(), retryBackoff(attempt+1)) {
+					break
+				}
+				continue
+			}
+			result = sent
+			break
 		}
-		if result.StatusCode == fiber.StatusTooManyRequests || result.StatusCode == fiber.StatusPaymentRequired {
-			lastStatus = result.StatusCode
-			drainAndClose(result.Body)
-			if g.ProviderQuotas != nil {
+		if result == nil {
+			// This account is exhausted for now; mark quota exhaustion so other
+			// replicas skip it, then move on to the next account.
+			if exhausted && g.ProviderQuotas != nil {
 				g.ProviderQuotas.MarkExhausted(credentialID)
 			}
-			continue
-		}
-		if (result.StatusCode < 200 || result.StatusCode >= 300) && !retryableStatus(result.StatusCode) {
-			status := result.StatusCode
-			drainAndClose(result.Body)
-			g.recordError(key, model, runtime.ID, status, started, "upstream rejected request")
-			c.Set("X-Cache", "bypass")
-			return responseapi.For(c).Error(status, "upstream rejected the request", "upstream_error", "upstream_rejected").Send()
-		}
-		if result.StatusCode < 200 || result.StatusCode >= 300 {
-			lastStatus = result.StatusCode
-			drainAndClose(result.Body)
-			g.Health.Report(credentialID, false)
+			if !exhausted || transportErr {
+				g.Health.Report(credentialID, false)
+			}
 			continue
 		}
 		g.Health.Report(credentialID, true)
@@ -361,6 +415,77 @@ func cloneModelMetadata(metadata *entities.ModelMetadata) *entities.ModelMetadat
 	clone.OutputModalities = append([]string(nil), metadata.OutputModalities...)
 	clone.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...)
 	return &clone
+}
+
+const (
+	maxRetryAfter   = 5 * time.Second
+	maxRetryBackoff = 2 * time.Second
+)
+
+func (g *Gateway) routeAttempts() int {
+	if g.RouteRetries < 0 {
+		return 1
+	}
+	return g.RouteRetries + 1
+}
+
+// retryBackoff grows with each same-account retry but stays short so a
+// momentary provider limit does not stall the request.
+func retryBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		return 0
+	}
+	backoff := time.Duration(attempt) * 200 * time.Millisecond
+	if backoff > maxRetryBackoff {
+		return maxRetryBackoff
+	}
+	return backoff
+}
+
+// retryAfter reads a Retry-After header as seconds or an HTTP date. A
+// non-positive result means the provider gave no usable hint.
+func retryAfter(header map[string][]string) time.Duration {
+	if header == nil {
+		return 0
+	}
+	var value string
+	for k, v := range header {
+		if strings.EqualFold(k, "Retry-After") && len(v) > 0 {
+			value = strings.TrimSpace(v[0])
+			break
+		}
+	}
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if delta := time.Until(when); delta > 0 {
+			return delta
+		}
+	}
+	return 0
+}
+
+// sleepCtx waits for d or until the request context is cancelled, returning
+// false when the caller should stop retrying.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func retryableStatus(status int) bool {

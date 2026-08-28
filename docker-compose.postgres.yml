@@ -17,6 +17,7 @@ services:
       REDIS_USER: "${REDIS_USER:-gorouter}"
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       APP_ENV: "production"
+      ROUTE_RETRIES: "${ROUTE_RETRIES:-2}"
       API_TOKEN_CACHE_TTL: "${API_TOKEN_CACHE_TTL:-10m}"
       WEEK_START: "${WEEK_START:-sunday}"
       USAGE_WRITE_CONCURRENCY: "${USAGE_WRITE_CONCURRENCY:-4}"
