@@ -16,8 +16,8 @@ export function AnalysisPage() {
     <RangeSelector {...filterState} onChange={filterState.setFilters} />
     {activity.loading ? <PageLoading /> : activity.error ? <PageError message={activity.error} retry={activity.retry} /> : <>
       <section className="stat-grid"><StatCard label="Requests" value={formatInteger(total.requests)} detail="completed gateway requests" accent="purple" /><StatCard label="Tokens" value={formatInteger(total.tokens)} detail="input + output + provider cache" accent="blue" /><StatCard label="Cache reads" value={formatInteger(total.cache)} detail="tokens reported by providers" accent="green" /><StatCard label="Estimated cost" value={formatUSD(total.cost)} detail="priced request total" accent="amber" /></section>
-      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Throughput · input, output, cache read, and cache write</span><h2>Tokens by {filterState.filters.groupBy}</h2></div></div><VerticalUsageChart data={activity.data} metric="tokens" groupBy={filterState.filters.groupBy} range={filterState.filters} /></section>
-      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Estimated spend</span><h2>Cost by {filterState.filters.groupBy}</h2></div></div><VerticalUsageChart data={activity.data} metric="cost" groupBy={filterState.filters.groupBy} range={filterState.filters} /></section>
+      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Throughput · input, output, cache read, and cache write</span><h2>Token trend</h2></div></div><VerticalUsageChart data={activity.data} metric="tokens" groupBy={filterState.filters.groupBy} range={filterState.filters} /></section>
+      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Estimated spend</span><h2>Cost trend</h2></div></div><VerticalUsageChart data={activity.data} metric="cost" groupBy={filterState.filters.groupBy} range={filterState.filters} /></section>
       <ModelBreakdown summary={activity.summary?.by_model ?? {}} />
       <HealthTable health={activity.health} />
     </>}

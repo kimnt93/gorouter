@@ -86,15 +86,6 @@ export function getRecent(filters: UsageFilters, cursor = ''): Promise<UsageRece
   if (filters.model) params.set('model', filters.model)
   if (filters.status) params.set('status', filters.status)
   if (cursor) params.set('cursor', cursor)
-  const now = new Date()
-  const durations: Partial<Record<UsageFilters['range'], number>> = { '1d': 1, '7d': 7, '30d': 30, '90d': 90 }
-  const days = durations[filters.range]
-  if (days) params.set('since', new Date(now.getTime() - days * 86_400_000).toISOString())
-  if (filters.range === 'ytd') params.set('since', new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString())
-  if (filters.range === 'custom') {
-    if (filters.since) params.set('since', new Date(filters.since).toISOString())
-    if (filters.until) params.set('until', new Date(filters.until).toISOString())
-  }
   return request(`/admin/usage/recent?${params}`)
 }
 

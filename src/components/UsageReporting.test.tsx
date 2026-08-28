@@ -72,12 +72,12 @@ test('supports a filter dimension and multiple values without a manual resolutio
 
 test('selects usage resolution from preset and custom ranges', () => {
   const filters: UsageFilters = { range: '7d', groupBy: 'hour', filterType: 'user', userIds: [], apiKeyIds: [], organizationIds: [], since: '2026-08-01T00:00', until: '2026-08-08T00:00' }
-  const expected = { '1d': 'hour', '7d': 'day', '30d': 'day', '90d': 'day', ytd: 'week', all: 'week' } as const
+  const expected = { '1d': 'hour', '7d': 'hour', '30d': 'day', '90d': 'day', ytd: 'day', all: 'week' } as const
   for (const [range, groupBy] of Object.entries(expected)) expect(groupByForUsageRange({ ...filters, range: range as UsageFilters['range'] })).toBe(groupBy)
   expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-08-03T00:00' })).toBe('hour')
-  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-08-08T00:00' })).toBe('day')
+  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-08-08T00:00' })).toBe('hour')
   expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-30T00:00' })).toBe('day')
-  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-31T00:01' })).toBe('week')
+  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-31T00:01' })).toBe('day')
 })
 
 test('fills unused hourly buckets through the current bucket in every usage chart', () => {
@@ -119,4 +119,28 @@ test('shows the complete preset timeline even when no buckets have usage', () =>
   expect(columns).toHaveLength(25)
   expect(columns[0].querySelector('time')).toHaveAttribute('datetime', '2026-08-27T14:00:00.000Z')
   expect(columns[24].querySelector('time')).toHaveAttribute('datetime', '2026-08-28T14:00:00.000Z')
+})
+
+test.each([
+  ['7d', 'hour', 30],
+  ['30d', 'day', 30],
+  ['90d', 'day', 30],
+  ['ytd', 'day', 30],
+] as const)('keeps the %s trend readable with at most 30 aggregated bars', (range, groupBy, expected) => {
+  const now = new Date('2026-08-28T14:30:00Z')
+  const row: UsageActivityBucket = { start: '2026-08-28T14:00:00Z', requests: 2, prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 4, cache_write_tokens: 1, cost_usd: .1, input_cost_usd: .1, output_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'a', username: 'Alice' }
+  const { container } = render(<VerticalUsageChart data={[row]} metric="tokens" groupBy={groupBy} range={{ range, since: '', until: '' }} now={now} />)
+  const columns = chartColumns(container, 'tokens activity trend')
+  expect(columns).toHaveLength(expected)
+  fireEvent.pointerEnter(columns[columns.length - 1], { clientX: 400, clientY: 500 })
+  expect(within(container).getByRole('tooltip')).toHaveTextContent('Total17')
+})
+
+test('can hide the date range while preserving shared identity filters', () => {
+  const filters: UsageFilters = { range: '7d', groupBy: 'hour', filterType: 'user', userIds: [], apiKeyIds: [], organizationIds: [], since: '', until: '' }
+  const { container } = render(<RangeSelector filters={filters} onChange={vi.fn()} users={[]} apiKeys={[]} showRange={false} />)
+  const filter = within(container)
+  expect(filter.queryByLabelText('Date range')).not.toBeInTheDocument()
+  expect(filter.getByText('Filter by')).toBeInTheDocument()
+  expect(filter.getByText('All users')).toBeInTheDocument()
 })
