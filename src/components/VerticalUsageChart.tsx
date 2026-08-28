@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FocusEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import type { GroupBy, UsageActivityBucket } from '../api/contracts'
+import type { GroupBy, UsageActivityBucket, UsageFilters } from '../api/contracts'
 import { formatDateBucket, formatInteger, formatUSD } from '../lib/format'
 import { TruncatedText } from './SearchableSelect'
 
@@ -7,8 +7,70 @@ type Metric = 'requests' | 'tokens' | 'cost'
 
 interface Segment { key: string; label: string; value: number; color: string }
 interface Bucket { start: string; segments: Segment[]; total: number }
+type ChartRange = Pick<UsageFilters, 'range' | 'since' | 'until'>
 
 const colors = ['#a99af4', '#78aaf7', '#62c996', '#e2ad61', '#e47c9f', '#69c6cf', '#c9a4ff', '#8fc16a']
+
+const bucketMilliseconds: Record<GroupBy, number> = {
+  hour: 3_600_000,
+  day: 86_400_000,
+  week: 7 * 86_400_000,
+}
+
+function bucketStart(value: Date, groupBy: GroupBy): Date {
+  const date = new Date(value)
+  if (groupBy === 'hour') date.setUTCMinutes(0, 0, 0)
+  if (groupBy === 'day') date.setUTCHours(0, 0, 0, 0)
+  if (groupBy === 'week') {
+    date.setUTCHours(0, 0, 0, 0)
+    date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+  }
+  return date
+}
+
+function rangeBounds(data: Array<{ start: string }>, groupBy: GroupBy, range: ChartRange | undefined, now: Date): [number, number] | null {
+  const dataTimes = data.map((item) => Date.parse(item.start)).filter(Number.isFinite)
+  const latest = bucketStart(now, groupBy).getTime()
+  if (!range) {
+    if (dataTimes.length === 0) return null
+    return [bucketStart(new Date(Math.min(...dataTimes)), groupBy).getTime(), bucketStart(new Date(Math.max(...dataTimes)), groupBy).getTime()]
+  }
+
+  let start: Date | undefined
+  let end = now
+  switch (range.range) {
+    case '1d': start = new Date(now.getTime() - 86_400_000); break
+    case '7d': start = new Date(now.getTime() - 7 * 86_400_000); break
+    case '30d': start = new Date(now.getTime() - 30 * 86_400_000); break
+    case '90d': start = new Date(now.getTime() - 90 * 86_400_000); break
+    case 'ytd': start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)); break
+    case 'custom': {
+      const since = new Date(range.since)
+      const until = new Date(range.until)
+      if (!Number.isNaN(since.getTime())) start = since
+      if (!Number.isNaN(until.getTime()) && until < end) end = until
+      break
+    }
+    case 'all':
+      if (dataTimes.length > 0) start = new Date(Math.min(...dataTimes))
+      break
+  }
+  if (!start) return null
+  const first = bucketStart(start, groupBy).getTime()
+  const last = Math.min(bucketStart(end, groupBy).getTime(), latest)
+  return first <= last ? [first, last] : null
+}
+
+function completeBuckets<T extends { start: string }>(data: T[], groupBy: GroupBy, range: ChartRange | undefined, now: Date, empty: (start: string) => T): T[] {
+  const bounds = rangeBounds(data, groupBy, range, now)
+  if (!bounds) return data
+  const byStart = new Map(data.map((item) => [bucketStart(new Date(item.start), groupBy).getTime(), item]))
+  const result: T[] = []
+  for (let time = bounds[0]; time <= bounds[1]; time += bucketMilliseconds[groupBy]) {
+    result.push(byStart.get(time) ?? empty(new Date(time).toISOString()))
+  }
+  return result
+}
 
 interface TooltipState<T> { item: T; x: number; y: number }
 
@@ -107,8 +169,9 @@ function aggregateCache(data: UsageActivityBucket[]): CacheBucket[] {
   })
 }
 
-export function CacheEfficiencyChart({ data, groupBy }: { data: UsageActivityBucket[]; groupBy: GroupBy }) {
-  const buckets = useMemo(() => aggregateCache(data), [data])
+export function CacheEfficiencyChart({ data, groupBy, range, now }: { data: UsageActivityBucket[]; groupBy: GroupBy; range?: ChartRange; now?: Date }) {
+  const current = useMemo(() => now ?? new Date(), [now])
+  const buckets = useMemo(() => completeBuckets(aggregateCache(data), groupBy, range, current, (start) => ({ start, input: 0, output: 0, read: 0, write: 0, context: 0, usage: 0, rate: 0 })), [data, groupBy, range, current])
   const maxUsage = Math.max(1, ...buckets.map((bucket) => bucket.usage))
   const hover = useChartTooltip<CacheBucket>()
   if (buckets.length === 0) return <div className="empty-state"><strong>No cache activity in this range</strong><span>Try a wider range or clear the selected identity values.</span></div>
@@ -134,8 +197,14 @@ export function CacheEfficiencyChart({ data, groupBy }: { data: UsageActivityBuc
   </div>
 }
 
-export function VerticalUsageChart({ data, metric, groupBy }: { data: UsageActivityBucket[]; metric: Metric; groupBy: GroupBy }) {
-  const buckets = useMemo(() => aggregate(data, metric), [data, metric])
+export function VerticalUsageChart({ data, metric, groupBy, range, now }: { data: UsageActivityBucket[]; metric: Metric; groupBy: GroupBy; range?: ChartRange; now?: Date }) {
+  const current = useMemo(() => now ?? new Date(), [now])
+  const buckets = useMemo(() => completeBuckets(aggregate(data, metric), groupBy, range, current, (start) => ({ start, segments: metric === 'requests' ? [] : [
+    { key: 'input', label: 'Input', value: 0, color: colors[0] },
+    { key: 'output', label: 'Output', value: 0, color: colors[1] },
+    { key: 'cache-read', label: 'Cache read', value: 0, color: colors[2] },
+    { key: 'cache-write', label: 'Cache write', value: 0, color: colors[3] },
+  ], total: 0 })), [data, metric, groupBy, range, current])
   const max = Math.max(1, ...buckets.map((bucket) => bucket.total))
   const hover = useChartTooltip<Bucket>()
   const legend = useMemo(() => {

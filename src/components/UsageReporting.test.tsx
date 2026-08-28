@@ -79,3 +79,44 @@ test('selects usage resolution from preset and custom ranges', () => {
   expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-30T00:00' })).toBe('day')
   expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-31T00:01' })).toBe('week')
 })
+
+test('fills unused hourly buckets through the current bucket in every usage chart', () => {
+  const rows: UsageActivityBucket[] = [
+    { start: '2026-08-28T08:00:00Z', requests: 1, prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: .1, input_cost_usd: .1, output_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'a', username: 'Alice' },
+    { start: '2026-08-28T10:00:00Z', requests: 1, prompt_tokens: 20, completion_tokens: 3, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: .2, input_cost_usd: .2, output_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'a', username: 'Alice' },
+  ]
+  const range = { range: 'custom' as const, since: '2026-08-28T08:00:00Z', until: '2026-08-28T14:00:00Z' }
+  const now = new Date('2026-08-28T14:00:00Z')
+  const { container, rerender } = render(<VerticalUsageChart data={rows} metric="tokens" groupBy="hour" range={range} now={now} />)
+
+  let columns = chartColumns(container, 'tokens activity trend')
+  expect(columns).toHaveLength(7)
+  expect([...columns].map((column) => new Date(column.querySelector('time')?.dateTime ?? '').toISOString())).toEqual([
+    '2026-08-28T08:00:00.000Z', '2026-08-28T09:00:00.000Z', '2026-08-28T10:00:00.000Z', '2026-08-28T11:00:00.000Z',
+    '2026-08-28T12:00:00.000Z', '2026-08-28T13:00:00.000Z', '2026-08-28T14:00:00.000Z',
+  ])
+  fireEvent.pointerEnter(columns[1], { clientX: 300, clientY: 600 })
+  expect(within(container).getByRole('tooltip')).toHaveTextContent('Total0')
+
+  rerender(<CacheEfficiencyChart data={rows} groupBy="hour" range={range} now={now} />)
+  columns = chartColumns(container, 'cache read share by time bucket')
+  expect(columns).toHaveLength(7)
+  expect(columns[6].querySelector('time')).toHaveAttribute('datetime', '2026-08-28T14:00:00.000Z')
+})
+
+test.each([
+  ['day', '2026-08-25T00:00:00Z', '2026-08-28T14:00:00Z', 4],
+  ['week', '2026-08-03T00:00:00Z', '2026-08-28T14:00:00Z', 4],
+] as const)('fills unused %s buckets across the selected range', (groupBy, since, until, expected) => {
+  const row: UsageActivityBucket = { start: since, requests: 1, prompt_tokens: 10, completion_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: .1, input_cost_usd: .1, output_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, user_id: 'a', username: 'Alice' }
+  const { container } = render(<VerticalUsageChart data={[row]} metric="tokens" groupBy={groupBy} range={{ range: 'custom', since, until }} now={new Date(until)} />)
+  expect(chartColumns(container, 'tokens activity trend')).toHaveLength(expected)
+})
+
+test('shows the complete preset timeline even when no buckets have usage', () => {
+  const { container } = render(<VerticalUsageChart data={[]} metric="cost" groupBy="hour" range={{ range: '1d', since: '', until: '' }} now={new Date('2026-08-28T14:30:00Z')} />)
+  const columns = chartColumns(container, 'cost activity trend')
+  expect(columns).toHaveLength(25)
+  expect(columns[0].querySelector('time')).toHaveAttribute('datetime', '2026-08-27T14:00:00.000Z')
+  expect(columns[24].querySelector('time')).toHaveAttribute('datetime', '2026-08-28T14:00:00.000Z')
+})
