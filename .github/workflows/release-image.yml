@@ -66,11 +66,7 @@ jobs:
 
       - name: Make GHCR package public
         env:
-          GH_TOKEN: ${{ secrets.GHCR_PUBLIC_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PACKAGE_NAME: ${{ github.event.repository.name }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "GHCR_PUBLIC_TOKEN is required to set package visibility to public" >&2
-            exit 1
-          fi
           gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public
