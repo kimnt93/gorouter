@@ -120,14 +120,14 @@ func TestOpenAIAdapterInjectsStablePromptCacheKeyOnlyForOpenAI(t *testing.T) {
 	defer server.Close()
 	adapter := &OpenAIAdapter{HTTP: server.Client()}
 	raw := []byte(`{"model":"public","messages":[{"role":"developer","content":"stable instructions"},{"role":"user","content":"question"}]}`)
-	for _, provider := range []string{"openai", entities.ProviderOpenAICompatible} {
+	for _, provider := range []string{"openai", "opencode-go", entities.ProviderOpenAICompatible} {
 		result, err := adapter.Send(context.Background(), &entities.CredentialRuntime{Kind: entities.KindAPIKey, Provider: provider, BaseURL: server.URL, APIKey: "secret"}, "upstream", raw)
 		if err != nil {
 			t.Fatal(err)
 		}
 		result.Body.Close()
 	}
-	if len(keys) != 2 || keys[0] == "" || keys[1] != "" {
+	if len(keys) != 3 || keys[0] == "" || keys[1] == "" || keys[2] != "" {
 		t.Fatalf("prompt cache keys = %#v", keys)
 	}
 }

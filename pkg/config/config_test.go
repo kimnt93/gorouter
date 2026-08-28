@@ -93,7 +93,7 @@ func TestModelCatalogDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.ModelCatalog.Enabled || cfg.ModelCatalog.SyncInterval != 5*time.Minute || cfg.ModelCatalog.CacheTTL != 5*time.Minute {
+	if !cfg.ModelCatalog.Enabled || cfg.ModelCatalog.SyncInterval != 15*time.Minute || cfg.ModelCatalog.CacheTTL != time.Hour {
 		t.Fatalf("model catalog defaults=%+v", cfg.ModelCatalog)
 	}
 	t.Setenv("MODEL_CATALOG_SYNC_INTERVAL", "2m")

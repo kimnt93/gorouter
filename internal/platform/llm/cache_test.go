@@ -58,3 +58,52 @@ func TestExplicitRouteAffinityUsesOnlyCallerSessionIdentity(t *testing.T) {
 		t.Fatalf("bounded affinity=%q", got)
 	}
 }
+
+func TestProviderPromptCacheKeyPrefersConversationIdentity(t *testing.T) {
+	request := &ChatRequest{
+		ConversationID: "conversation-123",
+		Messages: []Message{
+			{Role: "developer", Content: json.RawMessage(`"stable instructions"`)},
+			{Role: "user", Content: json.RawMessage(`"question"`)},
+		},
+	}
+	if got := ProviderPromptCacheKey(request); got != "conversation-123" {
+		t.Fatalf("provider cache key=%q", got)
+	}
+	request.ConversationID = ""
+	if got := ProviderPromptCacheKey(request); !strings.HasPrefix(got, "gorouter-") {
+		t.Fatalf("fallback provider cache key=%q", got)
+	}
+}
+
+func TestStableConversationIDFollowsExplicitSessionAndPrefix(t *testing.T) {
+	base := &ChatRequest{SessionID: "session-a", Messages: []Message{{Role: "user", Content: json.RawMessage(`"one"`)}}}
+	changedTurn := &ChatRequest{SessionID: "session-a", Messages: []Message{{Role: "user", Content: json.RawMessage(`"two"`)}}}
+	otherSession := &ChatRequest{SessionID: "session-b", Messages: changedTurn.Messages}
+	first := StableConversationID(base)
+	if first == "" || first != StableConversationID(changedTurn) || first == StableConversationID(otherSession) {
+		t.Fatalf("conversation IDs first=%q changed=%q other=%q", first, StableConversationID(changedTurn), StableConversationID(otherSession))
+	}
+	if len(first) != 36 || first[14] != '5' {
+		t.Fatalf("conversation ID is not UUIDv5-shaped: %q", first)
+	}
+
+	prefixOne := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable"`)}, {Role: "user", Content: json.RawMessage(`"one"`)}}}
+	prefixTwo := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable"`)}, {Role: "user", Content: json.RawMessage(`"two"`)}}}
+	if got := StableConversationID(prefixOne); got == "" || got != StableConversationID(prefixTwo) {
+		t.Fatalf("prefix conversation IDs %q %q", got, StableConversationID(prefixTwo))
+	}
+}
+
+func TestOpenAIPromptCacheKeyCapabilityIsProviderSpecific(t *testing.T) {
+	for _, providerID := range []string{"openai", "codex", "opencode-zen", "opencode-go", "grok-build"} {
+		if !SupportsOpenAIPromptCacheKey(providerID) {
+			t.Errorf("%s should support prompt_cache_key", providerID)
+		}
+	}
+	for _, providerID := range []string{"groq", "gemini", "openrouter", "xai", "openai-compatible"} {
+		if SupportsOpenAIPromptCacheKey(providerID) {
+			t.Errorf("%s must remain conservative", providerID)
+		}
+	}
+}

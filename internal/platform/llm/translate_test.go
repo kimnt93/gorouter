@@ -19,7 +19,7 @@ func TestToAnthropicUsesTypedPayload(t *testing.T) {
 	if got.Model != "public" || len(got.System) != 1 || got.System[0].Text != "be concise" || len(got.Messages) != 1 || len(got.Tools) != 1 {
 		t.Fatalf("translation incomplete: %+v", got)
 	}
-	if got.System[0].CacheControl == nil || got.Messages[0].Content[0].CacheControl == nil || got.Tools[0].CacheControl == nil {
+	if got.System[0].CacheControl == nil || got.Messages[0].Content[0].CacheControl != nil || got.Tools[0].CacheControl == nil {
 		t.Fatalf("prompt cache breakpoints missing: %+v", got)
 	}
 	if !json.Valid(got.Tools[0].InputSchema) {
@@ -57,5 +57,31 @@ func TestAnthropicStreamConverterCollectsEstimatedUsage(t *testing.T) {
 	}
 	if converter.ContentCollected() != "hello world" || converter.FinishReason() != "stop" {
 		t.Fatalf("stream metadata wrong: content=%q finish=%q", converter.ContentCollected(), converter.FinishReason())
+	}
+}
+
+func TestAnthropicAutomaticHistoryBreakpointStaysStableAcrossTurns(t *testing.T) {
+	build := func(extra bool) *AnthropicRequest {
+		messages := []Message{
+			{Role: "system", Content: json.RawMessage(`"stable system"`)},
+			{Role: "user", Content: json.RawMessage(`"turn one"`)},
+			{Role: "assistant", Content: json.RawMessage(`"answer one"`)},
+			{Role: "user", Content: json.RawMessage(`"turn two"`)},
+		}
+		if extra {
+			messages = append(messages, Message{Role: "assistant", Content: json.RawMessage(`"answer two"`)}, Message{Role: "user", Content: json.RawMessage(`"turn three"`)})
+		}
+		return ToAnthropic(&ChatRequest{Messages: messages})
+	}
+	first := build(false)
+	second := build(true)
+	if first.Messages[1].Content[0].CacheControl == nil {
+		t.Fatalf("first history boundary missing: %+v", first.Messages)
+	}
+	if second.Messages[1].Content[0].CacheControl == nil || second.Messages[3].Content[0].CacheControl == nil {
+		t.Fatalf("stable/new boundaries missing: %+v", second.Messages)
+	}
+	if first.Messages[len(first.Messages)-1].Content[0].CacheControl != nil || second.Messages[len(second.Messages)-1].Content[0].CacheControl != nil {
+		t.Fatal("current user turn received a moving cache breakpoint")
 	}
 }

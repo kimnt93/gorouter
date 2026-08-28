@@ -152,10 +152,18 @@ func applyAnthropicPromptCache(body *AnthropicRequest) {
 	if len(body.Tools) > 0 {
 		add(&body.Tools[len(body.Tools)-1].CacheControl)
 	}
-	if len(body.Messages) > 0 && len(body.Messages[len(body.Messages)-1].Content) > 0 {
-		last := &body.Messages[len(body.Messages)-1].Content
-		add(&(*last)[len(*last)-1].CacheControl)
+	// Add boundaries to completed assistant history in chronological order.
+	// Existing boundaries therefore remain at the same bytes as conversations
+	// grow; the current user turn is never marked. Capacity left after stable
+	// system and tool prefixes determines how many history checkpoints exist.
+	for i := range body.Messages {
+		if body.Messages[i].Role != "assistant" || len(body.Messages[i].Content) == 0 {
+			continue
+		}
+		content := &body.Messages[i].Content
+		add(&(*content)[len(*content)-1].CacheControl)
 	}
+
 }
 
 func maxTokensOf(req *ChatRequest) int64 {

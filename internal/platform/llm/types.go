@@ -70,6 +70,18 @@ type CacheControl struct {
 	TTL  string `json:"ttl,omitempty"`
 }
 
+// SupportsOpenAIPromptCacheKey is deliberately allowlisted. Generic OpenAI
+// compatibility does not imply support for prompt_cache_key, and several
+// providers reject unknown request fields.
+func SupportsOpenAIPromptCacheKey(providerID string) bool {
+	switch strings.ToLower(strings.TrimSpace(providerID)) {
+	case "openai", "codex", "opencode-zen", "opencode-go", "grok-build":
+		return true
+	default:
+		return false
+	}
+}
+
 func StablePromptCacheKey(req *ChatRequest) string {
 	if req == nil {
 		return ""
@@ -93,6 +105,32 @@ func StablePromptCacheKey(req *ChatRequest) string {
 	}
 	sum := sha256.Sum256([]byte(prefix.String()))
 	return fmt.Sprintf("gorouter-%x", sum[:16])
+}
+
+// ProviderPromptCacheKey prefers the caller's per-conversation identity and
+// falls back to a stable reusable-prefix key. Provider adapters use this for
+// upstream cache partitioning; routing affinity remains explicit-only so a
+// common system prompt cannot collapse independent conversations onto one
+// credential.
+func ProviderPromptCacheKey(req *ChatRequest) string {
+	if value := req.ExplicitRouteAffinity(); value != "" {
+		return value
+	}
+	return StablePromptCacheKey(req)
+}
+
+// StableConversationID returns a UUID-shaped, non-reversible conversation ID
+// for providers whose prompt cache is partitioned by a conversation field.
+func StableConversationID(req *ChatRequest) string {
+	key := ProviderPromptCacheKey(req)
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	value := sum[:16]
+	value[6] = (value[6] & 0x0f) | 0x50
+	value[8] = (value[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16])
 }
 
 // ExplicitRouteAffinity returns only caller-supplied conversation identity.

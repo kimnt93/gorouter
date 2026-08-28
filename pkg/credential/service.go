@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/provider"
 )
@@ -105,6 +107,7 @@ type Service struct {
 	discoveryCache     ModelDiscoveryCache
 	discoveryTTL       time.Duration
 	credentialsChanged func()
+	discoveryGroup     singleflight.Group
 }
 
 func NewService(repo Repository, box entities.SecretBox) *Service {
@@ -262,12 +265,24 @@ func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer Mode
 			return cached, nil
 		}
 	}
-	models, err := discoverer.DiscoverModels(ctx, runtime)
+	result, err, _ := s.discoveryGroup.Do(id, func() (any, error) {
+		if s.discoveryCache != nil && s.discoveryTTL > 0 {
+			if cached, ok, cacheErr := s.discoveryCache.Get(ctx, id); cacheErr == nil && ok {
+				return cached, nil
+			}
+		}
+		models, discoverErr := discoverer.DiscoverModels(ctx, runtime)
+		if discoverErr != nil {
+			return nil, discoverErr
+		}
+		if s.discoveryCache != nil && s.discoveryTTL > 0 {
+			_ = s.discoveryCache.Set(ctx, id, models, s.discoveryTTL)
+		}
+		return models, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if s.discoveryCache != nil && s.discoveryTTL > 0 {
-		_ = s.discoveryCache.Set(ctx, id, models, s.discoveryTTL)
-	}
-	return models, nil
+	models, _ := result.([]ProviderModel)
+	return append([]ProviderModel(nil), models...), nil
 }

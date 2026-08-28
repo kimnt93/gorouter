@@ -231,6 +231,13 @@ func TestToCodexRequestUsesBackendSafeDefaults(t *testing.T) {
 	}
 }
 
+func TestToCodexRequestPrefersExplicitConversationCacheKey(t *testing.T) {
+	request := &ChatRequest{ConversationID: "conversation-123", Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable"`)}, {Role: "user", Content: json.RawMessage(`"turn"`)}}}
+	if got := toCodexRequest(request, "gpt-5.5").PromptCacheKey; got != "conversation-123" {
+		t.Fatalf("prompt cache key=%q", got)
+	}
+}
+
 func TestToCodexRequestUsesStablePromptCacheKey(t *testing.T) {
 	first := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable coding instructions"`)}, {Role: "user", Content: json.RawMessage(`"first"`)}}}
 	second := &ChatRequest{Messages: []Message{{Role: "developer", Content: json.RawMessage(`"stable coding instructions"`)}, {Role: "user", Content: json.RawMessage(`"second"`)}}}
@@ -284,4 +291,28 @@ func TestCodexToolCallNonStreamingCompletedSnapshotFallback(t *testing.T) {
 	if call.ID != "call-fallback" || call.Function.Name != "shell" || call.Function.Arguments != `{"cmd":"pwd"}` {
 		t.Fatalf("tool call = %+v", call)
 	}
+}
+
+func TestCodexSendUsesConversationIdentityForBodyAndSessionHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("session_id"); got != "conversation-123" {
+			t.Fatalf("session_id=%q", got)
+		}
+		var request codexRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.PromptCacheKey != "conversation-123" {
+			t.Fatalf("prompt_cache_key=%q", request.PromptCacheKey)
+		}
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"response-1\",\"usage\":{}}}\n\n")
+	}))
+	defer server.Close()
+
+	adapter := &CodexAdapter{HTTP: server.Client()}
+	result, err := adapter.Send(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL, OAuthAccess: "synthetic"}, "gpt-5.5", []byte(`{"model":"public","conversation_id":"conversation-123","messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Body.Close()
 }

@@ -17,6 +17,9 @@ import (
 
 type CatalogDiscoverer func(providerID string) credential.ModelDiscoverer
 type OrganizationNameResolver func(ctx context.Context, id string) (string, error)
+type RefreshLocker interface {
+	WithLock(ctx context.Context, key string, fn func() error) (bool, error)
+}
 
 type catalogCredential struct {
 	definition entities.Credential
@@ -33,6 +36,7 @@ type CatalogSync struct {
 	Models           *Service
 	Discoverer       CatalogDiscoverer
 	OrganizationName OrganizationNameResolver
+	Locker           RefreshLocker
 
 	mu   sync.Mutex
 	wake chan struct{}
@@ -54,7 +58,14 @@ func (s *CatalogSync) Refresh(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.Locker != nil {
+		_, err := s.Locker.WithLock(ctx, "model-catalog", func() error { return s.refreshLocked(ctx) })
+		return err
+	}
+	return s.refreshLocked(ctx)
+}
 
+func (s *CatalogSync) refreshLocked(ctx context.Context) error {
 	connections, err := s.Credentials.List(ctx)
 	if err != nil {
 		return err

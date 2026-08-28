@@ -72,7 +72,7 @@ type OpenAIAdapter struct {
 // Send forwards an OpenAI Chat Completions body to the upstream, rewriting the
 // model name and forcing usage reporting on streams.
 func (a *OpenAIAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, upstreamModel string, rawBody []byte) (*entities.UpstreamResult, error) {
-	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel, cr.Provider == "openai")
+	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel, SupportsOpenAIPromptCacheKey(cr.Provider))
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func prepareOpenAIRequest(rawBody []byte, upstreamModel string, injectPromptCach
 	fields["model"] = model
 	if injectPromptCacheKey {
 		if _, exists := fields["prompt_cache_key"]; !exists {
-			if key := StablePromptCacheKey(&request); key != "" {
+			if key := ProviderPromptCacheKey(&request); key != "" {
 				fields["prompt_cache_key"], _ = json.Marshal(key)
 			}
 		}

@@ -227,3 +227,27 @@ func TestCatalogSyncRejectsEmptyResponse(t *testing.T) {
 	default:
 	}
 }
+
+type skipPricingLocker struct{ calls int }
+
+func (l *skipPricingLocker) WithLock(context.Context, string, func() error) (bool, error) {
+	l.calls++
+	return false, nil
+}
+
+func TestCatalogSyncSkipsWhenAnotherReplicaOwnsPricingRefresh(t *testing.T) {
+	repo := &catalogRepo{}
+	imports := 0
+	service := NewCatalogService(repo, catalogImporterFunc(func(context.Context) ([]entities.CatalogPrice, error) {
+		imports++
+		return []entities.CatalogPrice{{Model: "model"}}, nil
+	}), "source", nil)
+	locker := &skipPricingLocker{}
+	service.SetRefreshLocker(locker)
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if locker.calls != 1 || imports != 0 || len(repo.catalog) != 0 {
+		t.Fatalf("locker=%d imports=%d prices=%+v", locker.calls, imports, repo.catalog)
+	}
+}

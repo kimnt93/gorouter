@@ -12,6 +12,10 @@ type Repository interface {
 	SetPrice(ctx context.Context, model string, price entities.Price) error
 }
 
+type RefreshLocker interface {
+	WithLock(ctx context.Context, key string, fn func() error) (bool, error)
+}
+
 type CatalogRepository interface {
 	ReplaceCatalogPrices(ctx context.Context, source string, prices []entities.CatalogPrice) error
 }
@@ -32,6 +36,7 @@ type CatalogService struct {
 	importer entities.CatalogImporter
 	source   string
 	resolver *Resolver
+	locker   RefreshLocker
 }
 
 func NewService(repo Repository, importer Importer) *Service {
@@ -42,10 +47,20 @@ func NewCatalogService(repo CatalogRepository, importer entities.CatalogImporter
 	return &CatalogService{repo: repo, importer: importer, source: source, resolver: resolver}
 }
 
+func (s *CatalogService) SetRefreshLocker(locker RefreshLocker) { s.locker = locker }
+
 func (s *CatalogService) Sync(ctx context.Context) error {
 	if s.repo == nil || s.importer == nil {
 		return errors.New("catalog price sync is not configured")
 	}
+	if s.locker != nil {
+		_, err := s.locker.WithLock(ctx, "pricing-"+s.source, func() error { return s.syncLocked(ctx) })
+		return err
+	}
+	return s.syncLocked(ctx)
+}
+
+func (s *CatalogService) syncLocked(ctx context.Context) error {
 	prices, err := s.importer.ImportCatalog(ctx)
 	if err != nil {
 		return err

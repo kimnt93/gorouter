@@ -67,6 +67,27 @@ func TestKiroRequestPreservesHistoryToolsAndRequestScopedReasoning(t *testing.T)
 	}
 }
 
+func TestKiroRequestKeepsConversationIDStableAcrossTurns(t *testing.T) {
+	build := func(content string) string {
+		body, err := kiroRequest(ChatRequest{SessionID: "session-a", Messages: []Message{{Role: "user", Content: json.RawMessage(`"` + content + `"`)}}}, "model", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var request struct {
+			ConversationState struct {
+				ConversationID string `json:"conversationId"`
+			} `json:"conversationState"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Fatal(err)
+		}
+		return request.ConversationState.ConversationID
+	}
+	if first, second := build("one"), build("two"); first == "" || first != second {
+		t.Fatalf("conversation IDs %q %q", first, second)
+	}
+}
+
 func TestKiroRuntimeRegionUsesProfileARNAndRejectsOIDCOnlyRegion(t *testing.T) {
 	if got := kiroRuntimeRegion("arn:aws:codewhisperer:eu-central-1:123:profile/test", "eu-north-1"); got != "eu-central-1" {
 		t.Fatalf("profile region = %q", got)

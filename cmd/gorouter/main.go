@@ -29,6 +29,7 @@ import (
 	"github.com/kimnt93/gorouter/internal/platform/modeldiscovery"
 	platformpricing "github.com/kimnt93/gorouter/internal/platform/pricing"
 	"github.com/kimnt93/gorouter/internal/platform/promptcache"
+	"github.com/kimnt93/gorouter/internal/platform/refreshlock"
 	clickhouserepo "github.com/kimnt93/gorouter/internal/repositories/clickhouse"
 	"github.com/kimnt93/gorouter/internal/repositories/postgres"
 	"github.com/kimnt93/gorouter/pkg/apikey"
@@ -122,14 +123,6 @@ func main() {
 		log.Printf("load cached model prices: %v", err)
 	}
 	modelSvc.SetPriceCache(priceResolver)
-	if cfg.Pricing.Enabled {
-		priceImporter := &platformpricing.HTTPImporter{
-			Client: &http.Client{Timeout: cfg.Pricing.HTTPTimeout},
-			URL:    cfg.Pricing.CatalogURL, Source: platformpricing.SourceOpenRouter,
-		}
-		priceSync := pricing.NewCatalogService(modelRepo, priceImporter, platformpricing.SourceOpenRouter, priceResolver)
-		priceSync.Start(ctx, cfg.Pricing.SyncInterval, func(err error) { log.Printf("sync OpenRouter catalog: %v", err) })
-	}
 	pending := usage.NewPending()
 	usageSvc := usage.NewServiceWithConcurrency(usageRepo, cfg.UsageWriteQueueSize, cfg.UsageWriteConcurrency, pending)
 	defer usageSvc.Close()
@@ -162,6 +155,24 @@ func main() {
 		if err := priceResolver.EnableRedisInvalidation(ctx, redisClient); err != nil {
 			log.Fatal(err)
 		}
+	}
+	var distributedRefreshLock *refreshlock.Redis
+	if redisClient != nil {
+		distributedRefreshLock, err = refreshlock.NewRedis(redisClient, 10*time.Minute)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	if cfg.Pricing.Enabled {
+		priceImporter := &platformpricing.HTTPImporter{
+			Client: &http.Client{Timeout: cfg.Pricing.HTTPTimeout},
+			URL:    cfg.Pricing.CatalogURL, Source: platformpricing.SourceOpenRouter,
+		}
+		priceSync := pricing.NewCatalogService(modelRepo, priceImporter, platformpricing.SourceOpenRouter, priceResolver)
+		if distributedRefreshLock != nil {
+			priceSync.SetRefreshLocker(distributedRefreshLock)
+		}
+		priceSync.Start(ctx, cfg.Pricing.SyncInterval, func(err error) { log.Printf("sync OpenRouter catalog: %v", err) })
 	}
 	if clickhouseStore != nil {
 		if redisClient != nil {
@@ -221,7 +232,7 @@ func main() {
 		if redisClient != nil {
 			credSvc.SetModelDiscoveryCache(modeldiscovery.NewRedis(redisClient), cfg.ModelCatalog.CacheTTL)
 		}
-		catalogSync := &modelroute.CatalogSync{Credentials: credSvc, Models: modelSvc, Discoverer: func(providerID string) credential.ModelDiscoverer {
+		catalogSync := &modelroute.CatalogSync{Credentials: credSvc, Models: modelSvc, Locker: distributedRefreshLock, Discoverer: func(providerID string) credential.ModelDiscoverer {
 			return credential.ResolveModelDiscoverer(providerID, providerProbes, openai, anthropic, codex)
 		}, OrganizationName: func(ctx context.Context, id string) (string, error) {
 			organization, err := identityRepo.OrganizationByID(ctx, id)

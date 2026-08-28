@@ -3,6 +3,7 @@ package credential
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,7 +37,8 @@ type connectivityProbeStub struct {
 
 type modelDiscovererProbeStub struct {
 	model string
-	calls *int
+	calls *atomic.Int64
+	delay time.Duration
 }
 
 func (p modelDiscovererProbeStub) Probe(context.Context, *entities.CredentialRuntime) (int, error) {
@@ -45,7 +47,10 @@ func (p modelDiscovererProbeStub) Probe(context.Context, *entities.CredentialRun
 
 func (p modelDiscovererProbeStub) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]ProviderModel, error) {
 	if p.calls != nil {
-		*p.calls++
+		p.calls.Add(1)
+	}
+	if p.delay > 0 {
+		time.Sleep(p.delay)
 	}
 	return []ProviderModel{{ID: p.model}}, nil
 }
@@ -145,7 +150,7 @@ func TestDiscoverModelsUsesCacheAndMutationInvalidatesIt(t *testing.T) {
 	cache := &discoveryCacheStub{}
 	service := NewService(credentialRepoStub{runtime: &entities.CredentialRuntime{ID: "cred"}}, nil)
 	service.SetModelDiscoveryCache(cache, time.Minute)
-	calls := 0
+	var calls atomic.Int64
 	discoverer := modelDiscovererProbeStub{model: "fresh", calls: &calls}
 
 	for range 2 {
@@ -154,8 +159,8 @@ func TestDiscoverModelsUsesCacheAndMutationInvalidatesIt(t *testing.T) {
 			t.Fatalf("models=%+v err=%v", models, err)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("provider discovery calls=%d", calls)
+	if calls.Load() != 1 {
+		t.Fatalf("provider discovery calls=%d", calls.Load())
 	}
 	notified := 0
 	service.SetCredentialsChanged(func() { notified++ })
@@ -168,7 +173,31 @@ func TestDiscoverModelsUsesCacheAndMutationInvalidatesIt(t *testing.T) {
 	if _, err := service.DiscoverModels(context.Background(), "cred", discoverer); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("provider discovery after invalidation calls=%d", calls)
+	if calls.Load() != 2 {
+		t.Fatalf("provider discovery after invalidation calls=%d", calls.Load())
+	}
+}
+
+func TestDiscoverModelsCoalescesConcurrentCacheMisses(t *testing.T) {
+	var calls atomic.Int64
+	service := NewService(credentialRepoStub{runtime: &entities.CredentialRuntime{ID: "cred"}}, nil)
+	discoverer := modelDiscovererProbeStub{model: "model", calls: &calls, delay: 10 * time.Millisecond}
+	start := make(chan struct{})
+	errors := make(chan error, 16)
+	for range 16 {
+		go func() {
+			<-start
+			_, err := service.DiscoverModels(context.Background(), "cred", discoverer)
+			errors <- err
+		}()
+	}
+	close(start)
+	for range 16 {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("discovery calls=%d want 1", calls.Load())
 	}
 }

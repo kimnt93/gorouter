@@ -42,6 +42,9 @@ func (a *OpenCodeZenAdapter) Send(ctx context.Context, cr *entities.CredentialRu
 		return nil, fmt.Errorf("parse OpenCode Zen request: %w", err)
 	}
 	payload := toCodexRequest(&input, model)
+	if payload.PromptCacheKey == "" {
+		payload.PromptCacheKey = StableConversationID(&input)
+	}
 	payload.Stream = true // collectors convert the Responses stream for either client mode
 	encoded, err := json.Marshal(payload)
 	if err != nil {

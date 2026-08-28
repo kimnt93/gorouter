@@ -101,7 +101,7 @@ func Load() (*Config, error) {
 		WeekStart:             time.Sunday,
 		UsageWriteConcurrency: 4,
 		UsageWriteQueueSize:   100000,
-		ModelCatalog:          ModelCatalogConfig{Enabled: true, SyncInterval: 5 * time.Minute, CacheTTL: 5 * time.Minute},
+		ModelCatalog:          ModelCatalogConfig{Enabled: true, SyncInterval: 15 * time.Minute, CacheTTL: time.Hour},
 		Pricing: PricingConfig{
 			Enabled:      true,
 			CatalogURL:   "https://openrouter.ai/api/frontend/v1/catalog/models",

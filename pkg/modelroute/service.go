@@ -12,7 +12,7 @@ import (
 
 var (
 	ErrModelName       = errors.New("model name is required")
-	ErrModelStrategy   = errors.New("model strategy must be priority or round_robin")
+	ErrModelStrategy   = errors.New("model strategy must be priority, round_robin, or cache_affinity")
 	ErrCredentialRoute = errors.New("model routes require unique credential IDs and positive weights")
 	ErrInvalidPrice    = errors.New("model prices must be finite and non-negative")
 )
@@ -52,7 +52,7 @@ func (s *Service) Upsert(ctx context.Context, m entities.ModelDef) error {
 	if m.Strategy == "" {
 		m.Strategy = chat.StrategyPriority
 	}
-	if m.Strategy != chat.StrategyPriority && m.Strategy != chat.StrategyRoundRobin {
+	if m.Strategy != chat.StrategyPriority && m.Strategy != chat.StrategyRoundRobin && m.Strategy != chat.StrategyCacheAffinity {
 		return ErrModelStrategy
 	}
 	seen := make(map[string]struct{}, len(m.Routes))

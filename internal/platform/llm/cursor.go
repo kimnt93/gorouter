@@ -35,7 +35,10 @@ func (a *CursorAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
 	}
-	conversation, _ := randomUUID()
+	conversation := StableConversationID(&input)
+	if conversation == "" {
+		conversation, _ = randomUUID()
+	}
 	message, _ := randomUUID()
 	payload := cursorAgentRequest(input, model, conversation, message)
 	frame := cursorConnectFrame(payload)

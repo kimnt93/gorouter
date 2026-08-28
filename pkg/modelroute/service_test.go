@@ -45,6 +45,9 @@ func TestUpsertValidatesModelAndRoutes(t *testing.T) {
 	if repo.model.Name != "model" || repo.model.Strategy != chat.StrategyPriority || repo.model.Routes[0].CredentialID != "credential" {
 		t.Fatalf("model was not normalized: %+v", repo.model)
 	}
+	if err := service.Upsert(context.Background(), entities.ModelDef{Name: "cache-model", Strategy: chat.StrategyCacheAffinity, Routes: []entities.ModelRoute{{CredentialID: "credential", UpstreamModel: "upstream", Weight: 1}}}); err != nil {
+		t.Fatalf("cache affinity strategy rejected: %v", err)
+	}
 	if err := service.Upsert(context.Background(), entities.ModelDef{Name: "model", Strategy: "random"}); !errors.Is(err, ErrModelStrategy) {
 		t.Fatalf("invalid strategy error=%v", err)
 	}

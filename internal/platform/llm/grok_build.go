@@ -79,6 +79,9 @@ func (a *GrokBuildAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 		return nil, fmt.Errorf("parse Grok Build request: %w", err)
 	}
 	payload := toCodexRequest(&input, model)
+	if payload.PromptCacheKey == "" {
+		payload.PromptCacheKey = StableConversationID(&input)
+	}
 	payload.Stream = true // the Responses collector also handles non-stream clients
 	encoded, err := json.Marshal(payload)
 	if err != nil {

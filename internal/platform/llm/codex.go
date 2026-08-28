@@ -162,10 +162,7 @@ func codexMessageContent(raw json.RawMessage, role string) []codexContent {
 }
 
 func toCodexRequest(request *ChatRequest, model string) codexRequest {
-	cacheKey := request.PromptCacheKey
-	if cacheKey == "" {
-		cacheKey = StablePromptCacheKey(request)
-	}
+	cacheKey := ProviderPromptCacheKey(request)
 	out := codexRequest{Model: model, Stream: true, Store: false, Reasoning: request.Reasoning, PromptCacheKey: cacheKey}
 	out.ToolChoice = codexToolChoice(request.ToolChoice)
 	var instructions []string
@@ -289,8 +286,12 @@ func (a *CodexAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime,
 	if client == nil {
 		client = NewHTTPClient()
 	}
+	headers := codexHeaders(cr)
+	if sessionID := ProviderPromptCacheKey(&request); sessionID != "" {
+		headers["session_id"] = sessionID
+	}
 	send := func() (*entities.UpstreamResult, error) {
-		return postJSON(ctx, client, codexBase(cr.BaseURL)+"/responses", codexHeaders(cr), payload)
+		return postJSON(ctx, client, codexBase(cr.BaseURL)+"/responses", headers, payload)
 	}
 	result, err := send()
 	if err != nil {

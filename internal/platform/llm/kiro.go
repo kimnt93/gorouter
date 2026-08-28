@@ -205,7 +205,10 @@ func kiroRequest(input ChatRequest, model, profileARN string) ([]byte, error) {
 		contextValue["tools"] = specs
 		current["userInputMessageContext"] = contextValue
 	}
-	conversationID, _ := randomUUID()
+	conversationID := StableConversationID(&input)
+	if conversationID == "" {
+		conversationID, _ = randomUUID()
+	}
 	request := map[string]any{"conversationState": map[string]any{"chatTriggerType": "MANUAL", "conversationId": conversationID, "currentMessage": map[string]any{"userInputMessage": current}, "history": history}}
 	if profileARN != "" {
 		request["profileArn"] = profileARN

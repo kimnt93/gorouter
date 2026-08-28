@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -71,5 +73,47 @@ func TestHealthCooldownAndRecovery(t *testing.T) {
 	health.mu.Unlock()
 	if !health.Available("credential") {
 		t.Fatal("expired cooldown remained active")
+	}
+}
+
+func TestCacheAffinityRendezvousIsStableIsolatedAndDistributesPrefixes(t *testing.T) {
+	selector := &Selector{}
+	candidates := []Candidate{{ID: "cred-a", Priority: 1}, {ID: "cred-b", Priority: 1}, {ID: "cred-c", Priority: 1}}
+	base := RouteAffinity{ScopeID: "key-a", TenantID: "org-a", Model: "model", Value: "prefix-a"}
+	first := selector.OrderWithAffinity(context.Background(), StrategyCacheAffinity, candidates, base)
+	second := selector.OrderWithAffinity(context.Background(), StrategyCacheAffinity, candidates, base)
+	if first[0].ID != second[0].ID {
+		t.Fatalf("unstable affinity %q %q", first[0].ID, second[0].ID)
+	}
+	seen := map[string]bool{}
+	for index := range 64 {
+		affinity := base
+		affinity.Value = fmt.Sprintf("prefix-%d", index)
+		seen[selector.OrderWithAffinity(context.Background(), StrategyCacheAffinity, candidates, affinity)[0].ID] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("prefixes did not distribute: %+v", seen)
+	}
+	isolated := false
+	for index := range 64 {
+		affinity := base
+		affinity.Value = fmt.Sprintf("shared-%d", index)
+		left := selector.OrderWithAffinity(context.Background(), StrategyCacheAffinity, candidates, affinity)[0].ID
+		affinity.ScopeID = "key-b"
+		right := selector.OrderWithAffinity(context.Background(), StrategyCacheAffinity, candidates, affinity)[0].ID
+		if left != right {
+			isolated = true
+			break
+		}
+	}
+	if !isolated {
+		t.Fatal("API-key scope did not participate in cache affinity")
+	}
+}
+
+func TestCacheAffinityWithoutReusablePrefixPreservesPriority(t *testing.T) {
+	ordered := (&Selector{}).OrderWithAffinity(context.Background(), StrategyCacheAffinity, []Candidate{{ID: "low", Priority: 0}, {ID: "high", Priority: 10}}, RouteAffinity{})
+	if len(ordered) != 2 || ordered[0].ID != "high" {
+		t.Fatalf("ordered=%+v", ordered)
 	}
 }

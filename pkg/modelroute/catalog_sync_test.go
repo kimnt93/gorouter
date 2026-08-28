@@ -160,3 +160,22 @@ func TestCatalogSyncPrunesOnlyAfterSuccessfulDiscovery(t *testing.T) {
 		t.Fatalf("deletes=%v", successRepo.deletes)
 	}
 }
+
+type skipRefreshLocker struct{ calls int }
+
+func (l *skipRefreshLocker) WithLock(context.Context, string, func() error) (bool, error) {
+	l.calls++
+	return false, nil
+}
+
+func TestCatalogSyncSkipsWhenAnotherReplicaOwnsRefresh(t *testing.T) {
+	locker := &skipRefreshLocker{}
+	repo := &syncModelRepo{}
+	sync := &CatalogSync{Credentials: credential.NewService(syncCredentialRepo{}, nil), Models: NewService(repo), Discoverer: func(string) credential.ModelDiscoverer { return syncDiscoverer{} }, Locker: locker}
+	if err := sync.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if locker.calls != 1 || len(repo.models) != 0 {
+		t.Fatalf("locker calls=%d models=%+v", locker.calls, repo.models)
+	}
+}

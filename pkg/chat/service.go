@@ -39,11 +39,12 @@ type CacheStats struct {
 }
 
 const (
-	StrategyPriority   = "priority"
-	StrategyRoundRobin = "round_robin"
-	ScopeKey           = "key"
-	ScopeTenant        = "tenant"
-	ScopeGlobal        = "global"
+	StrategyPriority      = "priority"
+	StrategyRoundRobin    = "round_robin"
+	StrategyCacheAffinity = "cache_affinity"
+	ScopeKey              = "key"
+	ScopeTenant           = "tenant"
+	ScopeGlobal           = "global"
 )
 
 type Candidate struct {
@@ -85,6 +86,9 @@ func (a RouteAffinity) redisKey() string {
 // credential. Redis is an optimization boundary here: on an outage, routing
 // safely continues with ordinary distributed/local round robin.
 func (s *Selector) OrderWithAffinity(ctx context.Context, strategy string, in []Candidate, affinity RouteAffinity) []Candidate {
+	if strategy == StrategyCacheAffinity {
+		return orderByRendezvous(in, affinity)
+	}
 	if strategy != StrategyRoundRobin || s.redis == nil {
 		return s.Order(strategy, in)
 	}
@@ -124,6 +128,33 @@ func (s *Selector) BindAffinity(ctx context.Context, affinity RouteAffinity, can
 	if key := affinity.redisKey(); key != "" {
 		_ = s.redis.Set(ctx, key, candidateID, routeAffinityTTL).Err()
 	}
+}
+
+func orderByRendezvous(in []Candidate, affinity RouteAffinity) []Candidate {
+	out := append([]Candidate(nil), in...)
+	value := strings.TrimSpace(affinity.Value)
+	if value == "" {
+		// Without a reusable prefix, preserve explicit priority semantics rather
+		// than collapsing unrelated one-turn requests onto one credential.
+		for i := 1; i < len(out); i++ {
+			for j := i; j > 0 && (out[j].Priority > out[j-1].Priority || out[j].Priority == out[j-1].Priority && out[j].ID < out[j-1].ID); j-- {
+				out[j], out[j-1] = out[j-1], out[j]
+			}
+		}
+		return out
+	}
+	seed := affinity.ScopeID + "\x00" + affinity.TenantID + "\x00" + affinity.Model + "\x00" + value
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0; j-- {
+			left := sha256.Sum256([]byte(seed + "\x00" + out[j-1].ID))
+			right := sha256.Sum256([]byte(seed + "\x00" + out[j].ID))
+			if string(right[:]) <= string(left[:]) {
+				break
+			}
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
 }
 
 func pinCandidate(in []Candidate, candidateID string) ([]Candidate, bool) {
