@@ -59,6 +59,29 @@ func TestPercentAndUtilizationWindows(t *testing.T) {
 	}
 }
 
+func TestAnthropicUtilizationWindowsIncludeModelSpecificLimits(t *testing.T) {
+	payload := map[string]any{
+		"five_hour":            map[string]any{"utilization": 0.25},
+		"seven_day":            map[string]any{"utilization": 0.50},
+		"seven_day_opus":       map[string]any{"utilization": 1.0},
+		"seven_day_sonnet":     map[string]any{"utilization": 0.10},
+		"seven_day_oauth_apps": map[string]any{"utilization": 0.20},
+	}
+	windows := compact([]Window{
+		parseUtilizationWindow("Session (5h)", object(payload, "five_hour")),
+		parseUtilizationWindow("Weekly (7d)", object(payload, "seven_day")),
+		parseUtilizationWindow("Weekly Opus", object(payload, "seven_day_opus")),
+		parseUtilizationWindow("Weekly Sonnet", object(payload, "seven_day_sonnet")),
+		parseUtilizationWindow("Weekly OAuth apps", object(payload, "seven_day_oauth_apps")),
+	})
+	if len(windows) != 5 || windows[2].Name != "Weekly Opus" || windows[2].RemainingPercent != 0 || windows[3].RemainingPercent != 90 {
+		t.Fatalf("Anthropic windows = %+v", windows)
+	}
+	if missing := parseUtilizationWindow("Missing", nil); missing.Name != "" {
+		t.Fatalf("missing utilization window = %+v", missing)
+	}
+}
+
 func TestFetchUsesBearerAndExtraHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret-token" {

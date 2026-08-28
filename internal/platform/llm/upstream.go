@@ -17,7 +17,10 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-const anthropicOAuthBeta = "oauth-2025-04-20"
+const (
+	anthropicOAuthBeta = "oauth-2025-04-20"
+	claudeCodeBeta     = "claude-code-20250219"
+)
 
 func NewHTTPClient() *http.Client {
 	return &http.Client{
@@ -256,7 +259,7 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 		return nil, err
 	}
 	url := anthropicBase(cr.BaseURL) + "/v1/messages"
-	if cr.Provider == "kimi-code" {
+	if cr.Provider == "claude" || cr.Provider == "kimi-code" {
 		url += "?beta=true"
 	}
 
@@ -351,6 +354,9 @@ func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error)
 	case entities.KindOAuth:
 		headers["Authorization"] = "Bearer " + cr.OAuthAccess
 		headers["anthropic-beta"] = anthropicOAuthBeta
+		if cr.Provider == "claude" {
+			headers["anthropic-beta"] = claudeCodeBeta + "," + anthropicOAuthBeta
+		}
 		headers["anthropic-dangerous-direct-browser-access"] = "true"
 		headers["x-app"] = "cli"
 		headers["User-Agent"] = "claude-cli/2.1.219 (external, cli)"

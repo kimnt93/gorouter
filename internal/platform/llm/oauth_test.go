@@ -81,6 +81,54 @@ func TestAnthropicAdapterRefreshesOnceOnUnauthorized(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeAdapterUsesSubscriptionMessagesContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" || r.URL.RawQuery != "beta=true" {
+			t.Fatalf("Claude Code endpoint = %s", r.URL.RequestURI())
+		}
+		if got := r.Header.Get("anthropic-beta"); got != claudeCodeBeta+","+anthropicOAuthBeta {
+			t.Fatalf("anthropic-beta = %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer subscription-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_, _ = io.WriteString(w, `{"id":"msg_1","content":[],"usage":{}}`)
+	}))
+	defer server.Close()
+
+	adapter := &ClaudeCodeAdapter{AnthropicAdapter: &AnthropicAdapter{HTTP: server.Client()}}
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, Provider: "claude", BaseURL: server.URL, OAuthAccess: "subscription-token"}
+	result, err := adapter.Send(context.Background(), runtime, "claude-opus-4-7", []byte(`{"model":"public","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Body.Close()
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", result.StatusCode)
+	}
+}
+
+func TestAnthropicOAuthAdapterDoesNotClaimClaudeCodeContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Fatalf("Anthropic API-key endpoint query = %q", r.URL.RawQuery)
+		}
+		if got := r.Header.Get("anthropic-beta"); got != anthropicOAuthBeta {
+			t.Fatalf("anthropic-beta = %q", got)
+		}
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+
+	adapter := &AnthropicAdapter{HTTP: server.Client()}
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, Provider: entities.ProviderAnthropic, BaseURL: server.URL, OAuthAccess: "oauth-token"}
+	result, err := adapter.Send(context.Background(), runtime, "claude-test", []byte(`{"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Body.Close()
+}
+
 func TestOpenAIAdapterUsesTypedForwardPayload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/chat/completions") {

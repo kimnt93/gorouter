@@ -252,7 +252,13 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 	case "claude":
 		payload, err = s.fetch(ctx, runtime, http.MethodGet, "https://api.anthropic.com/api/oauth/usage", nil, map[string]string{"anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20"})
 		if err == nil {
-			snapshot.Windows = append(snapshot.Windows, parseUtilizationWindow("Session (5h)", object(payload, "five_hour")), parseUtilizationWindow("Weekly (7d)", object(payload, "seven_day")))
+			snapshot.Windows = append(snapshot.Windows,
+				parseUtilizationWindow("Session (5h)", object(payload, "five_hour")),
+				parseUtilizationWindow("Weekly (7d)", object(payload, "seven_day")),
+				parseUtilizationWindow("Weekly Opus", object(payload, "seven_day_opus")),
+				parseUtilizationWindow("Weekly Sonnet", object(payload, "seven_day_sonnet")),
+				parseUtilizationWindow("Weekly OAuth apps", object(payload, "seven_day_oauth_apps")),
+			)
 		}
 	case "kiro", "amazon-q":
 		body := map[string]any{"origin": "AI_EDITOR", "resourceType": "AGENTIC_REQUEST"}
@@ -391,6 +397,9 @@ func parsePercentWindow(name string, value map[string]any) Window {
 	return percentWindow(name, used, reset)
 }
 func parseUtilizationWindow(name string, value map[string]any) Window {
+	if len(value) == 0 {
+		return Window{}
+	}
 	used := number(value["utilization"])
 	// Anthropic reports utilization as a 0..1 ratio.
 	if used >= 0 && used <= 1 {
