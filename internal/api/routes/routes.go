@@ -41,6 +41,7 @@ type Dependencies struct {
 	Codex          credential.ConnectivityProber
 	Providers      map[string]credential.ConnectivityProber
 	OAuth          *oauthpkg.Service
+	OAuthAvailable func(string) bool
 	Pricing        handlers.PriceCatalog
 	ProviderQuotas *providerquota.Service
 	BodyLimit      int
@@ -149,7 +150,7 @@ func New(d Dependencies) *fiber.App {
 	app.Post("/v1/messages/", handlers.Require(d.Auth, "chat"), d.Gateway.Messages)
 	app.Get("/v1/models", handlers.Require(d.Auth, "chat"), d.Gateway.ListModels)
 
-	admin := &handlers.Admin{Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit}
+	admin := &handlers.Admin{Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit, OAuthAvailable: d.OAuthAvailable}
 	mgmt := app.Group("/admin", handlers.Require(d.Auth, ""))
 	mgmt.Get("/session", admin.Session)
 	mgmt.Get("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)

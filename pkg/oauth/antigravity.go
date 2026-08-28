@@ -15,6 +15,9 @@ var antigravityScopes = []string{"https://www.googleapis.com/auth/cloud-platform
 type antigravityDriver struct{}
 
 func (antigravityDriver) Start(_ context.Context, s *Service, f flow) (flow, StartResult, error) {
+	if !s.OAuthAvailable("antigravity") {
+		return flow{}, StartResult{}, ErrProviderNotConfigured
+	}
 	f.flowType = "authorization_code"
 	f.redirectURI = "http://localhost:51121/oauth-callback"
 	q := url.Values{"response_type": {"code"}, "client_id": {s.config.AntigravityClientID}, "redirect_uri": {f.redirectURI}, "scope": {strings.Join(antigravityScopes, " ")}, "state": {f.state}, "access_type": {"offline"}, "prompt": {"consent"}}

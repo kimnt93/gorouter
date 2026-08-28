@@ -284,7 +284,7 @@ func main() {
 		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
 		Identity: identitySvc, IdentityRepo: identityRepo, Audit: auditRepo,
-		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc,
+		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc, OAuthAvailable: oauthSvc.OAuthAvailable,
 		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
 		BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
 	})

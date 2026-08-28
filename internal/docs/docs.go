@@ -1650,7 +1650,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Completes a pending OAuth flow and persists the resulting credential with encrypted tokens.",
+                "description": "Completes a pending OAuth flow and persists encrypted tokens. owner_user_id is accepted only from the master session and binds the credential to an active user.",
                 "tags": [
                     "oauth"
                 ],
@@ -1767,6 +1767,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
@@ -5878,6 +5884,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "owner_type": {
+                    "type": "string"
+                },
+                "owner_user_id": {
                     "type": "string"
                 }
             }

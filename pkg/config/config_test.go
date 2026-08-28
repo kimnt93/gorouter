@@ -39,6 +39,8 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("OPENROUTER_CATALOG_URL", "")
 	t.Setenv("OPENROUTER_SYNC_INTERVAL", "")
 	t.Setenv("OPENROUTER_HTTP_TIMEOUT", "")
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_ID", "")
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_SECRET", "")
 }
 
 func TestTokenQuotaAndUsageWriterDefaultsAndOverrides(t *testing.T) {
@@ -255,5 +257,37 @@ func TestExplicitOpenPolicyAndInvalidPolicy(t *testing.T) {
 	t.Setenv("REDIS_OUTAGE_POLICY", "maybe")
 	if _, err := Load(); err == nil {
 		t.Fatal("invalid outage policy accepted")
+	}
+}
+
+func TestValidatesOptionalAntigravityOAuthConfiguration(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AntigravityOAuthClientID != "" || cfg.AntigravityOAuthClientSecret != "" {
+		t.Fatal("Antigravity unexpectedly configured")
+	}
+
+	requiredEnv(t)
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_ID", "registered.apps.googleusercontent.com")
+	if _, err = Load(); err == nil {
+		t.Fatal("Antigravity client ID without secret accepted")
+	}
+
+	requiredEnv(t)
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_ID", "invalid-client")
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_SECRET", "synthetic-secret")
+	if _, err = Load(); err == nil {
+		t.Fatal("malformed Antigravity client ID accepted")
+	}
+
+	requiredEnv(t)
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_ID", "registered.apps.googleusercontent.com")
+	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_SECRET", "synthetic-secret")
+	cfg, err = Load()
+	if err != nil || cfg.AntigravityOAuthClientID == "" {
+		t.Fatalf("valid Antigravity config rejected: %v", err)
 	}
 }

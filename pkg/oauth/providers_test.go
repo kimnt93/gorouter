@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -32,7 +33,7 @@ func oauthTestService(t *testing.T, handler http.Handler) (*Service, *oauthRepoS
 	target, _ := url.Parse(server.URL)
 	client := &http.Client{Transport: rewriteOAuthTransport{target: target, base: http.DefaultTransport}}
 	repo := &oauthRepoStub{}
-	return New(client, credential.NewService(repo, oauthBoxStub{}), Config{}), repo
+	return New(client, credential.NewService(repo, oauthBoxStub{}), Config{AntigravityClientID: "registered.apps.googleusercontent.com", AntigravityClientSecret: "synthetic-secret"}), repo
 }
 
 func TestGitHubCopilotDeviceFlowPollsAndPersistsCopilotToken(t *testing.T) {
@@ -178,5 +179,23 @@ func TestKiroAndAmazonQDevicePollPersistDynamicAWSClient(t *testing.T) {
 				t.Fatalf("AWS metadata = %+v", repo.created.OAuthMeta)
 			}
 		})
+	}
+}
+
+func TestAntigravityRequiresRegisteredOAuthConfiguration(t *testing.T) {
+	service := New(nil, credential.NewService(&oauthRepoStub{}, oauthBoxStub{}), Config{})
+	if service.OAuthAvailable("antigravity") {
+		t.Fatal("Antigravity advertised OAuth without configuration")
+	}
+	if _, err := service.StartContext(context.Background(), "antigravity", "master::"); !errors.Is(err, ErrProviderNotConfigured) {
+		t.Fatalf("missing configuration error = %v", err)
+	}
+	service = New(nil, credential.NewService(&oauthRepoStub{}, oauthBoxStub{}), Config{AntigravityClientID: "not-a-google-client", AntigravityClientSecret: "synthetic-secret"})
+	if service.OAuthAvailable("antigravity") {
+		t.Fatal("Antigravity advertised OAuth with malformed client ID")
+	}
+	service = New(nil, credential.NewService(&oauthRepoStub{}, oauthBoxStub{}), Config{AntigravityClientID: "registered.apps.googleusercontent.com", AntigravityClientSecret: "synthetic-secret"})
+	if !service.OAuthAvailable("antigravity") {
+		t.Fatal("configured Antigravity OAuth was unavailable")
 	}
 }

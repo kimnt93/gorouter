@@ -196,3 +196,35 @@ func TestOpenAIAdapterInjectsStablePromptCacheKeyOnlyForOpenAI(t *testing.T) {
 		t.Fatalf("prompt cache keys = %#v", keys)
 	}
 }
+
+func TestClaudeConnectivityProbeUsesDiscoveredModel(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"claude-current-from-account"}]}`)
+		case "/v1/messages":
+			var request AnthropicRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request.Model != "claude-current-from-account" {
+				t.Fatalf("probe model = %q", request.Model)
+			}
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			t.Fatalf("unexpected probe endpoint %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := &ClaudeCodeAdapter{AnthropicAdapter: &AnthropicAdapter{HTTP: server.Client()}}
+	status, err := adapter.Probe(context.Background(), &entities.CredentialRuntime{Kind: entities.KindOAuth, Provider: "claude", BaseURL: server.URL, OAuthAccess: "subscription-token"})
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("status=%d err=%v", status, err)
+	}
+	if len(paths) != 2 || paths[0] != "/v1/models" || paths[1] != "/v1/messages" {
+		t.Fatalf("probe paths = %v", paths)
+	}
+}

@@ -33,7 +33,7 @@ func oauthSessionBinding(session *entities.Session) string {
 // @Security BearerAuth
 // @Param provider path string true "Provider ID"
 // @Success 200 {object} OAuthStartResponse
-// @Failure 400,401,403,500 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,500,503 {object} responseapi.ErrorResponse
 // @Router /admin/oauth/{provider}/start [post]
 func (h *OAuthConnector) Start(c fiber.Ctx) error {
 	if h.Service == nil {
@@ -43,6 +43,9 @@ func (h *OAuthConnector) Start(c fiber.Ctx) error {
 	if errors.Is(err, oauthpkg.ErrInvalidFlow) {
 		return responseapi.For(c).BadRequest("unsupported OAuth provider").Send()
 	}
+	if errors.Is(err, oauthpkg.ErrProviderNotConfigured) {
+		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "OAuth provider is not configured", "configuration_error", "oauth_provider_not_configured").Send()
+	}
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to start OAuth flow").Send()
 	}
@@ -51,7 +54,7 @@ func (h *OAuthConnector) Start(c fiber.Ctx) error {
 
 // Complete exchanges an OAuth callback/device result and creates a credential.
 // @Summary Complete OAuth connection
-// @Description Completes a pending OAuth flow and persists the resulting credential with encrypted tokens.
+// @Description Completes a pending OAuth flow and persists encrypted tokens. owner_user_id is accepted only from the master session and binds the credential to an active user.
 // @Tags oauth
 // @Security BearerAuth
 // @Param provider path string true "Provider ID"
@@ -69,7 +72,14 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest("flow_id is required").Send()
 	}
 	session := SessionFrom(c)
-	ownerTenant, ownerUserID, ownerErr := credentialOwner(c.Context(), session, body.OwnerType, "", body.OwnerOrganizationID, h.Identities)
+	if strings.TrimSpace(body.OwnerUserID) != "" && (session == nil || !session.IsMaster()) {
+		return responseapi.For(c).Forbidden("owner_user_id may be assigned only by the master session").Send()
+	}
+	ownerType := body.OwnerType
+	if strings.TrimSpace(body.OwnerUserID) != "" && strings.TrimSpace(ownerType) == "" {
+		ownerType = entities.OwnerUser
+	}
+	ownerTenant, ownerUserID, ownerErr := credentialOwner(c.Context(), session, ownerType, body.OwnerUserID, body.OwnerOrganizationID, h.Identities)
 	if ownerErr != nil {
 		if session != nil && !session.IsMaster() {
 			return responseapi.For(c).Forbidden(ownerErr.Error()).Send()

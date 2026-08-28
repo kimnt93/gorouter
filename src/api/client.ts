@@ -1,4 +1,4 @@
-import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteRequest, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
 import { groupByForUsageRange } from '../lib/usageResolution'
 
 export class APIError extends Error {
@@ -132,7 +132,7 @@ export const refreshCredentialQuota = (id: string): Promise<ProviderQuotaSnapsho
 export const discoverModels = (id: string): Promise<ProviderModelsResponse> => request(`/admin/credentials/${encodeURIComponent(id)}/models`)
 export const importModels = (id: string, models: string[]): Promise<{ ok: boolean; imported: string[] }> => request(`/admin/credentials/${encodeURIComponent(id)}/models/import`, { method: 'POST', body: JSON.stringify({ models }) })
 export const startOAuth = (provider: string): Promise<OAuthStartResponse> => request(`/admin/oauth/${encodeURIComponent(provider)}/start`, { method: 'POST' })
-export const completeOAuth = (provider: string, body: object): Promise<OAuthCompleteResponse> => request(`/admin/oauth/${encodeURIComponent(provider)}/complete`, { method: 'POST', body: JSON.stringify(body) })
+export const completeOAuth = (provider: string, body: OAuthCompleteRequest): Promise<OAuthCompleteResponse> => request(`/admin/oauth/${encodeURIComponent(provider)}/complete`, { method: 'POST', body: JSON.stringify(body) })
 
 export const getModels = (): Promise<ModelDefinition[]> => request<ModelDefinition[]>('/admin/models').then((items) => items ?? [])
 export const saveModel = (model: ModelDefinition): Promise<{ ok: boolean }> => request(`/admin/models/${encodeURIComponent(model.name)}`, { method: 'PUT', body: JSON.stringify(model) })

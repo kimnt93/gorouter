@@ -276,6 +276,7 @@ type OAuthCompleteRequest struct {
 	Callback            string `json:"callback"`
 	Name                string `json:"name"`
 	OwnerType           string `json:"owner_type,omitempty"`
+	OwnerUserID         string `json:"owner_user_id,omitempty"`
 	OwnerOrganizationID string `json:"owner_organization_id,omitempty"`
 }
 type OAuthCompleteResponse struct {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, getCodexResetCredits, redeemCodexResetCredit, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
-import type { CodexResetCredit, Credential, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
+import type { CodexResetCredit, Credential, OAuthCompleteRequest, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
 import { Modal } from '../components/Modal'
 import { PageLoading } from '../components/PageState'
@@ -123,7 +123,7 @@ function ConnectProviderModal({ provider, session, organizations, viewOrganizati
   const defaultOwner = session?.principal_type === 'organization' || viewOrganizationID ? 'organization' : 'personal'
   const [owner, setOwner] = useState(defaultOwner)
   const [ownerOrganizationID, setOwnerOrganizationID] = useState(viewOrganizationID || session?.organization_id || '')
-  const ownership = owner === 'organization' ? { owner_type: 'organization', owner_organization_id: ownerOrganizationID } : session?.role === 'master' ? {} : { owner_type: 'user' }
+  const ownership: Pick<OAuthCompleteRequest, 'owner_type' | 'owner_organization_id'> = owner === 'organization' ? { owner_type: 'organization', owner_organization_id: ownerOrganizationID } : session?.role === 'master' ? {} : { owner_type: 'user' }
   const submitAPIKey = async () => { setBusy(true); setError(''); try { await createCredential({ name, provider: provider.id, kind: 'api_key', base_url: baseURL, api_key: apiKey, oauth_access: '', oauth_refresh: '', ...ownership }); setAPIKey(''); onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
   const beginOAuth = async () => { setBusy(true); setError(''); try { setFlow(await startOAuth(provider.id)) } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }
   const finishOAuth = async () => { if (!flow) return; setBusy(true); setError(''); try { const response = await completeOAuth(provider.id, { flow_id: flow.flow_id, callback, name, ...ownership }); if (response.status === 'authorization_pending') setStatus('Authorization is still pending. Finish sign-in, then check again.'); else onConnected() } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) } }

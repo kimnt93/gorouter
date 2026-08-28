@@ -297,8 +297,19 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 }
 
 func (a *AnthropicAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime) (int, error) {
+	models, err := a.DiscoverModels(ctx, cr)
+	if err != nil {
+		return 0, fmt.Errorf("discover model for connectivity probe: %w", err)
+	}
+	if len(models) == 0 || strings.TrimSpace(models[0].ID) == "" {
+		return 0, errors.New("provider returned no models for connectivity probe")
+	}
+	return a.probeModel(ctx, cr, models[0].ID)
+}
+
+func (a *AnthropicAdapter) probeModel(ctx context.Context, cr *entities.CredentialRuntime, model string) (int, error) {
 	req := &ChatRequest{
-		Model:     "claude-3-5-haiku-latest",
+		Model:     model,
 		Messages:  []Message{{Role: "user", Content: json.RawMessage(`"ping"`)}},
 		MaxTokens: int64Ptr(1),
 	}

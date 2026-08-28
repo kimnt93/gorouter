@@ -112,6 +112,14 @@ func Load() (*Config, error) {
 	if cfg.MasterKey == "" {
 		return nil, errors.New("MASTER_KEY is required; set it during setup")
 	}
+	antigravityID := strings.TrimSpace(cfg.AntigravityOAuthClientID)
+	antigravitySecret := strings.TrimSpace(cfg.AntigravityOAuthClientSecret)
+	if (antigravityID == "") != (antigravitySecret == "") {
+		return nil, errors.New("ANTIGRAVITY_OAUTH_CLIENT_ID and ANTIGRAVITY_OAUTH_CLIENT_SECRET must be configured together")
+	}
+	if antigravityID != "" && (!strings.HasSuffix(antigravityID, ".apps.googleusercontent.com") || len(strings.Split(antigravityID, ".")) < 3) {
+		return nil, errors.New("ANTIGRAVITY_OAUTH_CLIENT_ID must be a registered Google OAuth client ID")
+	}
 	cfg.EncryptionKey = deriveKey(cfg.MasterKey, "credential-encryption")
 	cfg.SessionSecret = deriveKey(cfg.MasterKey, "session-signing")
 

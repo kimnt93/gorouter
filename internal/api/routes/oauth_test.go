@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -59,6 +60,57 @@ func (*oauthRouteCredentialRepo) UpdateOAuthTokens(context.Context, entities.Sec
 func (*oauthRouteCredentialRepo) RoutesForModel(context.Context, string) ([]entities.RouteCandidate, error) {
 	return nil, nil
 }
+
+type oauthRouteIdentityRepo struct {
+	user entities.User
+}
+
+func (*oauthRouteIdentityRepo) CreateUser(context.Context, entities.User) error { return nil }
+func (r *oauthRouteIdentityRepo) UserByID(_ context.Context, id string) (*entities.User, error) {
+	if id != r.user.ID {
+		return nil, entities.ErrNotFound
+	}
+	user := r.user
+	return &user, nil
+}
+func (*oauthRouteIdentityRepo) UserByNormalizedUsername(context.Context, string) (*entities.User, error) {
+	return nil, entities.ErrNotFound
+}
+func (*oauthRouteIdentityRepo) ListUsers(context.Context, entities.PageQuery) ([]entities.User, string, error) {
+	return nil, "", nil
+}
+func (*oauthRouteIdentityRepo) UpdateUserStatus(context.Context, string, string, time.Time) error {
+	return nil
+}
+func (*oauthRouteIdentityRepo) CreateOrganization(context.Context, entities.Organization) error {
+	return nil
+}
+func (*oauthRouteIdentityRepo) OrganizationByID(context.Context, string) (*entities.Organization, error) {
+	return nil, entities.ErrNotFound
+}
+func (*oauthRouteIdentityRepo) OrganizationByNormalizedName(context.Context, string) (*entities.Organization, error) {
+	return nil, entities.ErrNotFound
+}
+func (*oauthRouteIdentityRepo) ListOrganizations(context.Context, entities.PageQuery) ([]entities.Organization, string, error) {
+	return nil, "", nil
+}
+func (*oauthRouteIdentityRepo) UpdateOrganization(context.Context, entities.Organization) error {
+	return nil
+}
+func (*oauthRouteIdentityRepo) PutMembership(context.Context, entities.Membership) error { return nil }
+func (*oauthRouteIdentityRepo) Membership(context.Context, string, string) (*entities.Membership, error) {
+	return nil, entities.ErrNotFound
+}
+func (*oauthRouteIdentityRepo) ListMemberships(context.Context, string) ([]entities.Membership, error) {
+	return nil, nil
+}
+func (*oauthRouteIdentityRepo) ListMembershipsForUser(context.Context, string) ([]entities.Membership, error) {
+	return nil, nil
+}
+func (*oauthRouteIdentityRepo) CountActiveOrganizationAdmins(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (*oauthRouteIdentityRepo) DeleteMembership(context.Context, string, string) error { return nil }
 
 type oauthRouteBox struct{}
 
@@ -266,4 +318,93 @@ func oauthFiberRequest(t *testing.T, app *fiber.App, method, path, bearer string
 		t.Fatal(err)
 	}
 	return response
+}
+
+func TestOAuthCompleteAllowsOnlyMasterToBindAnActivePersonalOwner(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "oauth-access", "refresh_token": "oauth-refresh"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"oauth_account": map[string]string{"account_uuid": "account-a"}})
+	}))
+	defer tokenServer.Close()
+
+	repo := &oauthRouteCredentialRepo{}
+	identities := &oauthRouteIdentityRepo{user: entities.User{ID: "user-control", Username: "control@example.test", Status: entities.StatusActive}}
+	service := oauthpkg.New(tokenServer.Client(), credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{ClaudeTokenURL: tokenServer.URL, ClaudeBootstrapURL: tokenServer.URL})
+	app := routes.New(routes.Dependencies{
+		Auth: auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{
+			"control-key": {ID: "control", TenantID: "tenant-control", Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}},
+		}),
+		OAuth: service, IdentityRepo: identities,
+	})
+
+	start := startOAuthRoute(t, app, "control-key")
+	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "control-key", map[string]any{"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID, "owner_user_id": "user-control"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-master owner binding status=%d", response.StatusCode)
+	}
+
+	start = startOAuthRoute(t, app, "master-secret")
+	response = oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID, "owner_user_id": "user-control"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("master owner binding status=%d", response.StatusCode)
+	}
+	if len(repo.created) != 1 || repo.created[0].OwnerUserID != "user-control" || repo.created[0].OwnerTenant != nil {
+		t.Fatalf("created ownership=%+v", repo.created)
+	}
+
+	identities.user.Status = entities.StatusDisabled
+	start = startOAuthRoute(t, app, "master-secret")
+	response = oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID, "owner_user_id": "user-control"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("inactive owner status=%d", response.StatusCode)
+	}
+}
+
+func TestAntigravityStartReturnsConfigurationErrorAndIsNotAdvertised(t *testing.T) {
+	service := oauthpkg.New(nil, credential.NewService(&oauthRouteCredentialRepo{}, oauthRouteBox{}), oauthpkg.Config{})
+	app := routes.New(routes.Dependencies{
+		Auth:  auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}),
+		OAuth: service, OAuthAvailable: service.OAuthAvailable,
+	})
+	response := oauthFiberRequest(t, app, http.MethodGet, "/admin/providers", "master-secret", nil)
+	defer response.Body.Close()
+	var catalog struct {
+		Data []struct {
+			ID             string `json:"id"`
+			OAuthSupported bool   `json:"oauth_supported"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&catalog); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range catalog.Data {
+		if provider.ID == "antigravity" && provider.OAuthSupported {
+			t.Fatal("Antigravity OAuth advertised without configuration")
+		}
+	}
+
+	start := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/antigravity/start", "master-secret", nil)
+	defer start.Body.Close()
+	if start.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("start status=%d", start.StatusCode)
+	}
+	var problem struct {
+		Error struct {
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(start.Body).Decode(&problem); err != nil {
+		t.Fatal(err)
+	}
+	if problem.Error.Type != "configuration_error" || problem.Error.Code != "oauth_provider_not_configured" || problem.Error.Message != "OAuth provider is not configured" {
+		t.Fatalf("configuration problem=%+v", problem.Error)
+	}
 }

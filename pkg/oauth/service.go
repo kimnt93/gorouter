@@ -18,20 +18,19 @@ import (
 )
 
 var (
-	ErrInvalidFlow          = errors.New("invalid or expired OAuth flow")
-	ErrBadCallback          = errors.New("invalid OAuth callback")
-	ErrAuthorizationPending = errors.New("OAuth authorization pending")
-	ErrAccessDenied         = errors.New("OAuth authorization denied")
+	ErrInvalidFlow           = errors.New("invalid or expired OAuth flow")
+	ErrBadCallback           = errors.New("invalid OAuth callback")
+	ErrAuthorizationPending  = errors.New("OAuth authorization pending")
+	ErrAccessDenied          = errors.New("OAuth authorization denied")
+	ErrProviderNotConfigured = errors.New("OAuth provider is not configured")
 )
 
 const (
-	defaultClaudeClientID          = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	defaultCodexClientID           = "app_EMoamEEZ73f0CkXaXp7hrann"
-	defaultGitHubClientID          = "Iv1.b507a08c87ecfe98"
-	defaultGrokClientID            = "b1a00492-073a-47ea-816f-4c329264a828"
-	defaultKimiClientID            = "17e5f671-d194-4dfb-9706-5516cb48c098"
-	defaultAntigravityClientID     = ""
-	defaultAntigravityClientSecret = ""
+	defaultClaudeClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	defaultCodexClientID  = "app_EMoamEEZ73f0CkXaXp7hrann"
+	defaultGitHubClientID = "Iv1.b507a08c87ecfe98"
+	defaultGrokClientID   = "b1a00492-073a-47ea-816f-4c329264a828"
+	defaultKimiClientID   = "17e5f671-d194-4dfb-9706-5516cb48c098"
 )
 
 type Config struct {
@@ -135,12 +134,6 @@ func New(client *http.Client, credentials *credential.Service, cfg Config) *Serv
 	if cfg.KimiClientID == "" {
 		cfg.KimiClientID = defaultKimiClientID
 	}
-	if cfg.AntigravityClientID == "" {
-		cfg.AntigravityClientID = defaultAntigravityClientID
-	}
-	if cfg.AntigravityClientSecret == "" {
-		cfg.AntigravityClientSecret = defaultAntigravityClientSecret
-	}
 	if cfg.ClaudeTokenURL == "" {
 		cfg.ClaudeTokenURL = "https://api.anthropic.com/v1/oauth/token"
 	}
@@ -156,12 +149,30 @@ func New(client *http.Client, credentials *credential.Service, cfg Config) *Serv
 	return &Service{client: client, credentials: credentials, config: cfg, now: time.Now, flows: map[string]flow{}}
 }
 
+func (s *Service) OAuthAvailable(providerID string) bool {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "antigravity" {
+		return validAntigravityClientID(s.config.AntigravityClientID) && strings.TrimSpace(s.config.AntigravityClientSecret) != ""
+	}
+	definition, ok := provider.Lookup(providerID)
+	return ok && definition.Auth == provider.AuthOAuth && oauthDrivers[providerID] != nil
+}
+
+func validAntigravityClientID(value string) bool {
+	value = strings.TrimSpace(value)
+	parts := strings.Split(value, ".")
+	return len(parts) >= 3 && strings.HasSuffix(value, ".apps.googleusercontent.com") && strings.TrimSpace(parts[0]) != ""
+}
+
 func (s *Service) Start(providerID, sessionBinding string) (StartResult, error) {
 	return s.StartContext(context.Background(), providerID, sessionBinding)
 }
 
 func (s *Service) StartContext(ctx context.Context, providerID, sessionBinding string) (StartResult, error) {
 	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "antigravity" && !s.OAuthAvailable(providerID) {
+		return StartResult{}, fmt.Errorf("%w: ANTIGRAVITY_OAUTH_CLIENT_ID and ANTIGRAVITY_OAUTH_CLIENT_SECRET must contain registered Google OAuth credentials", ErrProviderNotConfigured)
+	}
 	definition, ok := provider.Lookup(providerID)
 	driver := oauthDrivers[providerID]
 	if !ok || definition.Auth != provider.AuthOAuth || driver == nil || sessionBinding == "" {

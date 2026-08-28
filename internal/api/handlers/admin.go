@@ -37,24 +37,33 @@ type okResponse = OKResponse
 // @Failure 401,403 {object} responseapi.ErrorResponse
 // @Router /admin/providers [get]
 func (a *Admin) Providers(c fiber.Ctx) error {
-	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(ProviderListResponse{Data: provider.Catalog()}).Send()
+	catalog := provider.Catalog()
+	if a.OAuthAvailable != nil {
+		for i := range catalog {
+			if catalog[i].Auth == provider.AuthOAuth {
+				catalog[i].OAuthSupported = a.OAuthAvailable(catalog[i].ID)
+			}
+		}
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(ProviderListResponse{Data: catalog}).Send()
 }
 
 type loginResponse = LoginResponse
 type createdAPIKeyResponse = CreatedAPIKeyResponse
 
 type Admin struct {
-	Auth         *auth.Service
-	TenantSvc    *tenant.Service
-	CredsSvc     *credential.Service
-	KeysSvc      *apikey.Service
-	ModelsSvc    *modelroute.Service
-	UsageSvc     *usage.Service
-	Cache        chat.PromptCache
-	Pricing      PriceCatalog
-	IdentitySvc  *identity.Service
-	IdentityRepo identity.Repository
-	AuditRepo    entities.AuditRepository
+	Auth           *auth.Service
+	TenantSvc      *tenant.Service
+	CredsSvc       *credential.Service
+	KeysSvc        *apikey.Service
+	ModelsSvc      *modelroute.Service
+	UsageSvc       *usage.Service
+	Cache          chat.PromptCache
+	Pricing        PriceCatalog
+	IdentitySvc    *identity.Service
+	IdentityRepo   identity.Repository
+	AuditRepo      entities.AuditRepository
+	OAuthAvailable func(string) bool
 }
 
 type priceEstimateResponse = PricingEstimateResponse
