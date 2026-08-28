@@ -18,8 +18,11 @@ import (
 )
 
 const (
-	anthropicOAuthBeta = "oauth-2025-04-20"
-	claudeCodeBeta     = "claude-code-20250219"
+	anthropicOAuthBeta          = "oauth-2025-04-20"
+	claudeCodeBeta              = "claude-code-20250219"
+	claudeInterleavedThinking   = "interleaved-thinking-2025-05-14"
+	claudeContextManagementBeta = "context-management-2025-06-27"
+	claudeTokenCountingBeta     = "token-counting-2024-11-01"
 )
 
 func NewHTTPClient() *http.Client {
@@ -242,6 +245,7 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 	}
 	translated := ToAnthropic(&req)
 	translated.Model = upstreamModel
+	var claudeSessionID string
 	if cr.Kind == entities.KindOAuth && cr.OAuthMeta.AccountID != "" && cr.OAuthMeta.DeviceID != "" {
 		sessionID, sessionErr := randomUUID()
 		if sessionErr != nil {
@@ -253,6 +257,10 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 			SessionID   string `json:"session_id"`
 		}{DeviceID: cr.OAuthMeta.DeviceID, AccountUUID: cr.OAuthMeta.AccountID, SessionID: sessionID})
 		translated.Metadata = &AnthropicMetadata{UserID: string(identity)}
+		if cr.Provider == "claude" {
+			claudeSessionID = sessionID
+			prependClaudeCodeSystem(translated)
+		}
 	}
 	body, err := json.Marshal(translated)
 	if err != nil {
@@ -267,6 +275,9 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 		headers, headerErr := anthropicHeaders(cr)
 		if headerErr != nil {
 			return nil, headerErr
+		}
+		if claudeSessionID != "" {
+			headers["X-Claude-Code-Session-Id"] = claudeSessionID
 		}
 		return postJSON(ctx, a.httpClient(), url, headers, body)
 	}
@@ -355,7 +366,7 @@ func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error)
 		headers["Authorization"] = "Bearer " + cr.OAuthAccess
 		headers["anthropic-beta"] = anthropicOAuthBeta
 		if cr.Provider == "claude" {
-			headers["anthropic-beta"] = claudeCodeBeta + "," + anthropicOAuthBeta
+			headers["anthropic-beta"] = strings.Join([]string{claudeCodeBeta, anthropicOAuthBeta, claudeInterleavedThinking, claudeContextManagementBeta, claudeTokenCountingBeta}, ",")
 		}
 		headers["anthropic-dangerous-direct-browser-access"] = "true"
 		headers["x-app"] = "cli"
@@ -364,6 +375,17 @@ func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error)
 		return nil, fmt.Errorf("unsupported credential kind %q", cr.Kind)
 	}
 	return headers, nil
+}
+
+func prependClaudeCodeSystem(body *AnthropicRequest) {
+	if body == nil {
+		return
+	}
+	identity := []AnthropicContentBlock{
+		{Type: "text", Text: "x-anthropic-billing-header: cc_version=2.1.220; cc_entrypoint=cli;"},
+		{Type: "text", Text: "You are Claude Code, Anthropic's official CLI for Claude."},
+	}
+	body.System = append(identity, body.System...)
 }
 
 func randomUUID() (string, error) {

@@ -86,18 +86,35 @@ func TestClaudeCodeAdapterUsesSubscriptionMessagesContract(t *testing.T) {
 		if r.URL.Path != "/v1/messages" || r.URL.RawQuery != "beta=true" {
 			t.Fatalf("Claude Code endpoint = %s", r.URL.RequestURI())
 		}
-		if got := r.Header.Get("anthropic-beta"); got != claudeCodeBeta+","+anthropicOAuthBeta {
+		wantBetas := strings.Join([]string{claudeCodeBeta, anthropicOAuthBeta, claudeInterleavedThinking, claudeContextManagementBeta, claudeTokenCountingBeta}, ",")
+		if got := r.Header.Get("anthropic-beta"); got != wantBetas {
 			t.Fatalf("anthropic-beta = %q", got)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer subscription-token" {
 			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.Header.Get("X-Claude-Code-Session-Id"); got == "" {
+			t.Fatal("Claude Code session header is missing")
+		}
+		var request AnthropicRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.System) < 2 || !strings.HasPrefix(request.System[0].Text, "x-anthropic-billing-header:") || !strings.HasPrefix(request.System[1].Text, "You are Claude Code") {
+			t.Fatalf("Claude Code system identity = %+v", request.System)
+		}
+		var identity struct {
+			SessionID string `json:"session_id"`
+		}
+		if request.Metadata == nil || json.Unmarshal([]byte(request.Metadata.UserID), &identity) != nil || identity.SessionID != r.Header.Get("X-Claude-Code-Session-Id") {
+			t.Fatalf("Claude Code session identity = %+v metadata=%+v", identity, request.Metadata)
 		}
 		_, _ = io.WriteString(w, `{"id":"msg_1","content":[],"usage":{}}`)
 	}))
 	defer server.Close()
 
 	adapter := &ClaudeCodeAdapter{AnthropicAdapter: &AnthropicAdapter{HTTP: server.Client()}}
-	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, Provider: "claude", BaseURL: server.URL, OAuthAccess: "subscription-token"}
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, Provider: "claude", BaseURL: server.URL, OAuthAccess: "subscription-token", OAuthMeta: entities.OAuthMetadata{AccountID: "account-id", DeviceID: "device-id"}}
 	result, err := adapter.Send(context.Background(), runtime, "claude-opus-4-7", []byte(`{"model":"public","messages":[{"role":"user","content":"hi"}]}`))
 	if err != nil {
 		t.Fatal(err)
