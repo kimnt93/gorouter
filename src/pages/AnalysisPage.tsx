@@ -19,6 +19,7 @@ export function AnalysisPage() {
       <section className="panel"><div className="panel-header"><div><span className="eyebrow">Throughput · input, output, cache read, and cache write</span><h2>Tokens by {filterState.filters.groupBy}</h2></div></div><VerticalUsageChart data={activity.data} metric="tokens" groupBy={filterState.filters.groupBy} /></section>
       <section className="panel"><div className="panel-header"><div><span className="eyebrow">Estimated spend</span><h2>Cost by {filterState.filters.groupBy}</h2></div></div><VerticalUsageChart data={activity.data} metric="cost" groupBy={filterState.filters.groupBy} /></section>
       <ModelBreakdown summary={activity.summary?.by_model ?? {}} />
+      <HealthTable health={activity.health} />
     </>}
   </>
 }
@@ -27,4 +28,13 @@ function ModelBreakdown({ summary }: { summary: NonNullable<ReturnType<typeof us
   const rows = Object.entries(summary).map(([model, usage]) => ({ model, usage, total: usage.in_tokens + usage.out_tokens + usage.cache_read_tokens + usage.cache_write_tokens })).sort((a, b) => b.total - a.total)
   const allTokens = rows.reduce((sum, row) => sum + row.total, 0)
   return <section className="panel model-breakdown"><div className="panel-header"><div><span className="eyebrow">Selected interval</span><h2>Model breakdown</h2></div></div><div className="table-scroll"><table><thead><tr><th>Model</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total</th><th>Cost</th><th>Breakdown</th></tr></thead><tbody>{rows.map(({ model, usage, total }) => { const share = allTokens ? total / allTokens * 100 : 0; return <tr key={model}><td><strong>{model}</strong></td><td>{formatInteger(usage.requests)}</td><td>{formatInteger(usage.in_tokens)}</td><td>{formatInteger(usage.out_tokens)}</td><td>{formatInteger(usage.cache_read_tokens)}</td><td>{formatInteger(usage.cache_write_tokens)}</td><td><strong>{formatInteger(total)}</strong></td><td>{formatUSD(usage.cost_usd)}</td><td><div className="share-cell"><span><i style={{ width: `${Math.min(100, share)}%` }} /></span><strong>{share.toFixed(1)}%</strong></div></td></tr> })}</tbody></table></div>{rows.length === 0 && <div className="empty-state"><strong>No model activity</strong><span>No matching model usage was recorded in this range.</span></div>}</section>
+}
+
+export function HealthTable({ health }: { health: ReturnType<typeof useActivity>['health'] }) {
+  const dimensions = ['provider', 'model', 'credential'] as const
+  return <section className="panel health-panel"><div className="panel-header"><div><span className="eyebrow">Observed gateway calls</span><h2>Provider and model health</h2><p>Success rate measures successful calls against provider, quota, and gateway failures. Client 4xx responses are shown separately and do not lower provider health.</p></div></div>{dimensions.map((dimension) => {
+    const rows = health.filter((metric) => metric.dimension === dimension).slice(0, dimension === 'credential' ? 20 : 50)
+    if (rows.length === 0) return null
+    return <div className="health-group" key={dimension}><h3>{dimension === 'credential' ? 'Connections' : `${dimension[0].toUpperCase()}${dimension.slice(1)}s`}</h3><div className="table-scroll"><table className="health-table"><thead><tr><th>Name</th><th>Requests</th><th>Success</th><th>Client 4xx</th><th>Provider 5xx</th><th>Average</th><th>P95</th><th>Cache read</th></tr></thead><tbody>{rows.map((metric) => { const tone = metric.success_rate >= .99 ? 'good' : metric.success_rate >= .95 ? 'warning' : 'bad'; return <tr key={`${dimension}-${metric.id}`}><td><strong title={metric.id}>{metric.id}</strong></td><td>{formatInteger(metric.requests)}</td><td><span className={`health-rate ${tone}`}>{(metric.success_rate * 100).toFixed(1)}%</span></td><td>{formatInteger(metric.client_errors)}</td><td>{formatInteger(metric.provider_errors)}</td><td>{formatInteger(metric.average_ms)} ms</td><td>{formatInteger(metric.p95_ms)} ms</td><td>{(metric.cache_read_rate * 100).toFixed(1)}%</td></tr> })}</tbody></table></div></div>
+  })}{health.length === 0 && <div className="empty-state"><strong>No health samples</strong><span>Provider and model health appears after gateway calls are recorded.</span></div>}</section>
 }

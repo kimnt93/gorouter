@@ -53,3 +53,14 @@ test('lists connected public model with inherited original-model cost and prefil
   expect(screen.getByLabelText('Original upstream model')).toHaveValue('gpt-5.6-luna')
   expect(screen.getByText(/Uses openai\/gpt-5.6-luna: \$0.2000\/M input/)).toBeInTheDocument()
 })
+
+test('offers and saves prompt-cache affinity routing for a blend', async () => {
+  api.saveModel.mockResolvedValue({ ok: true })
+  render(<ModelsPage />)
+  await screen.findByText('cx/gpt-5.6-luna')
+  fireEvent.click(screen.getByRole('button', { name: 'Add to blends' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Strategy' }))
+  fireEvent.click(screen.getByRole('option', { name: /Prompt-cache affinity/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save blend' }))
+  expect(api.saveModel).toHaveBeenCalledWith(expect.objectContaining({ strategy: 'cache_affinity' }))
+})

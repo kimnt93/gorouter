@@ -4,6 +4,7 @@ export interface UsageEvent {
   tenant_id: string
   api_key_id: string
   credential_id: string
+  provider: string
   model: string
   upstream_model: string
   prompt_tokens: number
@@ -27,11 +28,19 @@ export interface UsageRecentResponse {
   next_cursor?: string
 }
 
-export interface UsageDetail extends UsageEvent {
-  request_body: string
-  response_body: string
-  content_truncated: boolean
+export interface UsageHealthMetric {
+  dimension: 'provider' | 'model' | 'credential'
+  id: string
+  requests: number
+  successes: number
+  client_errors: number
+  provider_errors: number
+  success_rate: number
+  average_ms: number
+  p95_ms: number
+  cache_read_rate: number
 }
+
 
 export interface UsageActivityBucket {
   start: string
@@ -60,6 +69,7 @@ export interface UsageActivityResponse {
   group_by: GroupBy
   data: UsageActivityBucket[]
   summary: UsageSummary
+  health: UsageHealthMetric[]
 }
 
 export interface User {

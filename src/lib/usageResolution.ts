@@ -5,8 +5,8 @@ const day = 86_400_000
 export function groupByForUsageRange(filters: Pick<UsageFilters, 'range' | 'since' | 'until'>): GroupBy {
   switch (filters.range) {
     case '1d':
-    case '7d':
       return 'hour'
+    case '7d':
     case '30d':
     case '90d':
       return 'day'
@@ -18,7 +18,7 @@ export function groupByForUsageRange(filters: Pick<UsageFilters, 'range' | 'sinc
       const until = Date.parse(filters.until)
       if (!Number.isFinite(since) || !Number.isFinite(until) || until <= since) return 'day'
       const duration = until - since
-      if (duration <= 7 * day) return 'hour'
+      if (duration <= 2 * day) return 'hour'
       if (duration <= 90 * day) return 'day'
       return 'week'
     }

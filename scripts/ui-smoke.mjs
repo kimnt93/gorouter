@@ -38,7 +38,7 @@ async function assertLayout(name, path, viewport) {
 try {
   await assertLayout('analysis-desktop', '/dashboard/analysis', { width: 1440, height: 900 })
   if (await page.$('[aria-label="Resolution"]')) throw new Error('manual usage resolution filter is still visible')
-  const resolutionCases = [['1D', 'hour'], ['7D', 'hour'], ['30D', 'day'], ['90D', 'day'], ['YTD', 'week'], ['All', 'week']]
+  const resolutionCases = [['1D', 'hour'], ['7D', 'day'], ['30D', 'day'], ['90D', 'day'], ['YTD', 'week'], ['All', 'week']]
   for (const [range, resolution] of resolutionCases) {
     const button = await page.$(`.segmented[aria-label="Date range"] button:nth-child(${resolutionCases.findIndex(([label]) => label === range) + 1})`)
     if (!button) throw new Error(`${range} range button is missing`)
@@ -56,15 +56,9 @@ try {
   await assertLayout('logs-desktop', '/dashboard/logs', { width: 1440, height: 900 })
   const order = await page.$eval('.token-order', (element) => element.textContent ?? '')
   if (!order.includes('[in / out / cache read / cache write]')) throw new Error('token order legend is missing')
-  const row = await page.$('.logs-table tbody tr')
-  if (row) {
-    await row.click()
-    await page.waitForSelector('[role="dialog"]')
-    await page.waitForSelector('.conversation-section')
-    const privacy = await page.$eval('.safe-note', (element) => element.textContent ?? '')
-    if (!privacy.includes('never captured')) throw new Error('conversation access boundary is missing')
-    await page.keyboard.press('Escape')
-  }
+  const logCopy = await page.$eval('.page-header p', (element) => element.textContent ?? '')
+  if (!logCopy.includes('never stored')) throw new Error('request-content privacy boundary is missing')
+  if (await page.$('.conversation-section')) throw new Error('conversation content is still rendered in logs')
   await assertLayout('cache-desktop', '/dashboard/cache', { width: 1440, height: 900 })
   const cacheCopy = await page.$eval('.page-header p', (element) => element.textContent ?? '')
   if (!cacheCopy.includes('upstream providers')) throw new Error('provider-side cache attribution is missing')

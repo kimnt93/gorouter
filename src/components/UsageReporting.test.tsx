@@ -72,9 +72,10 @@ test('supports a filter dimension and multiple values without a manual resolutio
 
 test('selects usage resolution from preset and custom ranges', () => {
   const filters: UsageFilters = { range: '7d', groupBy: 'hour', filterType: 'user', userIds: [], apiKeyIds: [], organizationIds: [], since: '2026-08-01T00:00', until: '2026-08-08T00:00' }
-  const expected = { '1d': 'hour', '7d': 'hour', '30d': 'day', '90d': 'day', ytd: 'week', all: 'week' } as const
+  const expected = { '1d': 'hour', '7d': 'day', '30d': 'day', '90d': 'day', ytd: 'week', all: 'week' } as const
   for (const [range, groupBy] of Object.entries(expected)) expect(groupByForUsageRange({ ...filters, range: range as UsageFilters['range'] })).toBe(groupBy)
-  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-08-08T00:00' })).toBe('hour')
+  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-08-03T00:00' })).toBe('hour')
+  expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-08-08T00:00' })).toBe('day')
   expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-30T00:00' })).toBe('day')
   expect(groupByForUsageRange({ ...filters, range: 'custom', until: '2026-10-31T00:01' })).toBe('week')
 })
