@@ -53,7 +53,7 @@ type StateCache interface {
 	MarkExhausted(ctx context.Context, credentialID string, until time.Time) error
 	ClearExhausted(ctx context.Context, credentialID string) error
 	ActiveCredential(ctx context.Context, provider string) (string, error)
-	MarkActive(ctx context.Context, provider, credentialID string) error
+	MarkActive(ctx context.Context, provider, credentialID string) (bool, error)
 }
 
 type Service struct {
@@ -99,6 +99,11 @@ func (s *Service) Restore(ctx context.Context) error {
 		for _, snapshot := range snapshots {
 			if _, ok, stateErr := s.state.Snapshot(ctx, snapshot.CredentialID); stateErr == nil && !ok {
 				_ = s.state.PutSnapshot(ctx, snapshot)
+			}
+			if snapshot.InUse {
+				if active, activeErr := s.state.ActiveCredential(ctx, snapshot.Provider); activeErr == nil && active == "" {
+					_, _ = s.state.MarkActive(ctx, snapshot.Provider, snapshot.CredentialID)
+				}
 			}
 		}
 	}
@@ -168,7 +173,7 @@ func (s *Service) Available(id string) bool {
 // for this provider. It is the cursor for ordered circular failover.
 func (s *Service) ActiveCredential(provider string) string {
 	if s.state != nil {
-		if active, err := s.state.ActiveCredential(context.Background(), provider); err == nil && active != "" {
+		if active, err := s.state.ActiveCredential(context.Background(), provider); err == nil {
 			return active
 		}
 	}
@@ -223,8 +228,14 @@ func (s *Service) MarkInUse(id string) {
 		}
 		target = Snapshot{CredentialID: id, Provider: runtime.Provider, Account: maskAccount(runtime), Available: true, Windows: []Window{}}
 	}
-	s.mu.Lock()
 	provider := target.Provider
+	if s.state != nil {
+		accepted, err := s.state.MarkActive(context.Background(), provider, id)
+		if err != nil || !accepted {
+			return
+		}
+	}
+	s.mu.Lock()
 	for key, snapshot := range s.snapshots {
 		if key == id || provider == "" || snapshot.Provider == provider {
 			snapshot.InUse = key == id
@@ -237,7 +248,6 @@ func (s *Service) MarkInUse(id string) {
 	s.mu.Unlock()
 	if s.state != nil {
 		_ = s.state.PutSnapshot(context.Background(), target)
-		_ = s.state.MarkActive(context.Background(), provider, id)
 	}
 	if s.store != nil {
 		_ = s.store.Save(context.Background(), target)

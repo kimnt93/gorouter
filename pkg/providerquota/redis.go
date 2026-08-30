@@ -69,6 +69,21 @@ func (r *RedisState) ActiveCredential(ctx context.Context, provider string) (str
 	return value, err
 }
 
-func (r *RedisState) MarkActive(ctx context.Context, provider, id string) error {
-	return r.client.Set(ctx, quotaStatePrefix+"active:"+provider, id, 0).Err()
+var markActiveScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 1 then
+  return 0
+end
+redis.call("SET", KEYS[2], ARGV[1])
+return 1
+`)
+
+// MarkActive atomically rejects stale successes for an account another replica
+// has already exhausted. This prevents a slower in-flight request from moving
+// the shared cursor backwards after failover selected a new account.
+func (r *RedisState) MarkActive(ctx context.Context, provider, id string) (bool, error) {
+	result, err := markActiveScript.Run(ctx, r.client, []string{
+		quotaStatePrefix + "exhausted:" + id,
+		quotaStatePrefix + "active:" + provider,
+	}, id).Int64()
+	return result == 1, err
 }
