@@ -115,19 +115,22 @@ same application-only update; never replace a release with an unpinned image.
 For Codex CLI-compatible OAuth connections, GoRouter uses the account binding
 from the OAuth token and sends requests through the Codex-compatible backend
 API. A provider `429` or `402` is treated as a provider-account limit, not as
-the GoRouter API-key quota. GoRouter does not move to another account on the
-first transient failure: it retries the current account using the configured
-`ROUTE_RETRIES` value (default `2`, in addition to the first attempt), with a
-bounded backoff and any short `Retry-After` hint. Only after those attempts
-fail does it mark that account exhausted and move to the next eligible account.
+the GoRouter API-key quota. Quota-aware accounts move immediately to the next
+account on those statuses; retrying an exhausted account would only delay
+failover. `ROUTE_RETRIES` (default `2`, in addition to the first attempt) is
+reserved for transient transport and upstream 5xx failures, with a bounded
+backoff and any short `Retry-After` hint.
 
-Accounts are tried in the selected routing order. With quota-aware provider
-accounts, priority order is preserved so one account is used until it succeeds
-or is exhausted before the next account is selected. The request returns a
-provider error only after all eligible accounts have failed or are currently
-known to be out of quota. A previously recorded exhausted account is skipped
-until its provider quota reset; refresh quota data or wait for the reset before
-trying it again. Set `ROUTE_RETRIES=0` to disable same-account retries.
+Accounts are tried in configured priority order, starting from the account that
+most recently succeeded. GoRouter uses that account until it fails, then walks
+the ordered list and wraps once to the beginning. Each eligible account is
+visited at most once in that circle. Codex account-local authorization or model
+availability failures (`401`, `403`, or `404` after the adapter's token refresh)
+also move to the next account instead of terminating the whole route. The
+request returns a provider error only after one complete eligible-account
+circle fails. A previously recorded exhausted account is skipped until its
+provider quota reset; refresh quota data or wait for the reset before trying it
+again. Set `ROUTE_RETRIES=0` to disable transient same-account retries.
 
 A `429` from the provider can still be expected when there is only one account
 and that account has no remaining quota: retries cannot create quota. Check the

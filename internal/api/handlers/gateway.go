@@ -51,6 +51,7 @@ type Gateway struct {
 
 type ProviderQuotaRouter interface {
 	Available(credentialID string) bool
+	ActiveCredential(provider string) string
 	MarkExhausted(credentialID string)
 	MarkInUse(credentialID string)
 }
@@ -220,10 +221,6 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
 			continue
 		}
-		quotaAvailable := g.ProviderQuotas == nil || g.ProviderQuotas.Available(route.CredentialID)
-		if !quotaAvailable || !g.Health.Available(route.CredentialID) {
-			continue
-		}
 		runtime, runtimeErr := g.Creds.Runtime(c.Context(), route.CredentialID)
 		if runtimeErr != nil {
 			g.Health.Report(route.CredentialID, false)
@@ -264,6 +261,21 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	routeAffinity := chat.RouteAffinity{ScopeID: key.ID, TenantID: key.TenantID, Model: model.Name, Value: affinityValue}
 	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
+	if fillFirst && fillFirstProvider != "" && g.ProviderQuotas != nil {
+		candidates = rotateToActiveCredential(candidates, credentialIDs, g.ProviderQuotas.ActiveCredential(fillFirstProvider))
+	}
+	available := candidates[:0]
+	for _, candidate := range candidates {
+		credentialID := credentialIDs[candidate.ID]
+		if g.ProviderQuotas != nil && !g.ProviderQuotas.Available(credentialID) {
+			continue
+		}
+		if !g.Health.Available(credentialID) {
+			continue
+		}
+		available = append(available, candidate)
+	}
+	candidates = available
 	if len(candidates) == 0 {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials").Send()
@@ -312,11 +324,13 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 				drainAndClose(sent.Body)
 				result = nil
 				exhausted = true
-				// Retry this account before moving on. A provider reset hint is
-				// preferred when it is short; otherwise use the bounded local
-				// backoff. Even without a hint, do not immediately abandon an
-				// account: a 429 can be a transient burst limit rather than quota
-				// exhaustion. Mark it exhausted only after all attempts fail.
+				// Quota-aware subscription accounts move immediately to the next
+				// account on a provider limit. Retrying an exhausted account only
+				// delays reaching the remaining account in the configured circle.
+				definition, quotaAware := providerpkg.Lookup(runtime.Provider)
+				if quotaAware && definition.QuotaSupported {
+					break
+				}
 				if attempt < attempts-1 {
 					delay := retryBackoff(attempt + 1)
 					if wait > 0 && wait <= maxRetryAfter {
@@ -327,6 +341,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 					}
 					continue
 				}
+				break
+			}
+			if sent.StatusCode < 200 || sent.StatusCode >= 300 {
+				lastStatus = sent.StatusCode
+			}
+			if accountLocalStatus(runtime.Provider, sent.StatusCode) {
+				drainAndClose(sent.Body)
+				result = nil
 				break
 			}
 			if (sent.StatusCode < 200 || sent.StatusCode >= 300) && !retryableStatus(sent.StatusCode) {
@@ -415,6 +437,37 @@ func cloneModelMetadata(metadata *entities.ModelMetadata) *entities.ModelMetadat
 	clone.OutputModalities = append([]string(nil), metadata.OutputModalities...)
 	clone.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...)
 	return &clone
+}
+
+func rotateToActiveCredential(candidates []chat.Candidate, credentialIDs map[string]string, activeCredentialID string) []chat.Candidate {
+	if activeCredentialID == "" || len(candidates) < 2 {
+		return candidates
+	}
+	for index, candidate := range candidates {
+		if credentialIDs[candidate.ID] != activeCredentialID {
+			continue
+		}
+		rotated := make([]chat.Candidate, 0, len(candidates))
+		rotated = append(rotated, candidates[index:]...)
+		rotated = append(rotated, candidates[:index]...)
+		return rotated
+	}
+	return candidates
+}
+
+// A Codex OAuth account can reject a model or lose authorization independently
+// of the other accounts in the same ordered route. Those statuses fail over to
+// the next account; request-shape 4xx responses remain terminal.
+func accountLocalStatus(provider string, status int) bool {
+	if provider != "codex" {
+		return false
+	}
+	switch status {
+	case fiber.StatusUnauthorized, fiber.StatusForbidden, fiber.StatusNotFound:
+		return true
+	default:
+		return false
+	}
 }
 
 const (

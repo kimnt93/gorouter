@@ -143,6 +143,18 @@ func TestRestoreAndMarkInUsePersistOnlyOnAccountTransition(t *testing.T) {
 	}
 }
 
+func TestActiveCredentialRestoresOrderedFailoverCursor(t *testing.T) {
+	store := &quotaStore{loaded: []Snapshot{{CredentialID: "cred-c", Provider: "codex", InUse: true}}}
+	service := New(nil, nil)
+	service.SetStore(store)
+	if err := service.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := service.ActiveCredential("codex"); got != "cred-c" {
+		t.Fatalf("active credential = %q", got)
+	}
+}
+
 func TestMaskAccountNeverReturnsToken(t *testing.T) {
 	runtime := &entities.CredentialRuntime{APIKey: "top-secret", OAuthMeta: entities.OAuthMetadata{Email: "person@example.test"}}
 	if got := maskAccount(runtime); got != "pe****@example.test" {

@@ -614,12 +614,17 @@ func TestGatewayFailsOverRetryableStatus(t *testing.T) {
 
 type gatewayProviderQuota struct {
 	available map[string]bool
+	active    map[string]string
 	marked    []string
 }
 
 func (q *gatewayProviderQuota) Available(id string) bool {
 	available, ok := q.available[id]
 	return !ok || available
+}
+
+func (q *gatewayProviderQuota) ActiveCredential(provider string) string {
+	return q.active[provider]
 }
 
 func (q *gatewayProviderQuota) MarkExhausted(id string) {
@@ -686,6 +691,93 @@ func TestGatewayQuotaFillFirstAndExhaustionFailover(t *testing.T) {
 	}
 	if got, want := strings.Join(quotaState.marked, ","), "cred-a,cred-b,cred-c,cred-d"; got != want {
 		t.Fatalf("marked=%v", quotaState.marked)
+	}
+}
+
+func TestGatewayCodexFailoverStartsAtActiveAccountAndTriesOneCircle(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{
+		{CredentialID: "cred-a", Priority: 10},
+		{CredentialID: "cred-b", Priority: 9},
+		{CredentialID: "cred-c", Priority: 8},
+		{CredentialID: "cred-d", Priority: 7},
+		{CredentialID: "cred-e", Priority: 6},
+	}
+	runtimes := map[string]*entities.CredentialRuntime{}
+	for _, route := range routes {
+		runtimes[route.CredentialID] = &entities.CredentialRuntime{ID: route.CredentialID, Provider: "codex", Kind: entities.KindOAuth}
+	}
+	upstream := &gatewayUpstream{statuses: map[string]int{
+		"cred-a": http.StatusNotFound,
+		"cred-b": http.StatusOK,
+		"cred-c": http.StatusNotFound,
+		"cred-d": http.StatusNotFound,
+		"cred-e": http.StatusNotFound,
+	}}
+	quotaState := &gatewayProviderQuota{
+		available: map[string]bool{"cred-a": true, "cred-b": true, "cred-c": true, "cred-d": true, "cred-e": true},
+		active:    map[string]string{"codex": "cred-c"},
+	}
+	gateway := &Gateway{
+		Keys:           apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:          credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
+		Models:         modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Codex:          upstream,
+		Selector:       &chat.Selector{},
+		Health:         chat.NewHealth(),
+		ProviderQuotas: quotaState,
+		RouteRetries:   2,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`))
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+	// The active account is the cursor. Each account is attempted at most once,
+	// and the list wraps exactly once before reaching the final working account.
+	if got, want := strings.Join(upstream.calls, ","), "cred-c,cred-d,cred-e,cred-a,cred-b"; got != want {
+		t.Fatalf("calls=%s want=%s", got, want)
+	}
+}
+
+func TestGatewayCodexQuotaLimitMovesImmediatelyToNextAccount(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
+	runtimes := map[string]*entities.CredentialRuntime{
+		"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth},
+		"cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth},
+	}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusTooManyRequests, "cred-b": http.StatusOK}}
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Codex:  upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 2,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || strings.Join(upstream.calls, ",") != "cred-a,cred-b" {
+		t.Fatalf("status=%d calls=%v", response.StatusCode, upstream.calls)
 	}
 }
 

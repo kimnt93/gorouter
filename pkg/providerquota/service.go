@@ -164,6 +164,19 @@ func (s *Service) Available(id string) bool {
 	return true
 }
 
+// ActiveCredential returns the account that most recently accepted a request
+// for this provider. It is the cursor for ordered circular failover.
+func (s *Service) ActiveCredential(provider string) string {
+	if s.state != nil {
+		if active, err := s.state.ActiveCredential(context.Background(), provider); err == nil && active != "" {
+			return active
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.active[provider]
+}
+
 func (s *Service) MarkExhausted(id string) {
 	now := time.Now()
 	until := now.Add(5 * time.Minute)
