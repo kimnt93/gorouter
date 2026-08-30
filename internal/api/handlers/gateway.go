@@ -282,10 +282,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	lastStatus := fiber.StatusBadGateway
 	lastCredential := ""
-	// Attempt every eligible account fully before moving on: an account is only
-	// abandoned after its own bounded retries are exhausted. A single account
-	// runs to completion (success or true exhaustion) before the next one is
-	// tried, and the request only fails once every account is exhausted.
+	// Attempt every eligible account in one bounded circle. Quota-aware provider
+	// accounts get exactly one attempt so a slow or failing account cannot consume
+	// the request budget before routing reaches the next account.
 	for _, candidate := range candidates {
 		credentialID := credentialIDs[candidate.ID]
 		lastCredential = credentialID
@@ -307,7 +306,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			transportErr bool
 			exhausted    bool
 		)
-		attempts := g.routeAttempts()
+		attempts := g.routeAttempts(runtime.Provider)
 		for attempt := 0; attempt < attempts; attempt++ {
 			sent, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
 			if rerr != nil {
@@ -475,7 +474,10 @@ const (
 	maxRetryBackoff = 2 * time.Second
 )
 
-func (g *Gateway) routeAttempts() int {
+func (g *Gateway) routeAttempts(providerID string) int {
+	if definition, ok := providerpkg.Lookup(providerID); ok && definition.QuotaSupported {
+		return 1
+	}
 	if g.RouteRetries < 0 {
 		return 1
 	}

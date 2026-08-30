@@ -117,9 +117,10 @@ from the OAuth token and sends requests through the Codex-compatible backend
 API. A provider `429` or `402` is treated as a provider-account limit, not as
 the GoRouter API-key quota. Quota-aware accounts move immediately to the next
 account on those statuses; retrying an exhausted account would only delay
-failover. `ROUTE_RETRIES` (default `2`, in addition to the first attempt) is
-reserved for transient transport and upstream 5xx failures, with a bounded
-backoff and any short `Retry-After` hint.
+failover. Every quota-aware provider account gets exactly one attempt per
+request, including transport and upstream 5xx failures. `ROUTE_RETRIES`
+(default `2`, in addition to the first attempt) applies only to providers that
+do not expose account quota routing.
 
 Accounts are tried in configured priority order, starting from the account that
 most recently succeeded. GoRouter uses that account until it fails, then walks
