@@ -861,7 +861,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Runs a bounded streaming chat test through one credential without recording a normal gateway request.",
+                "description": "Runs a bounded streaming chat test through one credential and records the provider attempt in usage logs.",
                 "tags": [
                     "credentials"
                 ],

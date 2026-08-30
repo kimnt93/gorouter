@@ -172,7 +172,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Put("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
 	mgmt.Delete("/credentials/:id", handlers.Require(d.Auth, "credentials:manage"), admin.CredentialByID)
-	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models, Quotas: d.ProviderQuotas, Identities: d.IdentityRepo}
+	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models, Quotas: d.ProviderQuotas, Usage: d.Usage, Identities: d.IdentityRepo}
 	oauthConnector := &handlers.OAuthConnector{Service: d.OAuth, Identities: d.IdentityRepo}
 	mgmt.Get("/providers", handlers.Require(d.Auth, entities.ScopeCredentialsManage), admin.Providers)
 	mgmt.Post("/oauth/:provider/start", handlers.Require(d.Auth, entities.ScopeCredentialsManage), oauthConnector.Start)

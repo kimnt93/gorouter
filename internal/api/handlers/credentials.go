@@ -19,6 +19,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
+	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
 // CredentialConnectivity is registered separately from Admin so provider
@@ -31,6 +32,7 @@ type CredentialConnectivity struct {
 	Providers   map[string]credential.ConnectivityProber
 	ModelRoutes *modelroute.Service
 	Quotas      *providerquota.Service
+	Usage       *usage.Service
 	Identities  identity.Repository
 }
 
@@ -403,7 +405,7 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 
 // Chat streams a bounded connectivity test through one credential.
 // @Summary Run credential chat test
-// @Description Runs a bounded streaming chat test through one credential without recording a normal gateway request.
+// @Description Runs a bounded streaming chat test through one credential and records the provider attempt in usage logs.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
@@ -412,6 +414,7 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 // @Failure 400,401,403,404,500,502 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/chat-tests [post]
 func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
+	started := time.Now()
 	if !h.authorize(c) {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
@@ -423,6 +426,11 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
+	credentialRecord, err := h.credential(c, runtime.ID)
+	if err != nil {
+		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	logContext := newChatTestLogContext(SessionFrom(c), credentialRecord, runtime, input.Model)
 	_, _, upstream := h.adapter(runtime.Provider)
 	if upstream == nil {
 		return responseapi.For(c).BadRequest("provider chat test is not supported").Send()
@@ -432,11 +440,13 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	body, _ := json.Marshal(req)
 	result, err := upstream.Send(c.Context(), runtime, input.Model, body)
 	if err != nil {
+		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, fiber.StatusBadGateway, started, "provider chat test failed")
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider chat test failed", "upstream_error", "").Send()
 	}
 	if result.StatusCode < 200 || result.StatusCode >= 300 {
 		defer result.Body.Close()
 		_, _ = io.Copy(io.Discard, io.LimitReader(result.Body, 1<<20))
+		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, result.StatusCode, started, "provider rejected chat test")
 		return responseapi.For(c).Error(fiber.StatusBadGateway, fmt.Sprintf("provider returned HTTP %d", result.StatusCode), "upstream_error", "").Send()
 	}
 	c.Set(fiber.HeaderContentType, "text/event-stream")
@@ -444,9 +454,12 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	c.Set("X-Accel-Buffering", "no")
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		defer result.Body.Close()
+		streamStatus := fiber.StatusOK
+		var collected llm.Usage
+		var completion strings.Builder
 		if providerpkg.UsesAnthropicWire(runtime.Provider) {
 			converter := llm.NewAnthropicStreamConverter(providerpkg.PublicModelID(runtime.Provider, input.Model))
-			_ = llm.ScanSSE(result.Body, func(event llm.SSEEvent) error {
+			scanErr := llm.ScanSSE(result.Body, func(event llm.SSEEvent) error {
 				chunks, _, feedErr := converter.Feed(event.Event, event.Data)
 				if feedErr != nil {
 					return feedErr
@@ -461,16 +474,91 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 				}
 				return nil
 			})
+			collected = converter.UsageCollected()
+			completion.WriteString(converter.ContentCollected())
+			if scanErr != nil {
+				streamStatus = fiber.StatusBadGateway
+			}
 			_, _ = w.WriteString("data: [DONE]\n\n")
 			_ = w.Flush()
-			return
-		}
-		_ = llm.ScanSSE(result.Body, func(event llm.SSEEvent) error {
-			if _, writeErr := w.WriteString("data: " + string(event.Data) + "\n\n"); writeErr != nil {
-				return writeErr
+		} else {
+			scanErr := llm.ScanSSE(result.Body, func(event llm.SSEEvent) error {
+				payload := string(event.Data)
+				if payload != "[DONE]" {
+					collected = llm.MergeUsage(payload, collected)
+					completion.WriteString(llm.ContentDelta(payload))
+				}
+				if _, writeErr := w.WriteString("data: " + payload + "\n\n"); writeErr != nil {
+					return writeErr
+				}
+				return w.Flush()
+			})
+			if scanErr != nil {
+				streamStatus = fiber.StatusBadGateway
 			}
-			return w.Flush()
-		})
+		}
+		if collected.PromptTokens == 0 {
+			collected.PromptTokens = req.EstimatePromptTokens()
+		}
+		if collected.CompletionTokens == 0 {
+			collected.CompletionTokens = llm.EstimateTextTokens(completion.String())
+		}
+		summary := ""
+		if streamStatus != fiber.StatusOK {
+			summary = "provider chat test stream failed"
+		}
+		h.recordChatTest(logContext, collected, streamStatus, started, summary)
+	})
+}
+
+type chatTestLogContext struct {
+	TenantID      string
+	APIKeyID      string
+	CredentialID  string
+	Provider      string
+	Model         string
+	UpstreamModel string
+	Actor         entities.UsageActor
+}
+
+func newChatTestLogContext(session *entities.Session, credentialRecord *entities.Credential, runtime *entities.CredentialRuntime, model string) chatTestLogContext {
+	context := chatTestLogContext{CredentialID: runtime.ID, Provider: runtime.Provider, Model: providerpkg.PublicModelID(runtime.Provider, model), UpstreamModel: model, Actor: entities.UsageActor{Type: entities.ActorLegacy}}
+	if session != nil {
+		context.APIKeyID = session.KeyID
+		context.Actor = entities.UsageActor{UserID: session.UserID, Username: session.Username, OrganizationID: session.OrganizationID}
+		switch {
+		case session.IsMaster():
+			context.APIKeyID = ""
+			context.Actor.Type = entities.ActorMaster
+			context.Actor.Username = "master"
+		case session.PrincipalType == entities.PrincipalUser:
+			context.Actor.Type = entities.ActorUser
+		default:
+			context.Actor.Type = entities.ActorOrganization
+		}
+	}
+	if credentialRecord.OwnerTenantID != nil {
+		context.TenantID = *credentialRecord.OwnerTenantID
+		context.Actor.OrganizationID = *credentialRecord.OwnerTenantID
+	} else {
+		// Personal and global connection tests must not acquire organization
+		// attribution merely because the operator is currently viewing an org.
+		context.Actor.OrganizationID = ""
+	}
+	return context
+}
+
+func (h *CredentialConnectivity) recordChatTest(logContext chatTestLogContext, tokenUsage llm.Usage, status int, started time.Time, summary string) {
+	if h.Usage == nil {
+		return
+	}
+	h.Usage.Record(entities.UsageEvent{
+		TS: time.Now(), TenantID: logContext.TenantID, ApiKeyID: logContext.APIKeyID, CredentialID: logContext.CredentialID,
+		Provider: logContext.Provider, Model: logContext.Model, UpstreamModel: logContext.UpstreamModel,
+		PromptTokens: tokenUsage.PromptTokens, CompletionTokens: tokenUsage.CompletionTokens,
+		CacheReadTokens: tokenUsage.CacheReadTokens, CacheWriteTokens: tokenUsage.CacheWriteTokens,
+		Priced: true, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary,
+		ActorType: logContext.Actor.Type, UserID: logContext.Actor.UserID, Username: logContext.Actor.Username, OrganizationID: logContext.Actor.OrganizationID,
 	})
 }
 

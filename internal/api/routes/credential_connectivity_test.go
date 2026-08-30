@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
 type connectivityRouteCredentialRepo struct {
@@ -93,11 +96,39 @@ func (connectivityRouteProvider) DiscoverModels(context.Context, *entities.Crede
 
 func (connectivityRouteProvider) Send(context.Context, *entities.CredentialRuntime, string, []byte) (*entities.UpstreamResult, error) {
 	body := "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+		"data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n" +
 		"data: [DONE]\n\n"
 	return &entities.UpstreamResult{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}, nil
+}
+
+type connectivityUsageRepo struct {
+	mu     sync.Mutex
+	events []entities.UsageEvent
+}
+
+func (*connectivityUsageRepo) SpendForKeySince(context.Context, string, time.Time) (float64, error) {
+	return 0, nil
+}
+func (*connectivityUsageRepo) Summary(context.Context, time.Time) (*entities.UsageSummary, error) {
+	return &entities.UsageSummary{}, nil
+}
+func (*connectivityUsageRepo) Recent(context.Context, int) ([]entities.RecentEvent, error) {
+	return nil, nil
+}
+func (*connectivityUsageRepo) SummaryForTenant(context.Context, string, time.Time) (*entities.UsageSummary, error) {
+	return &entities.UsageSummary{}, nil
+}
+func (*connectivityUsageRepo) RecentForTenant(context.Context, string, int) ([]entities.RecentEvent, error) {
+	return nil, nil
+}
+func (r *connectivityUsageRepo) InsertBatch(_ context.Context, events []entities.UsageEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, events...)
+	return nil
 }
 
 func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
@@ -117,6 +148,9 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 	}
 	models := &connectivityRouteModelRepo{}
 	provider := connectivityRouteProvider{}
+	usageRepo := &connectivityUsageRepo{}
+	usageService := usage.NewService(usageRepo, 16, nil)
+	t.Cleanup(usageService.Close)
 	keys := oauthRouteKeyLookup{
 		"tenant-key": {
 			ID:       "key-a",
@@ -129,6 +163,7 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 		Auth:        auth.NewService("master-secret", "session-secret", keys),
 		Credentials: credential.NewService(repo, oauthRouteBox{}),
 		Models:      modelroute.NewService(models),
+		Usage:       usageService,
 		OpenAI:      provider,
 	})
 
@@ -169,6 +204,18 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 			t.Fatalf("model default payload = %+v status=%d", payload, response.StatusCode)
 		}
 	})
+
+	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/credentials/own/chat-tests", "tenant-key", map[string]string{"model": "provider-model", "prompt": "hello"})
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	usageService.Close()
+	if len(usageRepo.events) == 0 {
+		t.Fatal("provider chat test was not recorded in usage logs")
+	}
+	event := usageRepo.events[len(usageRepo.events)-1]
+	if event.CredentialID != "own" || event.Provider != entities.ProviderOpenAICompatible || event.Model != "custom/provider-model" || event.UpstreamModel != "provider-model" || event.StatusCode != http.StatusOK || event.PromptTokens != 5 || event.CompletionTokens != 2 || event.ApiKeyID != "key-a" {
+		t.Fatalf("chat test usage event = %+v", event)
+	}
 
 	importBody := map[string]any{"models": []string{"provider-model"}}
 	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "own", "tenant-key", http.StatusForbidden, importBody)
