@@ -164,10 +164,11 @@ func TestDiscoverModelsUsesCacheAndMutationInvalidatesIt(t *testing.T) {
 	}
 	notified := 0
 	service.SetCredentialsChanged(func() { notified++ })
+	service.AddCredentialsChanged(func() { notified += 10 })
 	if _, err := service.Update(context.Background(), "cred", entities.CredentialUpdate{Name: "updated", Status: entities.StatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if cache.deleted != 1 || notified != 1 {
+	if cache.deleted != 1 || notified != 11 {
 		t.Fatalf("deleted=%d notified=%d", cache.deleted, notified)
 	}
 	if _, err := service.DiscoverModels(context.Background(), "cred", discoverer); err != nil {

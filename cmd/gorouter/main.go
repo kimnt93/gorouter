@@ -268,6 +268,14 @@ func main() {
 	if err := providerQuotaSvc.Restore(context.Background()); err != nil {
 		log.Printf("restore provider quota snapshots: %v", err)
 	}
+	if err := providerQuotaSvc.SyncAccountRings(context.Background()); err != nil {
+		log.Printf("sync provider account rings: %v", err)
+	}
+	credSvc.AddCredentialsChanged(func() {
+		if err := providerQuotaSvc.SyncAccountRings(context.Background()); err != nil {
+			log.Printf("sync provider account rings: %v", err)
+		}
+	})
 	selector := &chat.Selector{}
 	health := chat.NewHealth()
 	if redisClient != nil {

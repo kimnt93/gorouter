@@ -623,8 +623,35 @@ func (q *gatewayProviderQuota) Available(id string) bool {
 	return !ok || available
 }
 
-func (q *gatewayProviderQuota) ActiveCredential(provider string) string {
-	return q.active[provider]
+func (q *gatewayProviderQuota) OrderCredentials(provider string, eligible []string) []string {
+	if q.active == nil {
+		q.active = map[string]string{}
+	}
+	start := 0
+	if active := q.active[provider]; active != "" {
+		for index, id := range eligible {
+			if id == active {
+				start = index
+				break
+			}
+		}
+	}
+	return append(append([]string(nil), eligible[start:]...), eligible[:start]...)
+}
+
+func (q *gatewayProviderQuota) AdvanceAccount(provider, credentialID string, eligible []string) {
+	if q.active == nil {
+		q.active = map[string]string{}
+	}
+	if active := q.active[provider]; active != "" && active != credentialID {
+		return
+	}
+	for index, id := range eligible {
+		if id == credentialID {
+			q.active[provider] = eligible[(index+1)%len(eligible)]
+			return
+		}
+	}
 }
 
 func (q *gatewayProviderQuota) MarkExhausted(id string) {

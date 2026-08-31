@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +12,10 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-type quotaCredentialRepo struct{ runtime *entities.CredentialRuntime }
+type quotaCredentialRepo struct {
+	runtime     *entities.CredentialRuntime
+	credentials []entities.Credential
+}
 
 type quotaStore struct {
 	loaded   []Snapshot
@@ -32,7 +36,9 @@ func (s *quotaStore) SetInUse(_ context.Context, id, _ string) error {
 func (r quotaCredentialRepo) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
 	return nil, nil
 }
-func (r quotaCredentialRepo) List(context.Context) ([]entities.Credential, error) { return nil, nil }
+func (r quotaCredentialRepo) List(context.Context) ([]entities.Credential, error) {
+	return append([]entities.Credential(nil), r.credentials...), nil
+}
 func (r quotaCredentialRepo) Update(context.Context, entities.SecretBox, string, entities.CredentialUpdate) (*entities.Credential, error) {
 	return nil, nil
 }
@@ -45,6 +51,30 @@ func (r quotaCredentialRepo) UpdateOAuthTokens(context.Context, entities.SecretB
 }
 func (r quotaCredentialRepo) RoutesForModel(context.Context, string) ([]entities.RouteCandidate, error) {
 	return nil, nil
+}
+
+func TestSyncAccountRingsSortsPerProviderBySetupName(t *testing.T) {
+	repo := quotaCredentialRepo{credentials: []entities.Credential{
+		{ID: "c5", Name: "c5", Provider: "codex", Status: entities.StatusActive},
+		{ID: "c1", Name: "c1", Provider: "codex", Status: entities.StatusActive},
+		{ID: "c4", Name: "c4", Provider: "codex", Status: entities.StatusActive},
+		{ID: "c2", Name: "c2", Provider: "codex", Status: entities.StatusActive},
+		{ID: "c3", Name: "c3", Provider: "codex", Status: entities.StatusActive},
+		{ID: "c5", Name: "c5", Provider: "opencode-zen", Status: entities.StatusActive},
+		{ID: "c1", Name: "c1", Provider: "opencode-zen", Status: entities.StatusActive},
+		{ID: "c2", Name: "c2", Provider: "opencode-zen", Status: entities.StatusActive},
+		{ID: "disabled", Name: "c0", Provider: "codex", Status: entities.StatusDisabled},
+	}}
+	service := New(nil, credential.NewService(repo, nil))
+	if err := service.SyncAccountRings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(service.rings["codex"], ","); got != "c1,c2,c3,c4,c5" {
+		t.Fatalf("codex ring=%s", got)
+	}
+	if got := strings.Join(service.rings["opencode-zen"], ","); got != "c1,c2,c5" {
+		t.Fatalf("opencode ring=%s", got)
+	}
 }
 
 func TestPercentAndUtilizationWindows(t *testing.T) {

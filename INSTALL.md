@@ -122,10 +122,14 @@ request, including transport and upstream 5xx failures. `ROUTE_RETRIES`
 (default `2`, in addition to the first attempt) applies only to providers that
 do not expose account quota routing.
 
-Accounts are tried in configured priority order, starting from the account that
-most recently succeeded. GoRouter uses that account until it fails, then walks
-the ordered list and wraps once to the beginning. Each eligible account is
-visited at most once in that circle. Codex account-local authorization or model
+Quota-aware accounts are kept in a provider-specific ring sorted by connection
+name and credential ID. The ring and its current checkpoint are shared through
+Redis across router replicas. GoRouter starts at that checkpoint, advances it
+after every failed account, keeps it on the account that succeeds, and wraps
+once to the beginning. Each account eligible for the requested model is visited
+at most once in that fixed request circle. Adding, disabling, or deleting a
+connection rebuilds only that provider's ring while preserving a still-valid
+checkpoint. Codex account-local authorization or model
 availability failures (`401`, `403`, or `404` after the adapter's token refresh)
 also move to the next account instead of terminating the whole route. The
 request returns a provider error only after one complete eligible-account

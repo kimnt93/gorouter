@@ -51,7 +51,8 @@ type Gateway struct {
 
 type ProviderQuotaRouter interface {
 	Available(credentialID string) bool
-	ActiveCredential(provider string) string
+	OrderCredentials(provider string, eligible []string) []string
+	AdvanceAccount(provider, credentialID string, eligible []string)
 	MarkExhausted(credentialID string)
 	MarkInUse(credentialID string)
 }
@@ -261,9 +262,6 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	routeAffinity := chat.RouteAffinity{ScopeID: key.ID, TenantID: key.TenantID, Model: model.Name, Value: affinityValue}
 	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
-	if fillFirst && fillFirstProvider != "" && g.ProviderQuotas != nil {
-		candidates = rotateToActiveCredential(candidates, credentialIDs, g.ProviderQuotas.ActiveCredential(fillFirstProvider))
-	}
 	available := candidates[:0]
 	for _, candidate := range candidates {
 		credentialID := credentialIDs[candidate.ID]
@@ -276,6 +274,25 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		available = append(available, candidate)
 	}
 	candidates = available
+	eligibleAccountIDs := make([]string, 0, len(candidates))
+	if fillFirst && fillFirstProvider != "" && g.ProviderQuotas != nil {
+		for _, candidate := range candidates {
+			eligibleAccountIDs = append(eligibleAccountIDs, credentialIDs[candidate.ID])
+		}
+		accountOrder := g.ProviderQuotas.OrderCredentials(fillFirstProvider, eligibleAccountIDs)
+		ordered := make([]chat.Candidate, 0, len(candidates))
+		for _, credentialID := range accountOrder {
+			for _, candidate := range candidates {
+				if credentialIDs[candidate.ID] == credentialID {
+					ordered = append(ordered, candidate)
+					break
+				}
+			}
+		}
+		if len(ordered) > 0 {
+			candidates = ordered
+		}
+	}
 	if len(candidates) == 0 {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials").Send()
@@ -292,6 +309,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		adapter, ok := g.adapter(runtime.Provider)
 		if !ok || adapter == nil {
 			g.Health.Report(credentialID, false)
+			if fillFirstProvider != "" && g.ProviderQuotas != nil {
+				g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+			}
 			continue
 		}
 		upstreamModel := upstreamModels[candidate.ID]
@@ -370,6 +390,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			break
 		}
 		if result == nil {
+			if fillFirstProvider != "" && g.ProviderQuotas != nil {
+				g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+			}
 			// This account is exhausted for now; mark quota exhaustion so other
 			// replicas skip it, then move on to the next account.
 			if exhausted && g.ProviderQuotas != nil {
@@ -436,22 +459,6 @@ func cloneModelMetadata(metadata *entities.ModelMetadata) *entities.ModelMetadat
 	clone.OutputModalities = append([]string(nil), metadata.OutputModalities...)
 	clone.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...)
 	return &clone
-}
-
-func rotateToActiveCredential(candidates []chat.Candidate, credentialIDs map[string]string, activeCredentialID string) []chat.Candidate {
-	if activeCredentialID == "" || len(candidates) < 2 {
-		return candidates
-	}
-	for index, candidate := range candidates {
-		if credentialIDs[candidate.ID] != activeCredentialID {
-			continue
-		}
-		rotated := make([]chat.Candidate, 0, len(candidates))
-		rotated = append(rotated, candidates[index:]...)
-		rotated = append(rotated, candidates[:index]...)
-		return rotated
-	}
-	return candidates
 }
 
 // A Codex OAuth account can reject a model or lose authorization independently

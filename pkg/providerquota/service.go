@@ -54,6 +54,10 @@ type StateCache interface {
 	ClearExhausted(ctx context.Context, credentialID string) error
 	ActiveCredential(ctx context.Context, provider string) (string, error)
 	MarkActive(ctx context.Context, provider, credentialID string) (bool, error)
+	SyncAccountRing(ctx context.Context, provider string, credentialIDs []string) error
+	AlignAccount(ctx context.Context, provider string, eligible []string) error
+	AccountRing(ctx context.Context, provider string) ([]string, string, error)
+	AdvanceAccount(ctx context.Context, provider, credentialID string, eligible []string) error
 }
 
 type Service struct {
@@ -63,6 +67,7 @@ type Service struct {
 	snapshots   map[string]Snapshot
 	exhausted   map[string]time.Time
 	active      map[string]string
+	rings       map[string][]string
 	store       Store
 	state       StateCache
 }
@@ -71,7 +76,7 @@ func New(client *http.Client, credentials *credential.Service) *Service {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &Service{client: client, credentials: credentials, snapshots: map[string]Snapshot{}, exhausted: map[string]time.Time{}, active: map[string]string{}}
+	return &Service{client: client, credentials: credentials, snapshots: map[string]Snapshot{}, exhausted: map[string]time.Time{}, active: map[string]string{}, rings: map[string][]string{}}
 }
 
 func (s *Service) SetStore(store Store)           { s.store = store }
@@ -108,6 +113,176 @@ func (s *Service) Restore(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// SyncAccountRings rebuilds each quota-aware provider's stable account order
+// from durable credential metadata. Names define operator-visible order and IDs
+// provide a deterministic tie-break. Redis makes the same ring visible to every
+// router replica immediately after a credential change.
+func (s *Service) SyncAccountRings(ctx context.Context) error {
+	if s.credentials == nil {
+		return nil
+	}
+	credentials, err := s.credentials.List(ctx)
+	if err != nil {
+		return err
+	}
+	type account struct {
+		id   string
+		name string
+	}
+	grouped := map[string][]account{}
+	for _, item := range credentials {
+		if item.Status != entities.StatusActive || !Supported(item.Provider) {
+			continue
+		}
+		grouped[item.Provider] = append(grouped[item.Provider], account{id: item.ID, name: strings.ToLower(strings.TrimSpace(item.Name))})
+	}
+	for _, providerID := range []string{"codex", "claude", "kiro", "amazon-q", "opencode-go", "opencode-zen"} {
+		accounts := grouped[providerID]
+		sort.Slice(accounts, func(i, j int) bool {
+			if accounts[i].name == accounts[j].name {
+				return accounts[i].id < accounts[j].id
+			}
+			return accounts[i].name < accounts[j].name
+		})
+		ids := make([]string, len(accounts))
+		for index := range accounts {
+			ids[index] = accounts[index].id
+		}
+		s.mu.Lock()
+		s.rings[providerID] = append([]string(nil), ids...)
+		if !containsCredential(ids, s.active[providerID]) {
+			if len(ids) == 0 {
+				delete(s.active, providerID)
+			} else {
+				s.active[providerID] = ids[0]
+			}
+		}
+		s.mu.Unlock()
+		if s.state != nil {
+			if err := s.state.SyncAccountRing(ctx, providerID, ids); err != nil {
+				return fmt.Errorf("sync %s account ring: %w", providerID, err)
+			}
+		}
+	}
+	return nil
+}
+
+// OrderCredentials filters the provider ring to accounts eligible for one
+// model/owner context and rotates it to the shared checkpoint. The returned
+// slice is one complete cycle and never contains an account twice.
+func (s *Service) OrderCredentials(providerID string, eligible []string) []string {
+	if len(eligible) < 2 {
+		return append([]string(nil), eligible...)
+	}
+	var ring []string
+	checkpoint := ""
+	if s.state != nil {
+		_ = s.state.AlignAccount(context.Background(), providerID, eligible)
+		if sharedRing, sharedCheckpoint, err := s.state.AccountRing(context.Background(), providerID); err == nil {
+			ring, checkpoint = sharedRing, sharedCheckpoint
+		}
+	}
+	if len(ring) == 0 {
+		s.mu.RLock()
+		ring = append([]string(nil), s.rings[providerID]...)
+		checkpoint = s.active[providerID]
+		s.mu.RUnlock()
+	}
+	allowed := make(map[string]bool, len(eligible))
+	for _, id := range eligible {
+		allowed[id] = true
+	}
+	if s.state == nil && !allowed[checkpoint] && len(ring) > 0 {
+		for ringIndex, id := range ring {
+			if id != checkpoint {
+				continue
+			}
+			for offset := 1; offset <= len(ring); offset++ {
+				next := ring[(ringIndex+offset)%len(ring)]
+				if allowed[next] {
+					checkpoint = next
+					s.mu.Lock()
+					s.active[providerID] = next
+					s.mu.Unlock()
+					break
+				}
+			}
+			break
+		}
+	}
+	ordered := make([]string, 0, len(eligible))
+	for _, id := range ring {
+		if allowed[id] {
+			ordered = append(ordered, id)
+			delete(allowed, id)
+		}
+	}
+	missing := make([]string, 0, len(allowed))
+	for id := range allowed {
+		missing = append(missing, id)
+	}
+	sort.Strings(missing)
+	ordered = append(ordered, missing...)
+	if len(ordered) < 2 || checkpoint == "" {
+		return ordered
+	}
+	for ringIndex, id := range ring {
+		if id != checkpoint {
+			continue
+		}
+		for offset := range len(ring) {
+			next := ring[(ringIndex+offset)%len(ring)]
+			for orderedIndex, eligibleID := range ordered {
+				if eligibleID == next {
+					return append(append([]string(nil), ordered[orderedIndex:]...), ordered[:orderedIndex]...)
+				}
+			}
+		}
+	}
+	return ordered
+}
+
+// AdvanceAccount atomically moves the checkpoint from the failed account to
+// the next account eligible for this model. Known-unavailable accounts can be
+// skipped without making later requests restart from an old checkpoint.
+func (s *Service) AdvanceAccount(providerID, credentialID string, eligible []string) {
+	if s.state != nil {
+		_ = s.state.AdvanceAccount(context.Background(), providerID, credentialID, eligible)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ring := s.rings[providerID]
+	if len(ring) == 0 || s.active[providerID] != credentialID {
+		return
+	}
+	allowed := make(map[string]bool, len(eligible))
+	for _, id := range eligible {
+		allowed[id] = true
+	}
+	for index, id := range ring {
+		if id != credentialID {
+			continue
+		}
+		for offset := 1; offset <= len(ring); offset++ {
+			next := ring[(index+offset)%len(ring)]
+			if allowed[next] {
+				s.active[providerID] = next
+				return
+			}
+		}
+	}
+}
+
+func containsCredential(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 func Supported(provider string) bool {

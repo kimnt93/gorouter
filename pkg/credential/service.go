@@ -106,7 +106,7 @@ type Service struct {
 	box                entities.SecretBox
 	discoveryCache     ModelDiscoveryCache
 	discoveryTTL       time.Duration
-	credentialsChanged func()
+	credentialsChanged []func()
 	discoveryGroup     singleflight.Group
 }
 
@@ -121,14 +121,23 @@ func (s *Service) SetModelDiscoveryCache(cache ModelDiscoveryCache, ttl time.Dur
 
 // SetCredentialsChanged registers a lightweight notifier. Callers should use
 // it to wake background reconciliation, not perform provider I/O inline.
-func (s *Service) SetCredentialsChanged(notify func()) { s.credentialsChanged = notify }
+func (s *Service) SetCredentialsChanged(notify func()) {
+	s.credentialsChanged = nil
+	s.AddCredentialsChanged(notify)
+}
+
+func (s *Service) AddCredentialsChanged(notify func()) {
+	if notify != nil {
+		s.credentialsChanged = append(s.credentialsChanged, notify)
+	}
+}
 
 func (s *Service) changed(ctx context.Context, id string) {
 	if s.discoveryCache != nil && id != "" {
 		_ = s.discoveryCache.Delete(ctx, id)
 	}
-	if s.credentialsChanged != nil {
-		s.credentialsChanged()
+	for _, notify := range s.credentialsChanged {
+		notify()
 	}
 }
 

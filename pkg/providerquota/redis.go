@@ -87,3 +87,131 @@ func (r *RedisState) MarkActive(ctx context.Context, provider, id string) (bool,
 	}, id).Int64()
 	return result == 1, err
 }
+
+var syncAccountRingScript = redis.NewScript(`
+redis.call("DEL", KEYS[1])
+if #ARGV > 0 then
+  redis.call("RPUSH", KEYS[1], unpack(ARGV))
+end
+local checkpoint = redis.call("GET", KEYS[2])
+local present = false
+for _, id in ipairs(ARGV) do
+  if id == checkpoint then
+    present = true
+    break
+  end
+end
+if not present then
+  if #ARGV == 0 then
+    redis.call("DEL", KEYS[2])
+  else
+    redis.call("SET", KEYS[2], ARGV[1])
+  end
+end
+return 1
+`)
+
+func (r *RedisState) SyncAccountRing(ctx context.Context, provider string, credentialIDs []string) error {
+	args := make([]any, len(credentialIDs))
+	for index, id := range credentialIDs {
+		args[index] = id
+	}
+	return syncAccountRingScript.Run(ctx, r.client, []string{
+		quotaStatePrefix + "ring:" + provider,
+		quotaStatePrefix + "active:" + provider,
+	}, args...).Err()
+}
+
+var alignAccountScript = redis.NewScript(`
+local eligible = {}
+for _, id in ipairs(ARGV) do
+  eligible[id] = true
+end
+local current = redis.call("GET", KEYS[2])
+if eligible[current] then
+  return current
+end
+local ring = redis.call("LRANGE", KEYS[1], 0, -1)
+if #ring == 0 then
+  return ""
+end
+local start = 1
+for index, id in ipairs(ring) do
+  if id == current then
+    start = index
+    break
+  end
+end
+for offset = 1, #ring do
+  local nextIndex = ((start - 1 + offset) % #ring) + 1
+  if eligible[ring[nextIndex]] then
+    redis.call("SET", KEYS[2], ring[nextIndex])
+    return ring[nextIndex]
+  end
+end
+return ""
+`)
+
+func (r *RedisState) AlignAccount(ctx context.Context, provider string, eligible []string) error {
+	args := make([]any, len(eligible))
+	for index, id := range eligible {
+		args[index] = id
+	}
+	return alignAccountScript.Run(ctx, r.client, []string{
+		quotaStatePrefix + "ring:" + provider,
+		quotaStatePrefix + "active:" + provider,
+	}, args...).Err()
+}
+
+func (r *RedisState) AccountRing(ctx context.Context, provider string) ([]string, string, error) {
+	pipe := r.client.Pipeline()
+	ringCommand := pipe.LRange(ctx, quotaStatePrefix+"ring:"+provider, 0, -1)
+	checkpointCommand := pipe.Get(ctx, quotaStatePrefix+"active:"+provider)
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return nil, "", err
+	}
+	checkpoint, checkpointErr := checkpointCommand.Result()
+	if checkpointErr == redis.Nil {
+		checkpoint = ""
+	} else if checkpointErr != nil {
+		return nil, "", checkpointErr
+	}
+	return ringCommand.Val(), checkpoint, nil
+}
+
+var advanceAccountScript = redis.NewScript(`
+local current = redis.call("GET", KEYS[2])
+if current ~= ARGV[1] then
+  return 0
+end
+local eligible = {}
+for index = 2, #ARGV do
+  eligible[ARGV[index]] = true
+end
+local ring = redis.call("LRANGE", KEYS[1], 0, -1)
+for index, id in ipairs(ring) do
+  if id == ARGV[1] then
+    for offset = 1, #ring do
+      local nextIndex = ((index - 1 + offset) % #ring) + 1
+      if eligible[ring[nextIndex]] then
+        redis.call("SET", KEYS[2], ring[nextIndex])
+        return 1
+      end
+    end
+  end
+end
+return 0
+`)
+
+func (r *RedisState) AdvanceAccount(ctx context.Context, provider, credentialID string, eligible []string) error {
+	args := make([]any, 0, 1+len(eligible))
+	args = append(args, credentialID)
+	for _, id := range eligible {
+		args = append(args, id)
+	}
+	return advanceAccountScript.Run(ctx, r.client, []string{
+		quotaStatePrefix + "ring:" + provider,
+		quotaStatePrefix + "active:" + provider,
+	}, args...).Err()
+}
