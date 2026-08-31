@@ -263,12 +263,16 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	routeAffinity := chat.RouteAffinity{ScopeID: key.ID, TenantID: key.TenantID, Model: model.Name, Value: affinityValue}
 	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
 	available := candidates[:0]
+	quotaBlocked := 0
+	healthBlocked := 0
 	for _, candidate := range candidates {
 		credentialID := credentialIDs[candidate.ID]
 		if g.ProviderQuotas != nil && !g.ProviderQuotas.Available(credentialID) {
+			quotaBlocked++
 			continue
 		}
 		if !g.Health.Available(credentialID) {
+			healthBlocked++
 			continue
 		}
 		available = append(available, candidate)
@@ -294,11 +298,17 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 	}
 	if len(candidates) == 0 {
+		if fillFirstProvider != "" && quotaBlocked > 0 && healthBlocked == 0 {
+			g.recordError(key, model, "", fiber.StatusTooManyRequests, started, "provider account quota exhausted")
+			return responseapi.For(c).Error(fiber.StatusTooManyRequests, "all provider accounts are out of quota", "rate_limit_error", "provider_quota_exhausted").Send()
+		}
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no healthy credentials available")
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no healthy credentials available", "service_unavailable", "no_credentials").Send()
 	}
 	lastStatus := fiber.StatusBadGateway
 	lastCredential := ""
+	quotaFailures := quotaBlocked
+	onlyQuotaFailures := fillFirstProvider != "" && healthBlocked == 0
 	// Attempt every eligible account in one bounded circle. Quota-aware provider
 	// accounts get exactly one attempt so a slow or failing account cannot consume
 	// the request budget before routing reaches the next account.
@@ -308,6 +318,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		runtime := runtimes[candidate.ID]
 		adapter, ok := g.adapter(runtime.Provider)
 		if !ok || adapter == nil {
+			onlyQuotaFailures = false
 			g.Health.Report(credentialID, false)
 			if fillFirstProvider != "" && g.ProviderQuotas != nil {
 				g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
@@ -390,6 +401,11 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			break
 		}
 		if result == nil {
+			if exhausted {
+				quotaFailures++
+			} else {
+				onlyQuotaFailures = false
+			}
 			if fillFirstProvider != "" && g.ProviderQuotas != nil {
 				g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
 			}
@@ -424,6 +440,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
 	}
 	c.Set("X-Cache", "bypass")
+	if onlyQuotaFailures && quotaFailures > 0 {
+		g.recordError(key, model, lastCredential, fiber.StatusTooManyRequests, started, "provider account quota exhausted")
+		return responseapi.For(c).Error(fiber.StatusTooManyRequests, "all provider accounts are out of quota", "rate_limit_error", "provider_quota_exhausted").Send()
+	}
 	g.recordError(key, model, lastCredential, lastStatus, started, "all credentials failed")
 	responseStatus := fiber.StatusBadGateway
 	if lastStatus >= fiber.StatusBadRequest && lastStatus < fiber.StatusInternalServerError {

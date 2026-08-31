@@ -132,8 +132,10 @@ connection rebuilds only that provider's ring while preserving a still-valid
 checkpoint. Codex account-local authorization or model
 availability failures (`401`, `403`, or `404` after the adapter's token refresh)
 also move to the next account instead of terminating the whole route. The
-request returns a provider error only after one complete eligible-account
-circle fails. A previously recorded exhausted account is skipped until its
+request returns an HTTP `429` rate-limit error after one complete eligible-
+account circle is out of provider quota. Accounts already marked exhausted in
+Redis produce the same `429`, rather than a `503`, so coding clients can pause
+and resume. A previously recorded exhausted account is skipped until its
 provider quota reset; refresh quota data or wait for the reset before trying it
 again. Set `ROUTE_RETRIES=0` to disable transient same-account retries.
 

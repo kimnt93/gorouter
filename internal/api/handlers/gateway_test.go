@@ -842,6 +842,72 @@ func TestGatewayCodexQuotaLimitMovesImmediatelyToNextAccount(t *testing.T) {
 	}
 }
 
+func TestGatewayFullQuotaRingReturns429(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 2}, {CredentialID: "cred-b", Priority: 1}, {CredentialID: "cred-c", Priority: 0}}
+	runtimes := map[string]*entities.CredentialRuntime{
+		"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth},
+		"cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth},
+		"cred-c": {ID: "cred-c", Provider: "codex", Kind: entities.KindOAuth},
+	}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusTooManyRequests, "cred-b": http.StatusPaymentRequired, "cred-c": http.StatusTooManyRequests}}
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true, "cred-c": true}, active: map[string]string{"codex": "cred-b"}}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Codex:  upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 5,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusTooManyRequests || !strings.Contains(string(body), `"code":"provider_quota_exhausted"`) {
+		t.Fatalf("status=%d calls=%v body=%s", response.StatusCode, upstream.calls, body)
+	}
+	if got, want := strings.Join(upstream.calls, ","), "cred-b,cred-c,cred-a"; got != want {
+		t.Fatalf("calls=%s want=%s", got, want)
+	}
+}
+
+func TestGatewayKnownExhaustedQuotaRingReturns429WithoutProviderCall(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
+	runtimes := map[string]*entities.CredentialRuntime{
+		"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth},
+		"cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth},
+	}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusOK, "cred-b": http.StatusOK}}
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": false, "cred-b": false}}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Codex:  upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusTooManyRequests || len(upstream.calls) != 0 || !strings.Contains(string(body), `"code":"provider_quota_exhausted"`) {
+		t.Fatalf("status=%d calls=%v body=%s", response.StatusCode, upstream.calls, body)
+	}
+}
+
 func TestGatewayQuotaProviderUsesFillFirstEvenForRoundRobinBlend(t *testing.T) {
 	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 10}, {CredentialID: "cred-b", Priority: 5}}
