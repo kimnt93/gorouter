@@ -20,7 +20,9 @@ beforeEach(() => {
 
 test('opens request details from a clicked log row and closes the popup', async () => {
   render(<LogsPage />)
-  fireEvent.click(await screen.findByRole('button', { name: 'View request usage-1 details' }))
+  const row = await screen.findByRole('button', { name: 'View request usage-1 details' })
+  expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument()
+  fireEvent.click(row)
   expect(screen.getByRole('dialog', { name: 'Request usage-1' })).toBeInTheDocument()
   expect(screen.getByText('Safe metadata only')).toBeInTheDocument()
   expect(screen.getByText('cred-1')).toBeInTheDocument()
