@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -182,13 +181,56 @@ func TestKiroAndAmazonQDevicePollPersistDynamicAWSClient(t *testing.T) {
 	}
 }
 
-func TestAntigravityRequiresRegisteredOAuthConfiguration(t *testing.T) {
-	service := New(nil, credential.NewService(&oauthRepoStub{}, oauthBoxStub{}), Config{})
-	if service.OAuthAvailable("antigravity") {
-		t.Fatal("Antigravity advertised OAuth without configuration")
+func TestAntigravityCompletesOAuthAndBootstrapsProject(t *testing.T) {
+	var tokenForm url.Values
+	loadCalls := 0
+	service, repo := oauthTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			_ = r.ParseForm()
+			tokenForm = r.PostForm
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access", "refresh_token": "refresh", "expires_in": 3600})
+		case "/oauth2/v1/userinfo":
+			_ = json.NewEncoder(w).Encode(map[string]any{"email": "person@example.test"})
+		case "/v1internal:loadCodeAssist":
+			loadCalls++
+			if loadCalls == 1 {
+				_ = json.NewEncoder(w).Encode(map[string]any{})
+			} else {
+				_ = json.NewEncoder(w).Encode(map[string]any{"cloudaicompanionProject": map[string]any{"id": "project-1"}})
+			}
+		case "/v1internal:onboardUser":
+			_ = json.NewEncoder(w).Encode(map[string]any{"done": true})
+		default:
+			t.Fatalf("unexpected endpoint %s", r.URL.Path)
+		}
+	}))
+	start, err := service.StartContext(context.Background(), "antigravity", "master::")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := service.StartContext(context.Background(), "antigravity", "master::"); !errors.Is(err, ErrProviderNotConfigured) {
-		t.Fatalf("missing configuration error = %v", err)
+	created, err := service.Complete(context.Background(), CompleteInput{
+		Provider: "antigravity", FlowID: start.FlowID, Callback: "http://localhost:51121/oauth-callback?code=returned&state=" + start.FlowID, SessionBinding: "master::",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Provider != "antigravity" || repo.created.OAuthMeta.ProjectID != "project-1" || repo.created.OAuthMeta.Email != "person@example.test" {
+		t.Fatalf("created=%+v input=%+v", created, repo.created)
+	}
+	if tokenForm.Get("code_verifier") == "" || tokenForm.Get("client_id") == "" || tokenForm.Get("client_secret") == "" {
+		t.Fatalf("token form omitted OAuth fields: %v", tokenForm)
+	}
+}
+
+func TestAntigravityUsesPublicOAuthClientByDefaultAndAllowsOverrides(t *testing.T) {
+	service := New(nil, credential.NewService(&oauthRepoStub{}, oauthBoxStub{}), Config{})
+	if !service.OAuthAvailable("antigravity") {
+		t.Fatal("Antigravity public OAuth client was unavailable")
+	}
+	start, err := service.StartContext(context.Background(), "antigravity", "master::")
+	if err != nil || !strings.Contains(start.AuthorizeURL, "accounts.google.com") || !strings.Contains(start.AuthorizeURL, "code_challenge") {
+		t.Fatalf("default Antigravity start=%+v err=%v", start, err)
 	}
 	service = New(nil, credential.NewService(&oauthRepoStub{}, oauthBoxStub{}), Config{AntigravityClientID: "not-a-google-client", AntigravityClientSecret: "synthetic-secret"})
 	if service.OAuthAvailable("antigravity") {

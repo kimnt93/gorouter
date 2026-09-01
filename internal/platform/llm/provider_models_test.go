@@ -16,6 +16,11 @@ func TestSubscriptionCatalogsNeverCreateReasoningEffortModelAliases(t *testing.T
 	}
 	efforts := []string{"low", "medium", "high", "xhigh", "max", "ultra"}
 	for providerID, discoverer := range discoverers {
+		if providerID == "antigravity" {
+			// Antigravity discovery is intentionally account-authenticated and is
+			// covered with a mock live catalog in antigravity_test.go.
+			continue
+		}
 		models, err := discoverer.DiscoverModels(context.Background(), &entities.CredentialRuntime{Provider: providerID})
 		if err != nil {
 			t.Fatalf("%s: %v", providerID, err)

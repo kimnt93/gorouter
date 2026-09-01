@@ -217,7 +217,8 @@ func main() {
 	cursor := &llm.CursorAdapter{HTTP: client, Persister: credSvc}
 	kiro := &llm.KiroAdapter{HTTP: client, Persister: credSvc}
 	amazonQ := &llm.AmazonQAdapter{HTTP: client, Persister: credSvc}
-	antigravity := &llm.AntigravityAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.AntigravityOAuthClientID, ClientSecret: cfg.AntigravityOAuthClientSecret}
+	antigravityClientID, antigravityClientSecret := oauthpkg.ResolveAntigravityClientCredentials(cfg.AntigravityOAuthClientID, cfg.AntigravityOAuthClientSecret)
+	antigravity := &llm.AntigravityAdapter{HTTP: client, Persister: credSvc, ClientID: antigravityClientID, ClientSecret: antigravityClientSecret}
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
 	opencodeZen := &llm.OpenCodeZenAdapter{HTTP: client}
 	providerProbes := map[string]credential.ConnectivityProber{
@@ -254,8 +255,8 @@ func main() {
 		ClaudeClientID: cfg.OAuthClientID, ClaudeTokenURL: cfg.OAuthTokenURL,
 		CodexClientID: cfg.CodexOAuthClientID, CodexTokenURL: cfg.CodexOAuthTokenURL,
 		GitHubClientID: cfg.GitHubOAuthClientID, GrokClientID: cfg.GrokOAuthClientID,
-		KimiClientID: cfg.KimiOAuthClientID, AntigravityClientID: cfg.AntigravityOAuthClientID,
-		AntigravityClientSecret: cfg.AntigravityOAuthClientSecret,
+		KimiClientID: cfg.KimiOAuthClientID, AntigravityClientID: antigravityClientID,
+		AntigravityClientSecret: antigravityClientSecret,
 	})
 	if redisClient != nil {
 		oauthSvc.SetFlowStore(oauthpkg.NewRedisFlowStore(redisClient))

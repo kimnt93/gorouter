@@ -7,6 +7,16 @@ and prompt caching.
 The web dashboard includes activity analysis, request logs, provider cache-token
 metrics, users, organizations, API keys, models, credentials, and audit events.
 
+## Providers
+
+Connect API-key or OAuth accounts from `/dashboard/providers`. Antigravity uses
+Google OAuth and exposes the account's live Cloud Code model catalog.
+
+| Authentication | Providers |
+|---|---|
+| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible |
+| OAuth | Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Grok Build, xAI, Kimi Code, Cline, ClinePass, Kilo Code, Kiro, Amazon Q, Google Antigravity |
+
 ## Start with Docker
 
 Create the environment file and replace every placeholder secret:

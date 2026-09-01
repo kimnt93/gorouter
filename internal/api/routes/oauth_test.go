@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -366,7 +367,7 @@ func TestOAuthCompleteAllowsOnlyMasterToBindAnActivePersonalOwner(t *testing.T) 
 	}
 }
 
-func TestAntigravityStartReturnsConfigurationErrorAndIsNotAdvertised(t *testing.T) {
+func TestAntigravityIsAdvertisedAndStartsWithPublicOAuthClient(t *testing.T) {
 	service := oauthpkg.New(nil, credential.NewService(&oauthRouteCredentialRepo{}, oauthRouteBox{}), oauthpkg.Config{})
 	app := routes.New(routes.Dependencies{
 		Auth:  auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}),
@@ -383,28 +384,29 @@ func TestAntigravityStartReturnsConfigurationErrorAndIsNotAdvertised(t *testing.
 	if err := json.NewDecoder(response.Body).Decode(&catalog); err != nil {
 		t.Fatal(err)
 	}
+	found := false
 	for _, provider := range catalog.Data {
-		if provider.ID == "antigravity" && provider.OAuthSupported {
-			t.Fatal("Antigravity OAuth advertised without configuration")
+		if provider.ID == "antigravity" {
+			found = provider.OAuthSupported
 		}
+	}
+	if !found {
+		t.Fatal("Antigravity OAuth was not advertised")
 	}
 
 	start := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/antigravity/start", "master-secret", nil)
 	defer start.Body.Close()
-	if start.StatusCode != http.StatusServiceUnavailable {
+	if start.StatusCode != http.StatusOK {
 		t.Fatalf("start status=%d", start.StatusCode)
 	}
-	var problem struct {
-		Error struct {
-			Type    string `json:"type"`
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+	var flow struct {
+		FlowType     string `json:"flow_type"`
+		AuthorizeURL string `json:"authorize_url"`
 	}
-	if err := json.NewDecoder(start.Body).Decode(&problem); err != nil {
+	if err := json.NewDecoder(start.Body).Decode(&flow); err != nil {
 		t.Fatal(err)
 	}
-	if problem.Error.Type != "configuration_error" || problem.Error.Code != "oauth_provider_not_configured" || problem.Error.Message != "OAuth provider is not configured" {
-		t.Fatalf("configuration problem=%+v", problem.Error)
+	if flow.FlowType != "authorization_code" || !strings.Contains(flow.AuthorizeURL, "accounts.google.com") || !strings.Contains(flow.AuthorizeURL, "code_challenge") {
+		t.Fatalf("flow=%+v", flow)
 	}
 }

@@ -13,7 +13,7 @@ func TestCatalogHasStableUniqueDefinitions(t *testing.T) {
 		}
 		seen[definition.ID] = true
 	}
-	for _, required := range []string{"claude", "codex", "openai", "anthropic", "gemini", "groq", "openrouter", "opencode-zen"} {
+	for _, required := range []string{"claude", "codex", "openai", "anthropic", "gemini", "groq", "openrouter", "opencode-zen", "antigravity"} {
 		if !seen[required] {
 			t.Fatalf("missing provider %q", required)
 		}

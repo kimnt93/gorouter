@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getRecent } from '../api/client'
 import type { UsageEvent } from '../api/contracts'
+import { Modal } from '../components/Modal'
 import { PageError, PageLoading } from '../components/PageState'
 import { RangeSelector } from '../components/RangeSelector'
 import { TokenBreakdown } from '../components/TokenBreakdown'
@@ -15,6 +16,7 @@ export function LogsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [version, setVersion] = useState(0)
+  const [selected, setSelected] = useState<UsageEvent | null>(null)
   useEffect(() => {
     let live = true
     setLoading(true); setError('')
@@ -27,11 +29,31 @@ export function LogsPage() {
     <header className="page-header"><div><span className="eyebrow">Operations / Logs</span><h1>Request logs</h1><p>Inspect safe request metadata, provider routing, token accounting, cost, and latency. Prompt and completion content is never stored.</p></div><span className="live-indicator"><i /> Live data</span></header>
     <RangeSelector {...filterState} onChange={filterState.setFilters} showRange={false} />
     <div className="secondary-filters"><label className="select-field"><span>Model</span><SearchableSelect value={filterState.filters.model ?? ''} onChange={(value) => filterState.setFilters({ ...filterState.filters, model: value })} searchPlaceholder="Search models" options={[{ value: '', label: 'All models' }, ...filterState.models.map((model) => ({ value: model.name, label: model.name, meta: model.upstream_model }))]} /></label><label className="select-field small"><span>Status</span><SearchableSelect value={filterState.filters.status ?? ''} onChange={(value) => filterState.setFilters({ ...filterState.filters, status: value })} options={['', '200', '400', '401', '403', '429', '500', '502', '503'].map((status) => ({ value: status, label: status || 'All statuses' }))} /></label></div>
-    {loading ? <PageLoading /> : error ? <PageError message={error} retry={() => setVersion((value) => value + 1)} /> : <section className="panel table-panel"><div className="table-toolbar"><span>{formatInteger(events.length)} loaded requests</span><span className="token-order">tokens = [in / out / cache read / cache write]</span></div><div className="table-scroll"><table className="logs-table"><thead><tr><th>Status</th><th>Model</th><th>Provider</th><th>User</th><th>Tokens [I/O/CR/CW]</th><th>Cost</th><th>Latency</th><th>Time</th></tr></thead><tbody>{events.map((event) => { const actor = event.username || event.actor_type || 'legacy'; return <tr key={event.id}><td><span className={event.status_code >= 200 && event.status_code < 400 ? 'status success' : 'status failure'}>{event.status_code}</span></td><td><strong><TruncatedText>{event.model}</TruncatedText></strong><small title={event.upstream_model || 'direct'}>{event.upstream_model || 'direct'}</small></td><td><strong><TruncatedText>{event.provider || 'unknown'}</TruncatedText></strong><small title={event.credential_id || 'router cache'}>{event.credential_id ? `credential · ${event.credential_id.slice(0, 10)}` : 'router cache'}</small></td><td><TruncatedText>{actor}</TruncatedText><small title={event.organization_id || 'personal'}>{event.organization_id ? `org · ${event.organization_id.slice(0, 10)}` : 'personal'}</small></td><td><TokenBreakdown compact input={event.prompt_tokens} output={event.completion_tokens} cacheRead={event.cache_read_tokens} cacheWrite={event.cache_write_tokens} /></td><td><CostLabel event={event} /></td><td>{formatInteger(event.duration_ms)} ms</td><td><time dateTime={event.ts} title={formatDateTime(event.ts)}>{relativeTime(event.ts)}</time></td></tr> })}</tbody></table></div>{events.length === 0 && <div className="empty-state"><strong>No matching requests</strong><span>Try changing the filters.</span></div>}{cursor && <div className="load-more"><button className="button secondary" onClick={loadMore}>Load older requests</button></div>}</section>}
+    {loading ? <PageLoading /> : error ? <PageError message={error} retry={() => setVersion((value) => value + 1)} /> : <section className="panel table-panel"><div className="table-toolbar"><span>{formatInteger(events.length)} loaded requests</span><span className="token-order">tokens = [in / out / cache read / cache write]</span></div><div className="table-scroll"><table className="logs-table"><thead><tr><th>Status</th><th>Model</th><th>Provider</th><th>User</th><th>Tokens [I/O/CR/CW]</th><th>Cost</th><th>Latency</th><th>Time</th></tr></thead><tbody>{events.map((event) => { const actor = event.username || event.actor_type || 'legacy'; return <tr key={event.id} tabIndex={0} role="button" aria-label={`View request ${event.id} details`} onClick={() => setSelected(event)} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter' || keyEvent.key === ' ') { keyEvent.preventDefault(); setSelected(event) } }}><td><span className={event.status_code >= 200 && event.status_code < 400 ? 'status success' : 'status failure'}>{event.status_code}</span></td><td><strong><TruncatedText>{event.model}</TruncatedText></strong><small title={event.upstream_model || 'direct'}>{event.upstream_model || 'direct'}</small></td><td><strong><TruncatedText>{event.provider || 'unknown'}</TruncatedText></strong><small title={event.credential_id || 'router cache'}>{event.credential_id ? `credential · ${event.credential_id.slice(0, 10)}` : 'router cache'}</small></td><td><TruncatedText>{actor}</TruncatedText><small title={event.organization_id || 'personal'}>{event.organization_id ? `org · ${event.organization_id.slice(0, 10)}` : 'personal'}</small></td><td><TokenBreakdown compact input={event.prompt_tokens} output={event.completion_tokens} cacheRead={event.cache_read_tokens} cacheWrite={event.cache_write_tokens} /></td><td><CostLabel event={event} /></td><td>{formatInteger(event.duration_ms)} ms</td><td><time dateTime={event.ts} title={formatDateTime(event.ts)}>{relativeTime(event.ts)}</time></td></tr> })}</tbody></table></div>{events.length === 0 && <div className="empty-state"><strong>No matching requests</strong><span>Try changing the filters.</span></div>}{cursor && <div className="load-more"><button className="button secondary" onClick={loadMore}>Load older requests</button></div>}</section>}
+    {selected && <LogDetailModal event={selected} onClose={() => setSelected(null)} />}
   </>
 }
 
 function CostLabel({ event }: { event: Pick<UsageEvent, 'cost_usd' | 'priced'> }) {
   const free = !event.priced || event.cost_usd === 0
   return <span className={free ? 'cost-label free' : 'cost-label'}>{formatUSD(free ? 0 : event.cost_usd)}{free && <em>Free</em>}</span>
+}
+
+
+function LogDetailModal({ event, onClose }: { event: UsageEvent; onClose: () => void }) {
+  const actor = event.username || event.actor_type || 'legacy'
+  const detail = [
+    ['Status', String(event.status_code)], ['Time', formatDateTime(event.ts)],
+    ['Model', event.model || 'unknown'], ['Upstream model', event.upstream_model || 'direct'],
+    ['Provider', event.provider || 'unknown'], ['Credential', event.credential_id || 'router cache'],
+    ['Actor', actor], ['Actor type', event.actor_type || 'legacy'],
+    ['User ID', event.user_id || '—'], ['Organization ID', event.organization_id || 'personal'],
+    ['API key ID', event.api_key_id || 'master/direct'], ['Duration', `${formatInteger(event.duration_ms)} ms`],
+    ['Cache hit', event.cache_hit ? 'yes' : 'no'], ['Cost', !event.priced || event.cost_usd === 0 ? '$0.000000 · Free' : formatUSD(event.cost_usd)],
+  ]
+  return <Modal title={`Request ${event.id}`} onClose={onClose} className="usage-detail-modal">
+    <div className="safe-note"><strong>Safe metadata only</strong><span>Prompts, completions, credentials, and raw provider errors are not stored in request logs.</span></div>
+    <dl className="detail-grid usage-detail-grid">{detail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    <section className="conversation-section"><div className="conversation-heading"><div><span className="eyebrow">Token accounting</span><h3>[input / output / cache read / cache write]</h3></div></div><TokenBreakdown input={event.prompt_tokens} output={event.completion_tokens} cacheRead={event.cache_read_tokens} cacheWrite={event.cache_write_tokens} /></section>
+  </Modal>
 }

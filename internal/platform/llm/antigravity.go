@@ -8,11 +8,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+)
+
+const (
+	antigravityRuntimeBaseURL  = "https://daily-cloudcode-pa.googleapis.com"
+	antigravityFallbackBaseURL = "https://cloudcode-pa.googleapis.com"
+	antigravityUserAgent       = "antigravity/1.11.9 darwin/arm64"
 )
 
 type AntigravityAdapter struct {
@@ -44,9 +51,13 @@ func (a *AntigravityAdapter) Send(ctx context.Context, cr *entities.CredentialRu
 	}
 	base := strings.TrimRight(cr.BaseURL, "/")
 	if base == "" {
-		base = "https://cloudcode-pa.googleapis.com"
+		base = antigravityRuntimeBaseURL
 	}
-	result, err := postJSON(ctx, a.client(), base+path, map[string]string{"Authorization": "Bearer " + cr.OAuthAccess, "Accept": "application/json", "User-Agent": "antigravity/1.11.9 linux/amd64"}, payload)
+	headers := map[string]string{"Authorization": "Bearer " + cr.OAuthAccess, "Accept": "application/json", "User-Agent": antigravityUserAgent}
+	if project := strings.TrimSpace(cr.OAuthMeta.ProjectID); project != "" {
+		headers["x-goog-user-project"] = project
+	}
+	result, err := postJSON(ctx, a.client(), base+path, headers, payload)
 	if err == nil && result.StatusCode == http.StatusUnauthorized && a.Persister != nil && canRetryOAuth(ctx) {
 		result.Body.Close()
 		if refreshErr := refreshOAuthForm(ctx, a.HTTP, a.Persister, cr, "https://oauth2.googleapis.com/token", a.ClientID, a.ClientSecret, nil); refreshErr != nil {
@@ -248,7 +259,7 @@ func antigravityStream(upstream io.ReadCloser, model string) io.ReadCloser {
 func (a *AntigravityAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime) (int, error) {
 	base := strings.TrimRight(cr.BaseURL, "/")
 	if base == "" {
-		base = "https://cloudcode-pa.googleapis.com"
+		base = antigravityRuntimeBaseURL
 	}
 	payload := []byte(`{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}`)
 	res, err := postJSON(ctx, a.client(), base+"/v1internal:loadCodeAssist", map[string]string{"Authorization": "Bearer " + cr.OAuthAccess, "Accept": "application/json"}, payload)
@@ -259,6 +270,101 @@ func (a *AntigravityAdapter) Probe(ctx context.Context, cr *entities.CredentialR
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
 	return res.StatusCode, nil
 }
-func (a *AntigravityAdapter) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
-	return modelsFor("antigravity", "gemini-3.1-pro-preview", "gemini-3-flash", "claude-sonnet-4.6", "gpt-oss-120b"), nil
+func (a *AntigravityAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	if cr == nil || strings.TrimSpace(cr.OAuthAccess) == "" {
+		return nil, fmt.Errorf("Antigravity OAuth token is unavailable")
+	}
+	configuredBase := strings.TrimRight(cr.BaseURL, "/")
+	bases := []string{configuredBase}
+	if configuredBase == "" || configuredBase == antigravityRuntimeBaseURL || configuredBase == antigravityFallbackBaseURL {
+		bases = []string{antigravityRuntimeBaseURL, antigravityFallbackBaseURL, "https://daily-cloudcode-pa.sandbox.googleapis.com"}
+	}
+	body := []byte(`{}`)
+	if project := strings.TrimSpace(cr.OAuthMeta.ProjectID); project != "" {
+		body, _ = json.Marshal(struct {
+			Project string `json:"project"`
+		}{Project: project})
+	}
+	var lastStatus int
+	for _, base := range bases {
+		result, err := postJSON(ctx, a.client(), base+"/v1internal:fetchAvailableModels", map[string]string{
+			"Authorization": "Bearer " + cr.OAuthAccess,
+			"Accept":        "application/json",
+			"User-Agent":    antigravityUserAgent,
+		}, body)
+		if err != nil {
+			continue
+		}
+		lastStatus = result.StatusCode
+		if result.StatusCode < 200 || result.StatusCode >= 300 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(result.Body, 1<<20))
+			result.Body.Close()
+			if result.StatusCode == http.StatusUnauthorized || result.StatusCode == http.StatusForbidden {
+				break
+			}
+			continue
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(result.Body, 8<<20))
+		result.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		models, parseErr := parseAntigravityModels(payload)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+	}
+	if lastStatus != 0 {
+		return nil, fmt.Errorf("Antigravity model discovery returned HTTP %d", lastStatus)
+	}
+	return nil, fmt.Errorf("Antigravity model discovery failed")
+}
+
+func parseAntigravityModels(payload []byte) ([]credential.ProviderModel, error) {
+	var response struct {
+		Models map[string]struct {
+			DisplayName     string `json:"displayName"`
+			Description     string `json:"description"`
+			IsInternal      bool   `json:"isInternal"`
+			ContextWindow   int64  `json:"contextWindow"`
+			MaxOutputTokens int64  `json:"maxOutputTokens"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(payload, &response); err != nil {
+		return nil, fmt.Errorf("parse Antigravity models: %w", err)
+	}
+	ids := make([]string, 0, len(response.Models))
+	for id, item := range response.Models {
+		if item.IsInternal || !antigravityChatModel(id) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	models := make([]credential.ProviderModel, 0, len(ids))
+	for _, id := range ids {
+		item := response.Models[id]
+		models = append(models, credential.ProviderModel{
+			ID: id, Object: "model", OwnedBy: "google-antigravity", Name: item.DisplayName,
+			Description: item.Description, ContextLength: item.ContextWindow, MaxOutputTokens: item.MaxOutputTokens,
+			InputModalities: []string{"text", "image"}, OutputModalities: []string{"text"},
+		})
+	}
+	return models, nil
+}
+
+func antigravityChatModel(id string) bool {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return false
+	}
+	for _, token := range []string{"image", "imagen", "audio", "tts", "embedding", "embed", "video", "veo", "tab_"} {
+		if strings.Contains(id, token) {
+			return false
+		}
+	}
+	return strings.Contains(id, "gemini") || strings.Contains(id, "claude") || strings.Contains(id, "gpt")
 }

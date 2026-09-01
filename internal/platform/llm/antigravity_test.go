@@ -72,3 +72,32 @@ func TestAntigravityStreamConvertsTextAndToolCalls(t *testing.T) {
 		}
 	}
 }
+
+func TestAntigravityDiscoveryUsesAuthenticatedLiveCatalog(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1internal:fetchAvailableModels" || r.Method != http.MethodPost {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer google-token" {
+			t.Fatalf("authorization=%q", got)
+		}
+		var body struct {
+			Project string `json:"project"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Project != "project-1" {
+			t.Fatalf("body=%+v err=%v", body, err)
+		}
+		_, _ = io.WriteString(w, `{"models":{"gemini-3.7-flash-high":{"displayName":"Gemini Flash","contextWindow":1048576,"maxOutputTokens":65536},"claude-sonnet-4-6":{"displayName":"Claude Sonnet"},"imagen-4":{"displayName":"Imagen"},"internal":{"isInternal":true}}}`)
+	}))
+	defer server.Close()
+
+	models, err := (&AntigravityAdapter{HTTP: server.Client()}).DiscoverModels(context.Background(), &entities.CredentialRuntime{
+		BaseURL: server.URL, OAuthAccess: "google-token", OAuthMeta: entities.OAuthMetadata{ProjectID: "project-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0].ID != "claude-sonnet-4-6" || models[1].ID != "gemini-3.7-flash-high" || models[1].ContextLength != 1048576 {
+		t.Fatalf("models=%+v", models)
+	}
+}
