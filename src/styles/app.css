@@ -518,3 +518,26 @@ h2 { font-size: 19px; }
 
 .log-detail-button { padding: 7px 11px; border: 1px solid #484848; border-radius: 6px; color: #d8d8d8; background: #252525; cursor: pointer; font: 600 11px ui-monospace, monospace; }
 .log-detail-button:hover, .log-detail-button:focus-visible { border-color: #777; background: #333; outline: none; }
+
+/* Provider accounts stay compact inside one provider card. */
+.provider-card-react.has-accounts { grid-column: 1 / -1; }
+.connection-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.connection-grid .connection-row { min-width: 0; height: fit-content; margin-top: 0; padding: 12px; }
+.connection-grid .provider-quota { padding: 10px; }
+.connection-grid .provider-quota-head { align-items: flex-start; }
+.connection-grid .quota-window { margin-top: 9px; }
+.connection-grid .connection-row .compact-actions { margin-left: 0; gap: 5px 9px; }
+.connection-grid .connection-row .compact-actions button { font-size: 11px; }
+.reset-credit-panel { margin-top: 9px; }
+.reset-credit-panel > button { border: 1px solid #4b4b4b; border-radius: 6px; padding: 6px 9px; color: #ddd; background: #2b2b2b; cursor: pointer; font-size: 11px; }
+.reset-credit-panel > button:disabled { cursor: wait; opacity: .65; }
+.reset-credit-modal { width: min(760px, 100%); }
+.reset-credit-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 10px; color: #aaa; font-size: 12px; }
+.reset-credit-toolbar button { border: 1px solid #4b4b4b; border-radius: 6px; padding: 7px 10px; color: #ddd; background: #2b2b2b; cursor: pointer; }
+.reset-credit-list { display: grid; gap: 8px; }
+.reset-credit-list article { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 12px; border: 1px solid #3b3b3b; border-radius: 8px; background: #191919; }
+.reset-credit-list strong, .reset-credit-list small { display: block; }
+.reset-credit-list strong { color: #eee; font-size: 13px; }
+.reset-credit-list small { margin-top: 4px; color: #999; font-size: 11px; }
+@media (max-width: 1280px) { .connection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .connection-grid { grid-template-columns: 1fr; } }

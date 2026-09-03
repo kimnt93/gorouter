@@ -595,7 +595,10 @@ func (h *CredentialConnectivity) CodexResetCredits(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodGet {
 		result, err := h.Quotas.ListCodexResetCredits(c.Context(), c.Params("id"))
 		if err != nil {
-			return responseapi.For(c).Error(fiber.StatusBadGateway, "failed to load Codex reset credits", "upstream_error", "reset_credit_list_failed").Send()
+			return codexResetCreditError(c, err, "failed to load Codex reset credits", "reset_credit_list_failed")
+		}
+		if h.Health != nil {
+			h.Health.Report(c.Params("id"), true)
 		}
 		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(result).Send()
 	}
@@ -605,7 +608,22 @@ func (h *CredentialConnectivity) CodexResetCredits(c fiber.Ctx) error {
 	}
 	result, err := h.Quotas.ConsumeCodexResetCredit(c.Context(), c.Params("id"), input.SelectionToken, input.RequestID)
 	if err != nil {
-		return responseapi.For(c).Error(fiber.StatusBadGateway, "failed to redeem Codex reset credit", "upstream_error", "reset_credit_failed").Send()
+		return codexResetCreditError(c, err, "failed to redeem Codex reset credit", "reset_credit_failed")
+	}
+	if h.Health != nil {
+		h.Health.Report(c.Params("id"), true)
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(result).Send()
+}
+
+func codexResetCreditError(c fiber.Ctx, err error, fallbackMessage, fallbackCode string) error {
+	var resetErr *providerquota.ResetCreditError
+	if errors.As(err, &resetErr) {
+		errorType := "upstream_error"
+		if resetErr.Status == fiber.StatusConflict || resetErr.Status == fiber.StatusBadRequest {
+			errorType = "invalid_request_error"
+		}
+		return responseapi.For(c).Error(resetErr.Status, resetErr.Message, errorType, resetErr.Code).Send()
+	}
+	return responseapi.For(c).Error(fiber.StatusBadGateway, fallbackMessage, "upstream_error", fallbackCode).Send()
 }

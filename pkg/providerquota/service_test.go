@@ -2,8 +2,10 @@ package providerquota
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -227,3 +229,85 @@ func TestFailedReloadPreservesLastKnownQuotaAndExhaustion(t *testing.T) {
 }
 
 func timePointer(value time.Time) *time.Time { return &value }
+
+type quotaOAuthRefresher struct{ calls int }
+
+func (r *quotaOAuthRefresher) Refresh(_ context.Context, runtime *entities.CredentialRuntime) error {
+	r.calls++
+	runtime.OAuthAccess = "fresh-token"
+	return nil
+}
+
+type quotaRewriteTransport struct {
+	target *url.URL
+	base   http.RoundTripper
+}
+
+func (transport quotaRewriteTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.URL.Scheme, clone.URL.Host = transport.target.Scheme, transport.target.Host
+	return transport.base.RoundTrip(clone)
+}
+
+func TestCodexResetCreditsRefreshAuthValidateSelectionConsumeAndRefreshQuota(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		if r.Header.Get("chatgpt-account-id") != "account-1" || r.Header.Get("originator") != "codex_cli_rs" {
+			t.Fatalf("headers=%v", r.Header)
+		}
+		switch r.URL.Path {
+		case "/backend-api/wham/rate-limit-reset-credits":
+			if r.Header.Get("Authorization") == "Bearer stale-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"credits": []any{
+				map[string]any{"id": "later", "expires_at": "2099-08-01T00:00:00Z"},
+				map[string]any{"id": "chosen", "expires_at": "2099-07-01T00:00:00Z"},
+			}})
+		case "/backend-api/wham/rate-limit-reset-credits/consume":
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["credit_id"] != "chosen" || body["redeem_request_id"] != "request-1" {
+				t.Fatalf("body=%v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"code": "alreadyRedeemed"})
+		case "/backend-api/wham/usage":
+			_ = json.NewEncoder(w).Encode(map[string]any{"rate_limit": map[string]any{"primary_window": map[string]any{"used_percent": 0.0}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	target, _ := url.Parse(server.URL)
+	client := &http.Client{Transport: quotaRewriteTransport{target: target, base: http.DefaultTransport}}
+	runtime := &entities.CredentialRuntime{ID: "cred-1", Provider: "codex", Kind: entities.KindOAuth, OAuthAccess: "stale-token", OAuthRefreh: "refresh-token", OAuthAccount: "account-1"}
+	service := New(client, credential.NewService(quotaCredentialRepo{runtime: runtime}, nil))
+	refresher := &quotaOAuthRefresher{}
+	service.SetCodexOAuth(refresher)
+	listed, err := service.ListCodexResetCredits(context.Background(), runtime.ID)
+	if err != nil || refresher.calls != 1 || len(listed.Credits) != 2 || listed.Credits[0].SelectionToken != "chosen" {
+		t.Fatalf("listed=%+v refreshes=%d err=%v", listed, refresher.calls, err)
+	}
+	result, err := service.ConsumeCodexResetCredit(context.Background(), runtime.ID, "chosen", "request-1")
+	if err != nil || result.Outcome != "alreadyredeemed" || len(result.Quota.Windows) != 2 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if strings.Join(calls, ",") != "GET /backend-api/wham/rate-limit-reset-credits,GET /backend-api/wham/rate-limit-reset-credits,GET /backend-api/wham/rate-limit-reset-credits,POST /backend-api/wham/rate-limit-reset-credits/consume,GET /backend-api/wham/usage" {
+		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestParseNestedCodexResetCreditsAndRejectsUnavailable(t *testing.T) {
+	result := parseResetCreditList(map[string]any{"rate_limit_reset_credits": map[string]any{
+		"available_count": 2.0,
+		"credits": []any{
+			map[string]any{"credit_id": "available", "available": true},
+			map[string]any{"credit_id": "hidden", "available": false},
+		},
+	}})
+	if result.AvailableCount != 2 || len(result.Credits) != 1 || result.Credits[0].SelectionToken != "available" {
+		t.Fatalf("result=%+v", result)
+	}
+}

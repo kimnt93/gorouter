@@ -284,6 +284,7 @@ func main() {
 	}
 	providerQuotaSvc := providerquota.New(client, credSvc)
 	providerQuotaSvc.SetStore(providerQuotaStore)
+	providerQuotaSvc.SetCodexOAuth(codexRefresher)
 	if redisClient != nil {
 		providerQuotaSvc.SetStateCache(providerquota.NewRedisState(redisClient))
 	}

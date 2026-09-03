@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -61,6 +62,10 @@ type StateCache interface {
 	AdvanceAccount(ctx context.Context, provider, credentialID string, eligible []string) error
 }
 
+type OAuthRefresher interface {
+	Refresh(context.Context, *entities.CredentialRuntime) error
+}
+
 type Service struct {
 	client      *http.Client
 	credentials *credential.Service
@@ -71,6 +76,7 @@ type Service struct {
 	rings       map[string][]string
 	store       Store
 	state       StateCache
+	codexOAuth  OAuthRefresher
 }
 
 func New(client *http.Client, credentials *credential.Service) *Service {
@@ -80,8 +86,9 @@ func New(client *http.Client, credentials *credential.Service) *Service {
 	return &Service{client: client, credentials: credentials, snapshots: map[string]Snapshot{}, exhausted: map[string]time.Time{}, active: map[string]string{}, rings: map[string][]string{}}
 }
 
-func (s *Service) SetStore(store Store)           { s.store = store }
-func (s *Service) SetStateCache(state StateCache) { s.state = state }
+func (s *Service) SetStore(store Store)                   { s.store = store }
+func (s *Service) SetStateCache(state StateCache)         { s.state = state }
+func (s *Service) SetCodexOAuth(refresher OAuthRefresher) { s.codexOAuth = refresher }
 
 // Restore warms the read-only quota cache from durable snapshots. It does not
 // contact any provider and is safe to call during startup.
@@ -569,6 +576,17 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 }
 
 func (s *Service) fetch(ctx context.Context, runtime *entities.CredentialRuntime, method, url string, body any, extra map[string]string) (map[string]any, error) {
+	payload, status, err := s.fetchStatus(ctx, runtime, method, url, body, extra)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("quota endpoint returned HTTP %d", status)
+	}
+	return payload, nil
+}
+
+func (s *Service) fetchStatus(ctx context.Context, runtime *entities.CredentialRuntime, method, url string, body any, extra map[string]string) (map[string]any, int, error) {
 	var requestBody *strings.Reader
 	if body == nil {
 		requestBody = strings.NewReader("")
@@ -578,7 +596,7 @@ func (s *Service) fetch(ctx context.Context, runtime *entities.CredentialRuntime
 	}
 	request, err := http.NewRequestWithContext(ctx, method, url, requestBody)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	token := runtime.OAuthAccess
 	if token == "" {
@@ -594,17 +612,17 @@ func (s *Service) fetch(ctx context.Context, runtime *entities.CredentialRuntime
 	}
 	response, err := s.client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("quota endpoint returned HTTP %d", response.StatusCode)
-	}
 	var payload map[string]any
-	if json.NewDecoder(response.Body).Decode(&payload) != nil {
-		return nil, fmt.Errorf("quota endpoint returned invalid JSON")
+	if err := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&payload); err != nil {
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			return nil, response.StatusCode, fmt.Errorf("quota endpoint returned invalid JSON")
+		}
+		payload = map[string]any{}
 	}
-	return payload, nil
+	return payload, response.StatusCode, nil
 }
 
 func parsePercentWindow(name string, value map[string]any) Window {
@@ -768,25 +786,62 @@ type ResetCreditResult struct {
 	Quota   Snapshot `json:"quota"`
 }
 
-func (s *Service) ListCodexResetCredits(ctx context.Context, id string) (ResetCreditList, error) {
-	runtime, err := s.credentials.Runtime(ctx, id)
+func (s *Service) codexResetRequest(ctx context.Context, runtime *entities.CredentialRuntime, method, endpoint string, body any) (map[string]any, error) {
+	headers := map[string]string{
+		"chatgpt-account-id": runtime.OAuthAccount,
+		"originator":         "codex_cli_rs",
+		"User-Agent":         "codex_cli_rs/0.149.0",
+		"Version":            "0.149.0",
+	}
+	payload, status, err := s.fetchStatus(ctx, runtime, method, endpoint, body, headers)
+	if err == nil && (status == http.StatusUnauthorized || status == http.StatusForbidden) && s.codexOAuth != nil {
+		if refreshErr := s.codexOAuth.Refresh(ctx, runtime); refreshErr != nil {
+			return nil, refreshErr
+		}
+		payload, status, err = s.fetchStatus(ctx, runtime, method, endpoint, body, headers)
+	}
 	if err != nil {
-		return ResetCreditList{}, err
+		return nil, err
 	}
-	if runtime.Provider != "codex" || runtime.Kind != entities.KindOAuth {
-		return ResetCreditList{}, fmt.Errorf("reset credits require an OpenAI Codex OAuth account")
+	if status < 200 || status >= 300 {
+		if known := knownResetCreditError(payload); known != nil {
+			return payload, known
+		}
+		return payload, &ResetCreditError{Status: status, Code: "codex_reset_credit_upstream_error", Message: fmt.Sprintf("Codex reset-credit API returned HTTP %d", status)}
 	}
-	payload, err := s.fetch(ctx, runtime, http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", nil, map[string]string{"chatgpt-account-id": runtime.OAuthAccount, "originator": "codex_cli_rs"})
-	if err != nil {
-		return ResetCreditList{}, err
+	return payload, nil
+}
+
+type ResetCreditError struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *ResetCreditError) Error() string { return e.Message }
+
+func resetCreditCandidates(payload map[string]any) []any {
+	candidates := arrayAny(payload, "credits", "reset_credits", "resetCredits", "items", "data")
+	if len(candidates) != 0 {
+		return candidates
 	}
-	candidates := arrayAny(payload, "credits", "reset_credits", "resetCredits", "rate_limit_reset_credits", "rateLimitResetCredits", "items", "data")
+	for _, key := range []string{"rate_limit_reset_credits", "rateLimitResetCredits"} {
+		if nested := object(payload, key); len(nested) > 0 {
+			if candidates = arrayAny(nested, "credits", "items", "data"); len(candidates) > 0 {
+				return candidates
+			}
+		}
+	}
+	return nil
+}
+
+func parseResetCreditList(payload map[string]any) ResetCreditList {
 	out := ResetCreditList{Credits: []ResetCredit{}}
-	for _, candidate := range candidates {
+	for _, candidate := range resetCreditCandidates(payload) {
 		record, _ := candidate.(map[string]any)
 		id := textAny(record, "credit_id", "creditId", "id")
 		status := strings.ToLower(textAny(record, "status", "state"))
-		if id == "" || boolAny(record, "consumed", "redeemed") || status == "consumed" || status == "redeemed" || status == "used" || status == "expired" || status == "unavailable" {
+		if id == "" || boolAny(record, "consumed", "redeemed") || boolFalse(record, "available") || status == "consumed" || status == "redeeming" || status == "redeemed" || status == "used" || status == "expired" || status == "unavailable" {
 			continue
 		}
 		expires := parseTime(first(record, "expires_at", "expiresAt", "expiration_at", "expirationAt"))
@@ -805,30 +860,100 @@ func (s *Service) ListCodexResetCredits(ctx context.Context, id string) (ResetCr
 		return out.Credits[i].ExpiresAt.Before(*out.Credits[j].ExpiresAt)
 	})
 	out.AvailableCount = int(number(first(payload, "available_count", "availableCount")))
+	for _, key := range []string{"rate_limit_reset_credits", "rateLimitResetCredits"} {
+		if nested := object(payload, key); len(nested) > 0 && out.AvailableCount == 0 {
+			out.AvailableCount = int(number(first(nested, "available_count", "availableCount")))
+		}
+	}
 	if out.AvailableCount < len(out.Credits) {
 		out.AvailableCount = len(out.Credits)
 	}
-	return out, nil
+	return out
+}
+
+func boolFalse(value map[string]any, key string) bool {
+	result, ok := value[key].(bool)
+	return ok && !result
+}
+
+func (s *Service) ListCodexResetCredits(ctx context.Context, id string) (ResetCreditList, error) {
+	runtime, err := s.credentials.Runtime(ctx, id)
+	if err != nil {
+		return ResetCreditList{}, err
+	}
+	if runtime.Provider != "codex" || runtime.Kind != entities.KindOAuth {
+		return ResetCreditList{}, &ResetCreditError{Status: http.StatusBadRequest, Code: "codex_oauth_required", Message: "reset credits require an OpenAI Codex OAuth account"}
+	}
+	payload, err := s.codexResetRequest(ctx, runtime, http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", nil)
+	if err != nil {
+		return ResetCreditList{}, err
+	}
+	return parseResetCreditList(payload), nil
+}
+
+func normalizeResetOutcome(value string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return -1
+	}, value))
+}
+
+func knownResetCreditError(payload map[string]any) *ResetCreditError {
+	switch normalizeResetOutcome(textAny(payload, "outcome", "status", "result", "code", "type")) {
+	case "nocredit", "nocredits":
+		return &ResetCreditError{Status: http.StatusConflict, Code: "no_credit", Message: "no Codex reset credits are available"}
+	case "nothingtoreset":
+		return &ResetCreditError{Status: http.StatusConflict, Code: "nothing_to_reset", Message: "no exhausted Codex usage limit can be reset right now"}
+	default:
+		return nil
+	}
 }
 
 func (s *Service) ConsumeCodexResetCredit(ctx context.Context, id, selectionToken, requestID string) (ResetCreditResult, error) {
-	if strings.TrimSpace(selectionToken) == "" || strings.TrimSpace(requestID) == "" {
-		return ResetCreditResult{}, fmt.Errorf("reset credit and request ID are required")
+	selectionToken, requestID = strings.TrimSpace(selectionToken), strings.TrimSpace(requestID)
+	if selectionToken == "" || requestID == "" {
+		return ResetCreditResult{}, &ResetCreditError{Status: http.StatusBadRequest, Code: "reset_credit_required", Message: "reset credit and request ID are required"}
 	}
 	runtime, err := s.credentials.Runtime(ctx, id)
 	if err != nil {
 		return ResetCreditResult{}, err
 	}
 	if runtime.Provider != "codex" || runtime.Kind != entities.KindOAuth {
-		return ResetCreditResult{}, fmt.Errorf("reset credits require an OpenAI Codex OAuth account")
+		return ResetCreditResult{}, &ResetCreditError{Status: http.StatusBadRequest, Code: "codex_oauth_required", Message: "reset credits require an OpenAI Codex OAuth account"}
 	}
-	payload, err := s.fetch(ctx, runtime, http.MethodPost, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", map[string]any{"redeem_request_id": requestID, "credit_id": selectionToken}, map[string]string{"chatgpt-account-id": runtime.OAuthAccount, "originator": "codex_cli_rs"})
+	creditsPayload, err := s.codexResetRequest(ctx, runtime, http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", nil)
 	if err != nil {
 		return ResetCreditResult{}, err
 	}
-	outcome := strings.ToLower(strings.ReplaceAll(textAny(payload, "outcome", "status", "result", "code", "type"), "_", ""))
-	if outcome != "reset" && outcome != "alreadyredeemed" {
-		return ResetCreditResult{}, fmt.Errorf("Codex did not redeem the reset credit")
+	credits := parseResetCreditList(creditsPayload)
+	selected := false
+	for _, credit := range credits.Credits {
+		if credit.SelectionToken == selectionToken {
+			selected = true
+			break
+		}
+	}
+	if !selected {
+		return ResetCreditResult{}, &ResetCreditError{Status: http.StatusConflict, Code: "selected_credit_unavailable", Message: "the selected Codex reset credit is no longer available"}
+	}
+	payload, err := s.codexResetRequest(ctx, runtime, http.MethodPost, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", map[string]any{"redeem_request_id": requestID, "credit_id": selectionToken})
+	if err != nil {
+		return ResetCreditResult{}, err
+	}
+	outcome := normalizeResetOutcome(textAny(payload, "outcome", "status", "result", "code", "type"))
+	switch outcome {
+	case "reset", "alreadyredeemed":
+	case "nocredit", "nocredits":
+		return ResetCreditResult{}, &ResetCreditError{Status: http.StatusConflict, Code: "no_credit", Message: "no Codex reset credits are available"}
+	case "nothingtoreset":
+		return ResetCreditResult{}, &ResetCreditError{Status: http.StatusConflict, Code: "nothing_to_reset", Message: "no exhausted Codex usage limit can be reset right now"}
+	default:
+		return ResetCreditResult{}, &ResetCreditError{Status: http.StatusBadGateway, Code: "unknown_reset_credit_response", Message: "Codex returned an unknown reset-credit response"}
 	}
 	quota, err := s.Refresh(ctx, id)
 	if err != nil {
