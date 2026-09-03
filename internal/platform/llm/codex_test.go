@@ -382,3 +382,56 @@ func TestCodexNonStreamingRequiresCompletedTerminalEvent(t *testing.T) {
 		t.Fatal("incomplete non-streaming Codex response was accepted")
 	}
 }
+
+func TestCodexDiscoveryRefreshesOAuthAfter401(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			if r.Header.Get("Authorization") != "Bearer old-token" {
+				t.Fatalf("first authorization=%q", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer new-token" {
+			t.Fatalf("refreshed authorization=%q", r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]any{{"slug": "gpt-5.6-luna", "supported_in_api": true}}})
+	}))
+	defer server.Close()
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, BaseURL: server.URL, OAuthAccess: "old-token", OAuthRefreh: "refresh-token"}
+	adapter := &CodexAdapter{HTTP: server.Client(), Refresh: func(_ context.Context, cr *entities.CredentialRuntime) error {
+		cr.OAuthAccess = "new-token"
+		return nil
+	}}
+	models, err := adapter.DiscoverModels(context.Background(), runtime)
+	if err != nil || len(models) != 1 || calls != 2 {
+		t.Fatalf("models=%+v calls=%d err=%v", models, calls, err)
+	}
+}
+
+func TestCodexProbeRefreshesOAuthAfter401(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer new-token" {
+			t.Fatalf("refreshed authorization=%q", r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, BaseURL: server.URL, OAuthAccess: "old-token", OAuthRefreh: "refresh-token"}
+	adapter := &CodexAdapter{HTTP: server.Client(), Refresh: func(_ context.Context, cr *entities.CredentialRuntime) error {
+		cr.OAuthAccess = "new-token"
+		return nil
+	}}
+	status, err := adapter.Probe(context.Background(), runtime)
+	if err != nil || status != http.StatusNoContent || calls != 2 {
+		t.Fatalf("status=%d calls=%d err=%v", status, calls, err)
+	}
+}

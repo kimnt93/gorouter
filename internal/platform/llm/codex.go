@@ -27,6 +27,13 @@ type CodexAdapter struct {
 	Refresh func(context.Context, *entities.CredentialRuntime) error
 }
 
+func (a *CodexAdapter) refresh(ctx context.Context, cr *entities.CredentialRuntime) error {
+	if a.Refresh == nil {
+		return fmt.Errorf("Codex OAuth refresh is unavailable")
+	}
+	return a.Refresh(ctx, cr)
+}
+
 type codexContent struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
@@ -680,9 +687,24 @@ func (a *CodexAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime
 	}
 	headers := codexHeaders(cr)
 	headers["Accept"] = "application/json"
-	result, err := postJSON(ctx, client, codexBase(cr.BaseURL)+"/responses", headers, payload)
+	send := func() (*entities.UpstreamResult, error) {
+		return postJSON(ctx, client, codexBase(cr.BaseURL)+"/responses", headers, payload)
+	}
+	result, err := send()
 	if err != nil {
 		return 0, err
+	}
+	if result.StatusCode == http.StatusUnauthorized && a.Refresh != nil {
+		result.Body.Close()
+		if err := a.refresh(ctx, cr); err != nil {
+			return 0, err
+		}
+		headers = codexHeaders(cr)
+		headers["Accept"] = "application/json"
+		result, err = send()
+		if err != nil {
+			return 0, err
+		}
 	}
 	defer result.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(result.Body, 64<<10))
@@ -701,9 +723,25 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 	headers := codexHeaders(cr)
 	headers["Accept"] = "application/json"
 	headers["Content-Type"] = "application/json"
-	result, err := get(ctx, client, endpoint, headers)
+	load := func() (*entities.UpstreamResult, error) {
+		return get(ctx, client, endpoint, headers)
+	}
+	result, err := load()
 	if err != nil {
 		return nil, err
+	}
+	if result.StatusCode == http.StatusUnauthorized && a.Refresh != nil {
+		result.Body.Close()
+		if err := a.refresh(ctx, cr); err != nil {
+			return nil, err
+		}
+		headers = codexHeaders(cr)
+		headers["Accept"] = "application/json"
+		headers["Content-Type"] = "application/json"
+		result, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer result.Body.Close()
 	if result.StatusCode < 200 || result.StatusCode >= 300 {

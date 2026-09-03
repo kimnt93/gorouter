@@ -711,6 +711,39 @@ func (q *gatewayProviderQuota) MarkExhausted(id string) {
 
 func (q *gatewayProviderQuota) MarkInUse(string) {}
 
+func TestGatewayCodexAccountLocalFailuresDoNotBanHealthyQuotaAccount(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b"}}
+	runtimes := map[string]*entities.CredentialRuntime{
+		"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth},
+		"cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth},
+	}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusUnauthorized, "cred-b": http.StatusNotFound}}
+	health := chat.NewHealth()
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}, active: map[string]string{"codex": "cred-a"}}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Codex:  upstream, Selector: &chat.Selector{}, Health: health, ProviderQuotas: quotaState,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	for range 3 {
+		response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+	}
+	if !health.Available("cred-a") || !health.Available("cred-b") {
+		t.Fatal("Codex account-local authorization/model failures triggered generic health cooldown")
+	}
+}
+
 func TestGatewayQuotaFillFirstAndExhaustionFailover(t *testing.T) {
 	app, upstream := testGatewayApp(map[string]int{
 		"cred-a": http.StatusTooManyRequests,

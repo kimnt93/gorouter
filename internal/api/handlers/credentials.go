@@ -13,6 +13,7 @@ import (
 
 	responseapi "github.com/kimnt93/gorouter/internal/api"
 	"github.com/kimnt93/gorouter/internal/platform/llm"
+	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/identity"
@@ -33,6 +34,7 @@ type CredentialConnectivity struct {
 	ModelRoutes *modelroute.Service
 	Quotas      *providerquota.Service
 	Usage       *usage.Service
+	Health      *chat.Health
 	Identities  identity.Repository
 }
 
@@ -68,6 +70,9 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 	snapshot, err := h.Quotas.Refresh(c.Context(), id)
 	if err != nil {
 		return responseapi.For(c).Error(fiber.StatusBadGateway, err.Error(), "upstream_error", "quota_refresh_failed").Send()
+	}
+	if h.Health != nil {
+		h.Health.Report(id, true)
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(snapshot).Send()
 }
@@ -329,6 +334,9 @@ func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(credential.ConnectivityResult{OK: false}).Send()
 	}
+	if result.OK && h.Health != nil {
+		h.Health.Report(runtime.ID, true)
+	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(result).Send()
 }
 
@@ -356,6 +364,9 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 	models, err := h.Credentials.DiscoverModels(c.Context(), c.Params("id"), discoverer)
 	if err != nil {
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
+	}
+	if h.Health != nil {
+		h.Health.Report(runtime.ID, true)
 	}
 	defaultModel := ""
 	if len(models) > 0 {

@@ -337,6 +337,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			result       *entities.UpstreamResult
 			transportErr bool
 			exhausted    bool
+			accountLocal bool
 		)
 		attempts := g.routeAttempts(runtime.Provider)
 		for attempt := 0; attempt < attempts; attempt++ {
@@ -380,6 +381,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			if accountLocalStatus(runtime.Provider, sent.StatusCode) {
 				drainAndClose(sent.Body)
 				result = nil
+				accountLocal = true
 				break
 			}
 			if (sent.StatusCode < 200 || sent.StatusCode >= 300) && !retryableStatus(sent.StatusCode) {
@@ -416,7 +418,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			} else if exhausted && g.ProviderQuotas != nil {
 				g.ProviderQuotas.MarkExhausted(credentialID)
 			}
-			if !exhausted || transportErr {
+			if !accountLocal && (!exhausted || transportErr) {
 				g.Health.Report(credentialID, false)
 			}
 			continue
