@@ -9,39 +9,18 @@ func requiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("MASTER_KEY", "master")
 	t.Setenv("DB_BACKEND", "postgresql")
-	t.Setenv("DATABASE_BACKEND", "")
-	t.Setenv("DB_HOST", "database.internal")
-	t.Setenv("DB_PORT", "5432")
-	t.Setenv("DB_USER", "gorouter")
-	t.Setenv("DB_PASSWORD", "secret")
-	t.Setenv("DB_NAME", "gorouter")
-	t.Setenv("DB_SSLMODE", "")
+	t.Setenv("DB_CONNECTION_URL", "postgres://gorouter:secret@database.internal:5432/gorouter?sslmode=disable")
+	for _, key := range []string{"DATABASE_BACKEND", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE", "CLICKHOUSE_HOST", "CLICKHOUSE_PORT", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DB", "CLICKHOUSE_TLS", "SQLITE_PATH"} {
+		t.Setenv(key, "")
+	}
 	t.Setenv("REDIS_HOST", "redis.internal")
 	t.Setenv("REDIS_PORT", "6379")
 	t.Setenv("REDIS_USER", "gorouter")
 	t.Setenv("REDIS_PASSWORD", "redis-secret")
-	t.Setenv("CACHE_MEMORY_FALLBACK", "")
+	for _, key := range []string{"CACHE_MEMORY_FALLBACK", "CACHE_MAX_ENTRY_BYTES", "CACHE_MAX_TOTAL_BYTES", "CACHE_SCOPE", "CACHE_TTL", "CACHE_ENABLED", "REQUEST_LIMIT_MB", "REQUEST_TIMEOUT", "API_TOKEN_CACHE_TTL", "WEEK_START", "USAGE_WRITE_CONCURRENCY", "USAGE_WRITE_QUEUE_SIZE", "MODEL_CATALOG_SYNC_ENABLED", "MODEL_CATALOG_SYNC_INTERVAL", "MODEL_CATALOG_CACHE_TTL", "OPENROUTER_CATALOG_ENABLED", "OPENROUTER_CATALOG_URL", "OPENROUTER_SYNC_INTERVAL", "OPENROUTER_HTTP_TIMEOUT", "ANTIGRAVITY_OAUTH_CLIENT_ID", "ANTIGRAVITY_OAUTH_CLIENT_SECRET"} {
+		t.Setenv(key, "")
+	}
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("CACHE_MAX_ENTRY_BYTES", "")
-	t.Setenv("CACHE_MAX_TOTAL_BYTES", "")
-	t.Setenv("CACHE_SCOPE", "")
-	t.Setenv("CACHE_TTL", "")
-	t.Setenv("CACHE_ENABLED", "")
-	t.Setenv("REQUEST_LIMIT_MB", "")
-	t.Setenv("REQUEST_TIMEOUT", "")
-	t.Setenv("API_TOKEN_CACHE_TTL", "")
-	t.Setenv("WEEK_START", "")
-	t.Setenv("USAGE_WRITE_CONCURRENCY", "")
-	t.Setenv("USAGE_WRITE_QUEUE_SIZE", "")
-	t.Setenv("MODEL_CATALOG_SYNC_ENABLED", "")
-	t.Setenv("MODEL_CATALOG_SYNC_INTERVAL", "")
-	t.Setenv("MODEL_CATALOG_CACHE_TTL", "")
-	t.Setenv("OPENROUTER_CATALOG_ENABLED", "")
-	t.Setenv("OPENROUTER_CATALOG_URL", "")
-	t.Setenv("OPENROUTER_SYNC_INTERVAL", "")
-	t.Setenv("OPENROUTER_HTTP_TIMEOUT", "")
-	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_ID", "")
-	t.Setenv("ANTIGRAVITY_OAUTH_CLIENT_SECRET", "")
 }
 
 func TestTokenQuotaAndUsageWriterDefaultsAndOverrides(t *testing.T) {
@@ -124,34 +103,25 @@ func TestRejectsInvalidPricingConfig(t *testing.T) {
 }
 
 func TestRequiredEnvironment(t *testing.T) {
-	tests := []struct {
-		name string
-		key  string
-	}{
-		{"master", "MASTER_KEY"},
-		{"database user", "DB_USER"},
-		{"database password", "DB_PASSWORD"},
-		{"database name", "DB_NAME"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, key := range []string{"MASTER_KEY", "DB_CONNECTION_URL"} {
+		t.Run(key, func(t *testing.T) {
 			requiredEnv(t)
-			t.Setenv(test.key, "")
+			t.Setenv(key, "")
 			if _, err := Load(); err == nil {
-				t.Fatalf("missing %s was accepted", test.key)
+				t.Fatalf("missing %s was accepted", key)
 			}
 		})
 	}
 }
 
-func TestBuildsConnectionURLsAndDerivesSecrets(t *testing.T) {
+func TestUsesDatabaseConnectionURLAndDerivesSecrets(t *testing.T) {
 	requiredEnv(t)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DatabaseURL != "postgres://gorouter:secret@database.internal:5432/gorouter?sslmode=disable" {
-		t.Fatalf("database URL = %q", cfg.DatabaseURL)
+	if cfg.DatabaseConnectionURL != "postgres://gorouter:secret@database.internal:5432/gorouter?sslmode=disable" {
+		t.Fatalf("database URL = %q", cfg.DatabaseConnectionURL)
 	}
 	if cfg.RedisURL != "redis://gorouter:redis-secret@redis.internal:6379/0" {
 		t.Fatalf("redis URL = %q", cfg.RedisURL)
@@ -161,15 +131,11 @@ func TestBuildsConnectionURLsAndDerivesSecrets(t *testing.T) {
 	}
 }
 
-func TestDatabaseSSLModeOverride(t *testing.T) {
+func TestRejectsDatabaseConnectionURLForWrongBackend(t *testing.T) {
 	requiredEnv(t)
-	t.Setenv("DB_SSLMODE", "require")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.DatabaseURL != "postgres://gorouter:secret@database.internal:5432/gorouter?sslmode=require" {
-		t.Fatalf("database URL = %q", cfg.DatabaseURL)
+	t.Setenv("DB_CONNECTION_URL", "clickhouse://gorouter:secret@clickhouse:9000/gorouter")
+	if _, err := Load(); err == nil {
+		t.Fatal("ClickHouse URL was accepted for PostgreSQL backend")
 	}
 }
 
@@ -202,15 +168,13 @@ func TestRedisIsRequiredForDistributedDeployment(t *testing.T) {
 func TestAcceptsClickHouseAsPrimaryStore(t *testing.T) {
 	requiredEnv(t)
 	t.Setenv("DB_BACKEND", "clickhouse")
-	t.Setenv("CLICKHOUSE_USER", "gorouter")
-	t.Setenv("CLICKHOUSE_PASSWORD", "secret")
-	t.Setenv("CLICKHOUSE_DB", "gorouter")
+	t.Setenv("DB_CONNECTION_URL", "clickhouse://gorouter:secret@clickhouse.internal:9000/gorouter")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ClickHouseURL == "" {
-		t.Fatal("ClickHouse URL is empty")
+	if cfg.DatabaseConnectionURL != "clickhouse://gorouter:secret@clickhouse.internal:9000/gorouter" {
+		t.Fatalf("ClickHouse URL = %q", cfg.DatabaseConnectionURL)
 	}
 }
 
@@ -296,42 +260,40 @@ func TestValidatesOptionalAntigravityOAuthConfiguration(t *testing.T) {
 func TestAcceptsFullyLocalBackendWithoutExternalServices(t *testing.T) {
 	requiredEnv(t)
 	t.Setenv("DB_BACKEND", "local")
-	t.Setenv("DB_USER", "")
-	t.Setenv("DB_PASSWORD", "")
-	t.Setenv("DB_NAME", "")
 	t.Setenv("REDIS_HOST", "redis-must-be-ignored")
-	t.Setenv("SQLITE_PATH", "/tmp/gorouter-local-test.db")
+	t.Setenv("DB_CONNECTION_URL", "file:///tmp/gorouter-local-test.db")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SQLitePath != "/tmp/gorouter-local-test.db" || cfg.RedisURL != "" || !cfg.Cache.AllowMemory {
+	if cfg.DatabaseConnectionURL != "/tmp/gorouter-local-test.db" || cfg.RedisURL != "" || !cfg.Cache.AllowMemory {
 		t.Fatalf("local configuration = %+v", cfg)
 	}
 }
 
-func TestDatabaseBackendAliasCanSelectLocal(t *testing.T) {
+func TestLegacyDatabaseVariablesDoNotOverrideCanonicalConfiguration(t *testing.T) {
 	requiredEnv(t)
-	t.Setenv("DB_BACKEND", "postgresql")
 	t.Setenv("DATABASE_BACKEND", "local")
+	t.Setenv("SQLITE_PATH", "/tmp/legacy.db")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DatabaseBackend != "local" {
-		t.Fatalf("database backend = %q", cfg.DatabaseBackend)
+	if cfg.DatabaseBackend != "postgresql" || cfg.DatabaseConnectionURL == "" {
+		t.Fatalf("legacy variables changed config: %+v", cfg)
 	}
 }
 
-func TestLocalBackendUsesDefaultSQLitePath(t *testing.T) {
-	requiredEnv(t)
-	t.Setenv("DB_BACKEND", "local")
-	t.Setenv("SQLITE_PATH", "")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.SQLitePath != "data/gorouter.db" {
-		t.Fatalf("SQLite path = %q", cfg.SQLitePath)
+func TestLocalBackendAcceptsSQLitePathAndMemory(t *testing.T) {
+	for _, connection := range []string{"data/gorouter.db", "file:///tmp/gorouter.db", ":memory:"} {
+		t.Run(connection, func(t *testing.T) {
+			requiredEnv(t)
+			t.Setenv("DB_BACKEND", "local")
+			t.Setenv("DB_CONNECTION_URL", connection)
+			cfg, err := Load()
+			if err != nil || cfg.DatabaseConnectionURL == "" {
+				t.Fatalf("connection=%q path=%q err=%v", connection, cfg.DatabaseConnectionURL, err)
+			}
+		})
 	}
 }

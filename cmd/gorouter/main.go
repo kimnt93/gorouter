@@ -75,7 +75,7 @@ func main() {
 	var providerQuotaStore providerquota.Store
 	switch cfg.DatabaseBackend {
 	case "clickhouse":
-		db, connectErr := database.ConnectClickHouse(ctx, cfg.ClickHouseURL)
+		db, connectErr := database.ConnectClickHouse(ctx, cfg.DatabaseConnectionURL)
 		if connectErr != nil {
 			log.Fatal(connectErr)
 		}
@@ -91,7 +91,7 @@ func main() {
 		identityRepo, auditRepo = clickhouserepo.NewIdentityRepo(store), clickhouserepo.NewAuditRepo(store)
 		hashSecret, generateSecret = clickhouserepo.HashSecret, clickhouserepo.GenerateSecret
 	case "local":
-		db, connectErr := database.ConnectSQLite(ctx, cfg.SQLitePath)
+		db, connectErr := database.ConnectSQLite(ctx, cfg.DatabaseConnectionURL)
 		if connectErr != nil {
 			log.Fatal(connectErr)
 		}
@@ -106,7 +106,7 @@ func main() {
 		identityRepo, auditRepo = localrepo.NewIdentityRepo(store), localrepo.NewAuditRepo(store)
 		hashSecret, generateSecret = localrepo.HashSecret, localrepo.GenerateSecret
 	case "postgresql":
-		db, connectErr := database.Connect(ctx, cfg.DatabaseURL)
+		db, connectErr := database.Connect(ctx, cfg.DatabaseConnectionURL)
 		if connectErr != nil {
 			log.Fatal(connectErr)
 		}

@@ -37,7 +37,7 @@ check out the selected tag and build the Docker image locally.
 
 ## New Docker installation
 
-Choose exactly one backend. PostgreSQL is the default recommendation for distributed deployments; local mode is suitable for one-process installations.
+Choose exactly one backend. PostgreSQL is the default recommendation for distributed deployments; local mode is suitable for one-process installations. Configure it with only `DB_BACKEND` and `DB_CONNECTION_URL`; the URL contains the backend host, credentials, database, and transport options, or the SQLite path for local mode.
 
 1. Create the configuration without overwriting an existing installation:
 
@@ -46,9 +46,9 @@ Choose exactly one backend. PostgreSQL is the default recommendation for distrib
    chmod 600 .env
    ```
 
-2. Generate fresh values for `MASTER_KEY`, `DB_PASSWORD`, and `REDIS_PASSWORD`
-   and write them to `.env` without displaying them. Never use the example
-   placeholder values in a production deployment.
+2. Generate fresh values for `MASTER_KEY`, the password embedded in
+   `DB_CONNECTION_URL`, and `REDIS_PASSWORD`, then write them to `.env` without
+   displaying them. Never use example placeholder values in production.
 
 3. Check the requested host port before starting. `8090` is the default. If it
    is already used by anything other than this GoRouter installation, choose
@@ -95,7 +95,7 @@ To run without Docker, build and run the application with a private data directo
 ```bash
 mkdir -p data
 chmod 700 data
-MASTER_KEY="$(openssl rand -base64 33)" DB_BACKEND=local SQLITE_PATH=data/gorouter.db go run ./cmd/gorouter
+MASTER_KEY="$(openssl rand -base64 33)" DB_BACKEND=local DB_CONNECTION_URL=file://"$PWD/data/gorouter.db" go run ./cmd/gorouter
 ```
 
 Keep the same `MASTER_KEY` across restarts so encrypted provider credentials remain

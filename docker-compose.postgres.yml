@@ -6,12 +6,7 @@ services:
       MASTER_KEY: "${MASTER_KEY}"
       LISTEN: ":8090"
       DB_BACKEND: "postgresql"
-      DB_HOST: "postgres"
-      DB_PORT: "5432"
-      DB_USER: "${DB_USER}"
-      DB_PASSWORD: "${DB_PASSWORD}"
-      DB_NAME: "${DB_NAME}"
-      DB_SSLMODE: "${DB_SSLMODE:-disable}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       REDIS_USER: "${REDIS_USER:-gorouter}"
@@ -62,13 +57,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: "${DB_USER}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD}"
-      POSTGRES_DB: "${DB_NAME}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
+    entrypoint: ["/gorouter-database-entrypoint.sh", "postgres"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/database-entrypoint.sh:/gorouter-database-entrypoint.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1"]
       interval: 5s
       timeout: 3s
       retries: 10

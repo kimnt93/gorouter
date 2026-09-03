@@ -7,11 +7,7 @@ services:
       MASTER_KEY: "${MASTER_KEY}"
       LISTEN: ":8090"
       DB_BACKEND: "clickhouse"
-      CLICKHOUSE_HOST: "clickhouse"
-      CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-gorouter}"
-      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-gorouter}"
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       REDIS_USER: "${REDIS_USER:-gorouter}"
@@ -75,11 +71,11 @@ services:
     image: clickhouse/clickhouse-server:25.8-alpine
     restart: unless-stopped
     environment:
-      CLICKHOUSE_DB: "${CLICKHOUSE_DB:-gorouter}"
-      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-gorouter}"
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
+    entrypoint: ["/gorouter-database-entrypoint.sh", "clickhouse"]
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+      - ./scripts/database-entrypoint.sh:/gorouter-database-entrypoint.sh:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
       interval: 10s

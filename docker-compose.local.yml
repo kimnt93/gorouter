@@ -6,7 +6,7 @@ services:
       MASTER_KEY: "${MASTER_KEY}"
       LISTEN: ":8090"
       DB_BACKEND: "local"
-      SQLITE_PATH: "/var/lib/gorouter/gorouter.db"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL:-file:///var/lib/gorouter/gorouter.db}"
       APP_ENV: "production"
       ROUTE_RETRIES: "${ROUTE_RETRIES:-2}"
       WEEK_START: "${WEEK_START:-sunday}"

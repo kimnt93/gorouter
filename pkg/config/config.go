@@ -17,9 +17,7 @@ type Config struct {
 	Environment                  string
 	Listen                       string
 	DatabaseBackend              string
-	DatabaseURL                  string
-	ClickHouseURL                string
-	SQLitePath                   string
+	DatabaseConnectionURL        string
 	ClickHouseSingleWriter       bool
 	RedisURL                     string
 	APITokenCacheTTL             time.Duration
@@ -126,31 +124,35 @@ func Load() (*Config, error) {
 	cfg.EncryptionKey = deriveKey(cfg.MasterKey, "credential-encryption")
 	cfg.SessionSecret = deriveKey(cfg.MasterKey, "session-signing")
 
-	backendValue := os.Getenv("DATABASE_BACKEND")
-	if backendValue == "" {
-		backendValue = env("DB_BACKEND", "postgresql")
-	}
-	backend := strings.ToLower(backendValue)
+	backend := strings.ToLower(strings.TrimSpace(env("DB_BACKEND", "postgresql")))
 	if backend == "postgres" {
 		backend = "postgresql"
 	}
 	cfg.DatabaseBackend = backend
+	connection := strings.TrimSpace(os.Getenv("DB_CONNECTION_URL"))
+	if connection == "" {
+		return nil, errors.New("DB_CONNECTION_URL is required")
+	}
 	switch backend {
 	case "postgresql":
-		cfg.DatabaseURL = postgresConnectionURL(env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"), env("DB_SSLMODE", "disable"))
+		if err := validateConnectionURL(connection, "postgres", "postgresql"); err != nil {
+			return nil, fmt.Errorf("invalid PostgreSQL DB_CONNECTION_URL: %w", err)
+		}
+		cfg.DatabaseConnectionURL = connection
 	case "clickhouse":
-		cfg.ClickHouseURL = clickhouseConnectionURL(env("CLICKHOUSE_HOST", "127.0.0.1"), env("CLICKHOUSE_PORT", "9000"), os.Getenv("CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_DB"), strings.EqualFold(env("CLICKHOUSE_TLS", "false"), "true"))
+		if err := validateConnectionURL(connection, "clickhouse", "clickhouses"); err != nil {
+			return nil, fmt.Errorf("invalid ClickHouse DB_CONNECTION_URL: %w", err)
+		}
+		cfg.DatabaseConnectionURL = connection
 	case "local":
-		cfg.SQLitePath = env("SQLITE_PATH", "data/gorouter.db")
+		path, err := sqlitePath(connection)
+		if err != nil {
+			return nil, err
+		}
+		cfg.DatabaseConnectionURL = path
 		cfg.Cache.AllowMemory = true
 	default:
-		return nil, errors.New("DATABASE_BACKEND must be postgres/postgresql, clickhouse, or local")
-	}
-	if backend == "postgresql" && (os.Getenv("DB_USER") == "" || os.Getenv("DB_PASSWORD") == "" || os.Getenv("DB_NAME") == "") {
-		return nil, errors.New("DB_USER, DB_PASSWORD, and DB_NAME are required for PostgreSQL")
-	}
-	if backend == "clickhouse" && (os.Getenv("CLICKHOUSE_USER") == "" || os.Getenv("CLICKHOUSE_PASSWORD") == "" || os.Getenv("CLICKHOUSE_DB") == "") {
-		return nil, errors.New("CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and CLICKHOUSE_DB are required for ClickHouse")
+		return nil, errors.New("DB_BACKEND must be postgresql, clickhouse, or local")
 	}
 	if value := strings.TrimSpace(os.Getenv("CLICKHOUSE_SINGLE_WRITER")); value != "" {
 		parsed, parseErr := strconv.ParseBool(value)
@@ -314,27 +316,48 @@ func Load() (*Config, error) {
 }
 
 func connectionURL(scheme, host, port, user, password, name string) string {
-	u := &url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port), Path: "/" + name}
+	value := &url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port), Path: "/" + name}
 	if user != "" || password != "" {
-		u.User = url.UserPassword(user, password)
+		value.User = url.UserPassword(user, password)
 	}
-	return u.String()
+	return value.String()
 }
 
-func postgresConnectionURL(host, port, user, password, name, sslMode string) string {
-	u, _ := url.Parse(connectionURL("postgres", host, port, user, password, name))
-	query := u.Query()
-	query.Set("sslmode", sslMode)
-	u.RawQuery = query.Encode()
-	return u.String()
+func validateConnectionURL(value string, schemes ...string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return errors.New("must be an absolute database URL")
+	}
+	for _, scheme := range schemes {
+		if strings.EqualFold(parsed.Scheme, scheme) {
+			return nil
+		}
+	}
+	return fmt.Errorf("scheme must be %s", strings.Join(schemes, " or "))
 }
 
-func clickhouseConnectionURL(host, port, user, password, name string, tls bool) string {
-	scheme := "clickhouse"
-	if tls {
-		scheme = "clickhouses"
+func sqlitePath(value string) (string, error) {
+	if value == ":memory:" {
+		return value, nil
 	}
-	return connectionURL(scheme, host, port, user, password, name)
+	parsed, err := url.Parse(value)
+	if err == nil && strings.EqualFold(parsed.Scheme, "file") {
+		if parsed.Host != "" && parsed.Host != "localhost" {
+			return "", errors.New("SQLite DB_CONNECTION_URL file host must be empty or localhost")
+		}
+		path, unescapeErr := url.PathUnescape(parsed.Path)
+		if unescapeErr != nil || strings.TrimSpace(path) == "" {
+			return "", errors.New("SQLite DB_CONNECTION_URL requires a file path")
+		}
+		return path, nil
+	}
+	if strings.Contains(value, "://") {
+		return "", errors.New("local DB_CONNECTION_URL must be a SQLite file URL or path")
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", errors.New("local DB_CONNECTION_URL requires a SQLite path")
+	}
+	return value, nil
 }
 
 func parseWeekday(v string) (time.Weekday, error) {
