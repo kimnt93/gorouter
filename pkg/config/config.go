@@ -15,6 +15,10 @@ import (
 
 type Config struct {
 	Environment                  string
+	ServiceName                  string
+	DevelopmentEnvironment       string
+	LogTimeFormat                string
+	Telemetry                    TelemetryConfig
 	Listen                       string
 	DatabaseBackend              string
 	DatabaseConnectionURL        string
@@ -43,6 +47,12 @@ type Config struct {
 	KimiOAuthClientID            string
 	AntigravityOAuthClientID     string
 	AntigravityOAuthClientSecret string
+}
+
+type TelemetryConfig struct {
+	Enabled  bool
+	Protocol string
+	Endpoint string
 }
 
 type CacheConfig struct {
@@ -74,7 +84,14 @@ type PricingConfig struct {
 func Load() (*Config, error) {
 	environment := strings.ToLower(strings.TrimSpace(env("APP_ENV", "development")))
 	cfg := &Config{
-		Environment:                  environment,
+		Environment:            environment,
+		ServiceName:            strings.TrimSpace(env("OTEL_SERVICE_NAME", "gorouter")),
+		DevelopmentEnvironment: strings.TrimSpace(env("DEVELOPMENT_ENVIRONMENT", "local")),
+		LogTimeFormat:          strings.ToLower(strings.TrimSpace(env("LOG_TIME_FORMAT", "rfc3339"))),
+		Telemetry: TelemetryConfig{
+			Protocol: strings.ToLower(strings.TrimSpace(env("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"))),
+			Endpoint: strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
+		},
 		Listen:                       env("LISTEN", ":8090"),
 		MasterKey:                    os.Getenv("MASTER_KEY"),
 		RequestLimit:                 20 << 20,
@@ -109,6 +126,28 @@ func Load() (*Config, error) {
 			SyncInterval: time.Hour,
 			HTTPTimeout:  30 * time.Second,
 		},
+	}
+	if value := strings.TrimSpace(os.Getenv("OTEL_ENABLED")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, errors.New("OTEL_ENABLED must be true or false")
+		}
+		cfg.Telemetry.Enabled = enabled
+	}
+	if cfg.ServiceName == "" {
+		return nil, errors.New("OTEL_SERVICE_NAME must not be empty")
+	}
+	if cfg.DevelopmentEnvironment == "" {
+		return nil, errors.New("DEVELOPMENT_ENVIRONMENT must not be empty")
+	}
+	if cfg.LogTimeFormat != "rfc3339" && cfg.LogTimeFormat != "rfc3339nano" {
+		return nil, errors.New("LOG_TIME_FORMAT must be rfc3339 or rfc3339nano")
+	}
+	if cfg.Telemetry.Protocol != "grpc" && cfg.Telemetry.Protocol != "http" {
+		return nil, errors.New("OTEL_EXPORTER_OTLP_PROTOCOL must be grpc or http")
+	}
+	if cfg.Telemetry.Enabled && cfg.Telemetry.Endpoint == "" {
+		return nil, errors.New("OTEL_EXPORTER_OTLP_ENDPOINT is required when OTEL_ENABLED=true")
 	}
 	if cfg.MasterKey == "" {
 		return nil, errors.New("MASTER_KEY is required; set it during setup")

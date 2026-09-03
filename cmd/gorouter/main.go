@@ -13,7 +13,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,12 +21,14 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 
 	"github.com/kimnt93/gorouter/internal/api/handlers"
 	"github.com/kimnt93/gorouter/internal/api/routes"
 	"github.com/kimnt93/gorouter/internal/platform/database"
 	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/internal/platform/modeldiscovery"
+	"github.com/kimnt93/gorouter/internal/platform/observability"
 	platformpricing "github.com/kimnt93/gorouter/internal/platform/pricing"
 	"github.com/kimnt93/gorouter/internal/platform/promptcache"
 	"github.com/kimnt93/gorouter/internal/platform/refreshlock"
@@ -58,10 +60,23 @@ type modelStore interface {
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
+	observability.SetupLogger(cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.LogTimeFormat)
 
 	ctx := context.Background()
+	shutdownTracer, err := observability.InitTracer(ctx, cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.Telemetry)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to initialize tracing")
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracer(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("failed to shut down tracing")
+		}
+	}()
 	var tenantRepo tenant.Repository
 	var credRepo credential.Repository
 	var keyRepo apikey.Repository
@@ -77,11 +92,11 @@ func main() {
 	case "clickhouse":
 		db, connectErr := database.ConnectClickHouse(ctx, cfg.DatabaseConnectionURL)
 		if connectErr != nil {
-			log.Fatal(connectErr)
+			log.Fatal().Err(connectErr).Msg("failed to connect ClickHouse")
 		}
 		defer db.Close()
 		if err := db.Migrate(ctx); err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("failed to migrate ClickHouse")
 		}
 		store := clickhouserepo.New(db.Conn)
 		clickhouseStore = store
@@ -93,11 +108,11 @@ func main() {
 	case "local":
 		db, connectErr := database.ConnectSQLite(ctx, cfg.DatabaseConnectionURL)
 		if connectErr != nil {
-			log.Fatal(connectErr)
+			log.Fatal().Err(connectErr).Msg("failed to connect SQLite")
 		}
 		defer db.Close()
 		if err := db.Migrate(ctx); err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("failed to migrate SQLite")
 		}
 		store := localrepo.New(db.DB)
 		providerQuotaStore = localrepo.NewProviderQuotaRepo(store)
@@ -108,11 +123,11 @@ func main() {
 	case "postgresql":
 		db, connectErr := database.Connect(ctx, cfg.DatabaseConnectionURL)
 		if connectErr != nil {
-			log.Fatal(connectErr)
+			log.Fatal().Err(connectErr).Msg("failed to connect PostgreSQL")
 		}
 		defer db.Close()
 		if err := db.Migrate(ctx); err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("failed to migrate PostgreSQL")
 		}
 		store := postgres.New(db.Pool)
 		providerQuotaStore = postgres.NewProviderQuotaRepo(store)
@@ -121,16 +136,16 @@ func main() {
 		identityRepo, auditRepo = postgres.NewIdentityRepo(store), postgres.NewAuditRepo(store)
 		hashSecret, generateSecret = postgres.HashSecret, postgres.GenerateSecret
 	default:
-		log.Fatalf("unsupported database backend %q", cfg.DatabaseBackend)
+		log.Fatal().Str("database_backend", cfg.DatabaseBackend).Msg("unsupported database backend")
 	}
 
 	box, err := seal.New(cfg.EncryptionKey)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("failed to initialize credential encryption")
 	}
 	tenantSvc := tenant.NewService(tenantRepo)
 	if err := tenantSvc.EnsureDefault(ctx); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("failed to ensure default tenant")
 	}
 	credSvc := credential.NewService(credRepo, box)
 	keySvc := apikey.NewService(keyRepo, hashSecret, generateSecret)
@@ -139,7 +154,7 @@ func main() {
 	modelSvc := modelroute.NewService(modelRepo)
 	priceResolver := pricing.NewResolver(modelRepo)
 	if err := priceResolver.Refresh(ctx); err != nil {
-		log.Printf("load cached model prices: %v", err)
+		log.Warn().Err(err).Msg("failed to load cached model prices")
 	}
 	modelSvc.SetPriceCache(priceResolver)
 	pending := usage.NewPending()
@@ -148,7 +163,7 @@ func main() {
 	authSvc := auth.NewServiceWithIdentity(cfg.MasterKey, cfg.SessionSecret, keySvc, identityRepo)
 	cacheSvc, redisClient, err := promptcache.New(cfg.Cache, cfg.RedisURL)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("failed to initialize prompt cache")
 	}
 	defer cacheSvc.Close()
 	if redisClient != nil {
@@ -157,7 +172,7 @@ func main() {
 	if redisClient == nil && cfg.RedisURL != "" {
 		redisOptions, parseErr := redis.ParseURL(cfg.RedisURL)
 		if parseErr != nil {
-			log.Fatal(parseErr)
+			log.Fatal().Err(parseErr).Msg("failed to parse Redis URL")
 		}
 		redisClient = redis.NewClient(redisOptions)
 		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -165,21 +180,21 @@ func main() {
 		cancel()
 		if pingErr != nil {
 			_ = redisClient.Close()
-			log.Fatal(pingErr)
+			log.Fatal().Err(pingErr).Msg("failed to connect Redis")
 		}
 		defer redisClient.Close()
 	}
 	if redisClient != nil {
 		keySvc.SetTokenCache(redisClient, cfg.APITokenCacheTTL)
 		if err := priceResolver.EnableRedisInvalidation(ctx, redisClient); err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("failed to enable pricing invalidation")
 		}
 	}
 	var distributedRefreshLock *refreshlock.Redis
 	if redisClient != nil {
 		distributedRefreshLock, err = refreshlock.NewRedis(redisClient, 10*time.Minute)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("failed to initialize distributed refresh lock")
 		}
 	}
 	if cfg.Pricing.Enabled {
@@ -191,17 +206,17 @@ func main() {
 		if distributedRefreshLock != nil {
 			priceSync.SetRefreshLocker(distributedRefreshLock)
 		}
-		priceSync.Start(ctx, cfg.Pricing.SyncInterval, func(err error) { log.Printf("sync OpenRouter catalog: %v", err) })
+		priceSync.Start(ctx, cfg.Pricing.SyncInterval, func(err error) { log.Warn().Err(err).Msg("failed to sync OpenRouter catalog") })
 	}
 	if clickhouseStore != nil {
 		if redisClient != nil {
 			locker, lockErr := clickhouserepo.NewRedisMutationLocker(redisClient, 15*time.Second)
 			if lockErr != nil {
-				log.Fatal(lockErr)
+				log.Fatal().Err(lockErr).Msg("failed to initialize ClickHouse mutation lock")
 			}
 			clickhouseStore.SetMutationLocker(locker)
 		} else if !cfg.ClickHouseSingleWriter {
-			log.Fatal("ClickHouse administration requires Redis locking unless CLICKHOUSE_SINGLE_WRITER=true is explicitly declared")
+			log.Fatal().Msg("ClickHouse administration requires Redis locking unless CLICKHOUSE_SINGLE_WRITER=true is explicitly declared")
 		}
 	}
 	quota.SetWeekStart(cfg.WeekStart)
@@ -211,11 +226,11 @@ func main() {
 	} else if redisClient != nil {
 		policy, parseErr := quota.ParsePolicy(cfg.Quota.RedisPolicy)
 		if parseErr != nil {
-			log.Fatal(parseErr)
+			log.Fatal().Err(parseErr).Msg("failed to parse Redis outage policy")
 		}
 		quotaSvc, err = quota.NewRedis(redisClient, policy)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("failed to initialize Redis quota coordinator")
 		}
 	}
 
@@ -263,7 +278,7 @@ func main() {
 			}
 			return organization.Name, nil
 		}}
-		catalogSync.Start(ctx, cfg.ModelCatalog.SyncInterval, func(err error) { log.Printf("sync provider model catalogs: %v", err) })
+		catalogSync.Start(ctx, cfg.ModelCatalog.SyncInterval, func(err error) { log.Warn().Err(err).Msg("failed to sync provider model catalogs") })
 		credSvc.SetCredentialsChanged(catalogSync.Trigger)
 	}
 	providerUpstreams := make(map[string]entities.Upstream, len(providerProbes))
@@ -289,14 +304,14 @@ func main() {
 		providerQuotaSvc.SetStateCache(providerquota.NewRedisState(redisClient))
 	}
 	if err := providerQuotaSvc.Restore(context.Background()); err != nil {
-		log.Printf("restore provider quota snapshots: %v", err)
+		log.Warn().Err(err).Msg("failed to restore provider quota snapshots")
 	}
 	if err := providerQuotaSvc.SyncAccountRings(context.Background()); err != nil {
-		log.Printf("sync provider account rings: %v", err)
+		log.Warn().Err(err).Msg("failed to sync provider account rings")
 	}
 	credSvc.AddCredentialsChanged(func() {
 		if err := providerQuotaSvc.SyncAccountRings(context.Background()); err != nil {
-			log.Printf("sync provider account rings: %v", err)
+			log.Warn().Err(err).Msg("failed to sync provider account rings")
 		}
 	})
 	selector := &chat.Selector{}
@@ -319,15 +334,20 @@ func main() {
 		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc, OAuthAvailable: oauthSvc.OAuthAvailable,
 		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
 		BodyLimit: int(cfg.RequestLimit), ReadTimeout: cfg.RequestTimeout,
+		TelemetryEnabled: cfg.Telemetry.Enabled,
 	})
 
+	log.Info().Str("listen", cfg.Listen).Bool("otel_enabled", cfg.Telemetry.Enabled).Msg("starting server")
 	go func() {
 		if err := app.Listen(cfg.Listen); err != nil && !errors.Is(err, syscall.EINTR) {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("server stopped unexpectedly")
 		}
 	}()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	_ = app.Shutdown()
+	log.Info().Msg("shutting down server")
+	if err := app.Shutdown(); err != nil {
+		log.Error().Err(err).Msg("failed to shut down server")
+	}
 }

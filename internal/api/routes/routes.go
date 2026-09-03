@@ -5,15 +5,16 @@ import (
 	"strings"
 	"time"
 
+	otelfiber "github.com/gofiber/contrib/v3/otel"
 	"github.com/gofiber/contrib/v3/swagger"
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 
 	"github.com/kimnt93/gorouter/internal/api/handlers"
 	"github.com/kimnt93/gorouter/internal/api/spa"
 	"github.com/kimnt93/gorouter/internal/api/views"
 	"github.com/kimnt93/gorouter/internal/docs"
+	"github.com/kimnt93/gorouter/internal/platform/observability"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/auth"
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -28,32 +29,37 @@ import (
 )
 
 type Dependencies struct {
-	Auth           *auth.Service
-	Tenants        *tenant.Service
-	Credentials    *credential.Service
-	Keys           *apikey.Service
-	Models         *modelroute.Service
-	Usage          *usage.Service
-	Cache          chat.PromptCache
-	Gateway        *handlers.Gateway
-	OpenAI         credential.ConnectivityProber
-	Anthropic      credential.ConnectivityProber
-	Codex          credential.ConnectivityProber
-	Providers      map[string]credential.ConnectivityProber
-	OAuth          *oauthpkg.Service
-	OAuthAvailable func(string) bool
-	Pricing        handlers.PriceCatalog
-	ProviderQuotas *providerquota.Service
-	BodyLimit      int
-	ReadTimeout    time.Duration
-	Identity       *identity.Service
-	IdentityRepo   identity.Repository
-	Audit          entities.AuditRepository
+	Auth             *auth.Service
+	Tenants          *tenant.Service
+	Credentials      *credential.Service
+	Keys             *apikey.Service
+	Models           *modelroute.Service
+	Usage            *usage.Service
+	Cache            chat.PromptCache
+	Gateway          *handlers.Gateway
+	OpenAI           credential.ConnectivityProber
+	Anthropic        credential.ConnectivityProber
+	Codex            credential.ConnectivityProber
+	Providers        map[string]credential.ConnectivityProber
+	OAuth            *oauthpkg.Service
+	OAuthAvailable   func(string) bool
+	Pricing          handlers.PriceCatalog
+	ProviderQuotas   *providerquota.Service
+	BodyLimit        int
+	ReadTimeout      time.Duration
+	Identity         *identity.Service
+	IdentityRepo     identity.Repository
+	Audit            entities.AuditRepository
+	TelemetryEnabled bool
 }
 
 func New(d Dependencies) *fiber.App {
 	app := fiber.New(fiber.Config{BodyLimit: d.BodyLimit, ReadTimeout: d.ReadTimeout, IdleTimeout: 60 * time.Second})
-	app.Use(recover.New(), logger.New())
+	app.Use(recover.New())
+	if d.TelemetryEnabled {
+		app.Use(otelfiber.Middleware(otelfiber.WithoutMetrics(true)))
+	}
+	app.Use(observability.RequestLoggingMiddleware())
 	app.Get("/healthz", handlers.Health)
 	app.Use(swagger.New(swagger.Config{BasePath: "/", Path: "docs", Title: "gorouter API", FileContent: []byte(docs.SwaggerInfo.ReadDoc())}))
 	app.Get("/assets/:name", func(c fiber.Ctx) error {

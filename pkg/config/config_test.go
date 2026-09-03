@@ -17,10 +17,69 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("REDIS_PORT", "6379")
 	t.Setenv("REDIS_USER", "gorouter")
 	t.Setenv("REDIS_PASSWORD", "redis-secret")
-	for _, key := range []string{"CACHE_MEMORY_FALLBACK", "CACHE_MAX_ENTRY_BYTES", "CACHE_MAX_TOTAL_BYTES", "CACHE_SCOPE", "CACHE_TTL", "CACHE_ENABLED", "REQUEST_LIMIT_MB", "REQUEST_TIMEOUT", "API_TOKEN_CACHE_TTL", "WEEK_START", "USAGE_WRITE_CONCURRENCY", "USAGE_WRITE_QUEUE_SIZE", "MODEL_CATALOG_SYNC_ENABLED", "MODEL_CATALOG_SYNC_INTERVAL", "MODEL_CATALOG_CACHE_TTL", "OPENROUTER_CATALOG_ENABLED", "OPENROUTER_CATALOG_URL", "OPENROUTER_SYNC_INTERVAL", "OPENROUTER_HTTP_TIMEOUT", "ANTIGRAVITY_OAUTH_CLIENT_ID", "ANTIGRAVITY_OAUTH_CLIENT_SECRET"} {
+	for _, key := range []string{"CACHE_MEMORY_FALLBACK", "CACHE_MAX_ENTRY_BYTES", "CACHE_MAX_TOTAL_BYTES", "CACHE_SCOPE", "CACHE_TTL", "CACHE_ENABLED", "REQUEST_LIMIT_MB", "REQUEST_TIMEOUT", "API_TOKEN_CACHE_TTL", "WEEK_START", "USAGE_WRITE_CONCURRENCY", "USAGE_WRITE_QUEUE_SIZE", "MODEL_CATALOG_SYNC_ENABLED", "MODEL_CATALOG_SYNC_INTERVAL", "MODEL_CATALOG_CACHE_TTL", "OPENROUTER_CATALOG_ENABLED", "OPENROUTER_CATALOG_URL", "OPENROUTER_SYNC_INTERVAL", "OPENROUTER_HTTP_TIMEOUT", "ANTIGRAVITY_OAUTH_CLIENT_ID", "ANTIGRAVITY_OAUTH_CLIENT_SECRET", "OTEL_ENABLED", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_SERVICE_NAME", "DEVELOPMENT_ENVIRONMENT", "LOG_TIME_FORMAT"} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("APP_ENV", "production")
+}
+
+func TestObservabilityDefaultsAndOverrides(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServiceName != "gorouter" || cfg.DevelopmentEnvironment != "local" || cfg.LogTimeFormat != "rfc3339" {
+		t.Fatalf("logging defaults: service=%q environment=%q time=%q", cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.LogTimeFormat)
+	}
+	if cfg.Telemetry.Enabled || cfg.Telemetry.Protocol != "grpc" || cfg.Telemetry.Endpoint != "" {
+		t.Fatalf("telemetry defaults: %+v", cfg.Telemetry)
+	}
+
+	requiredEnv(t)
+	t.Setenv("OTEL_ENABLED", "true")
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.internal:4318")
+	t.Setenv("OTEL_SERVICE_NAME", "router-edge")
+	t.Setenv("DEVELOPMENT_ENVIRONMENT", "staging")
+	t.Setenv("LOG_TIME_FORMAT", "rfc3339nano")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Telemetry.Enabled || cfg.Telemetry.Protocol != "http" || cfg.Telemetry.Endpoint != "http://collector.internal:4318" {
+		t.Fatalf("telemetry overrides: %+v", cfg.Telemetry)
+	}
+	if cfg.ServiceName != "router-edge" || cfg.DevelopmentEnvironment != "staging" || cfg.LogTimeFormat != "rfc3339nano" {
+		t.Fatalf("logging overrides: service=%q environment=%q time=%q", cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.LogTimeFormat)
+	}
+}
+
+func TestRejectsInvalidObservabilityConfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "enabled", key: "OTEL_ENABLED", value: "sometimes"},
+		{name: "protocol", key: "OTEL_EXPORTER_OTLP_PROTOCOL", value: "udp"},
+		{name: "time format", key: "LOG_TIME_FORMAT", value: "unix"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requiredEnv(t)
+			t.Setenv(tt.key, tt.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("%s=%q was accepted", tt.key, tt.value)
+			}
+		})
+	}
+
+	requiredEnv(t)
+	t.Setenv("OTEL_ENABLED", "true")
+	if _, err := Load(); err == nil {
+		t.Fatal("enabled telemetry without an endpoint was accepted")
+	}
 }
 
 func TestTokenQuotaAndUsageWriterDefaultsAndOverrides(t *testing.T) {

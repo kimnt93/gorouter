@@ -79,6 +79,12 @@ Detailed configuration and API examples are in the [integration guide](docs/inte
 | `ROUTER_PORT` | Compose only | Published HTTP port; default `8090` (`CLICKHOUSE_ROUTER_PORT` defaults to `18091`). |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_USER`, `REDIS_PASSWORD` | Distributed modes | Shared coordination connection; ignored by local mode. |
 | `APP_ENV` | No | `development` by default; Compose profiles use `production`. |
+| `OTEL_SERVICE_NAME` | No | Service identity in logs and traces; default `gorouter`. |
+| `DEVELOPMENT_ENVIRONMENT` | No | Deployment label in logs and traces; default `local`. |
+| `LOG_TIME_FORMAT` | No | Structured-log timestamp format: `rfc3339` (default) or `rfc3339nano`. |
+| `OTEL_ENABLED` | No | Enables request tracing and OTLP export; default `false`. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | When OTEL enabled | OTLP transport: `grpc` (default) or `http`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | When OTEL enabled | Collector endpoint, such as `http://otel-agent:4317` (gRPC) or `http://otel-agent:4318` (HTTP). |
 | `CACHE_ENABLED`, `CACHE_TTL`, `CACHE_SCOPE` | No | Deterministic response-cache controls. |
 | `REQUEST_TIMEOUT`, `REQUEST_LIMIT_MB` | No | Request duration and body-size limits. |
 | `ROUTE_RETRIES` | No | Retry budget for providers without quota-aware account routing. |
