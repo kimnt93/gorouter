@@ -64,9 +64,16 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Make GHCR package public
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PACKAGE_NAME: ${{ github.event.repository.name }}
+      - name: Verify GHCR package is publicly pullable
         run: |
-          gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public
+          docker logout "${REGISTRY}"
+          for attempt in {1..5}; do
+            if docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${{ github.event.release.tag_name }}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 5 ]; then
+              sleep 3
+            fi
+          done
+          echo "Published image is not anonymously pullable. Set the GHCR package visibility to public." >&2
+          exit 1
