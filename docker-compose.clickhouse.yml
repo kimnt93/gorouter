@@ -4,14 +4,14 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      MASTER_KEY: "${MASTER_KEY}"
+      MASTER_KEY: "${MASTER_KEY:-secret}"
       LISTEN: ":8090"
       DB_BACKEND: "clickhouse"
-      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL:-clickhouse://gorouter:secret@clickhouse:9000/gorouter}"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       REDIS_USER: "${REDIS_USER:-gorouter}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-secret}"
       APP_ENV: "production"
       OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-gorouter}"
       DEVELOPMENT_ENVIRONMENT: "${DEVELOPMENT_ENVIRONMENT:-local}"
@@ -42,7 +42,7 @@ services:
       MODEL_CATALOG_SYNC_INTERVAL: "${MODEL_CATALOG_SYNC_INTERVAL:-15m}"
       MODEL_CATALOG_CACHE_TTL: "${MODEL_CATALOG_CACHE_TTL:-1h}"
     ports:
-      - "${CLICKHOUSE_ROUTER_PORT:-18091}:8090"
+      - "${ROUTER_PORT:-8090}:8090"
     depends_on:
       redis:
         condition: service_healthy
@@ -59,7 +59,7 @@ services:
       - --user
       - "${REDIS_USER:-gorouter}"
       - "on"
-      - ">${REDIS_PASSWORD}"
+      - ">${REDIS_PASSWORD:-secret}"
       - "~*"
       - "&*"
       - "+@all"
@@ -69,7 +69,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--user", "${REDIS_USER:-gorouter}", "--pass", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "--user", "${REDIS_USER:-gorouter}", "--pass", "${REDIS_PASSWORD:-secret}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -78,7 +78,7 @@ services:
     image: clickhouse/clickhouse-server:25.8-alpine
     restart: unless-stopped
     environment:
-      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL:-clickhouse://gorouter:secret@clickhouse:9000/gorouter}"
     entrypoint: ["/gorouter-database-entrypoint.sh", "clickhouse"]
     volumes:
       - clickhouse_data:/var/lib/clickhouse

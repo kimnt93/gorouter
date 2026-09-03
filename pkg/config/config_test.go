@@ -163,13 +163,31 @@ func TestRejectsInvalidPricingConfig(t *testing.T) {
 	}
 }
 
-func TestRequiredEnvironment(t *testing.T) {
-	for _, key := range []string{"MASTER_KEY", "DB_CONNECTION_URL"} {
-		t.Run(key, func(t *testing.T) {
+func TestZeroConfigurationDefaultsToLocal(t *testing.T) {
+	requiredEnv(t)
+	for _, key := range []string{"MASTER_KEY", "DB_BACKEND", "DB_CONNECTION_URL", "REDIS_HOST", "APP_ENV"} {
+		t.Setenv(key, "")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MasterKey != "secret" || cfg.DatabaseBackend != "local" || cfg.DatabaseConnectionURL != "gorouter.db" {
+		t.Fatalf("zero-configuration defaults: master=%q backend=%q connection=%q", cfg.MasterKey, cfg.DatabaseBackend, cfg.DatabaseConnectionURL)
+	}
+	if cfg.RedisURL != "" || !cfg.Cache.AllowMemory {
+		t.Fatalf("local runtime dependencies: redis=%q memory_cache=%t", cfg.RedisURL, cfg.Cache.AllowMemory)
+	}
+}
+
+func TestDistributedBackendRequiresConnectionURL(t *testing.T) {
+	for _, backend := range []string{"postgresql", "clickhouse"} {
+		t.Run(backend, func(t *testing.T) {
 			requiredEnv(t)
-			t.Setenv(key, "")
+			t.Setenv("DB_BACKEND", backend)
+			t.Setenv("DB_CONNECTION_URL", "")
 			if _, err := Load(); err == nil {
-				t.Fatalf("missing %s was accepted", key)
+				t.Fatalf("%s accepted an empty connection URL", backend)
 			}
 		})
 	}

@@ -37,35 +37,40 @@ check out the selected tag and build the Docker image locally.
 
 ## New Docker installation
 
-Choose exactly one backend. PostgreSQL is the default recommendation for distributed deployments; local mode is suitable for one-process installations. Configure it with only `DB_BACKEND` and `DB_CONNECTION_URL`; the URL contains the backend host, credentials, database, and transport options, or the SQLite path for local mode.
+With no environment variables, GoRouter uses local SQLite at `gorouter.db` and
+the development master key `secret`. This zero-configuration mode is suitable
+only for a private local machine. PostgreSQL remains the default recommendation
+for distributed deployments.
 
-1. Create the configuration without overwriting an existing installation:
+1. Configuration is optional. To override defaults without overwriting an
+   existing installation:
 
    ```bash
    test -e .env || cp .env.example .env
    chmod 600 .env
    ```
 
-2. Generate fresh values for `MASTER_KEY`, the password embedded in
+2. For any shared or exposed installation, generate fresh values for `MASTER_KEY`, the password embedded in
    `DB_CONNECTION_URL`, and `REDIS_PASSWORD`, then write them to `.env` without
    displaying them. Never use example placeholder values in production.
 
 3. Check the requested host port before starting. `8090` is the default. If it
    is already used by anything other than this GoRouter installation, choose
    the next free port (`8091`, then `8092`, and so on), set `ROUTER_PORT` in
-   `.env` for PostgreSQL or `CLICKHOUSE_ROUTER_PORT` for ClickHouse, and
-   continue. Do not stop the service using the original port.
+   `.env`, and continue. `ROUTER_PORT` is interpreted only by Docker Compose;
+   it is not passed to the GoRouter process. Do not stop the service using the
+   original port.
 
 4. Start the PostgreSQL stack:
 
    ```bash
-   docker compose --env-file .env -f docker-compose.postgres.yml up -d --build
+   docker compose -f docker-compose.postgres.yml up -d --build
    ```
 
    For ClickHouse, configure the ClickHouse variables in `.env` and run:
 
    ```bash
-   docker compose --env-file .env -f docker-compose.clickhouse.yml up -d --build
+   docker compose -f docker-compose.clickhouse.yml up -d --build
    ```
 
 5. Verify the installation:
@@ -73,13 +78,11 @@ Choose exactly one backend. PostgreSQL is the default recommendation for distrib
    ```bash
    curl -fsS http://127.0.0.1:${ROUTER_PORT:-8090}/healthz
 
-   # For ClickHouse use CLICKHOUSE_ROUTER_PORT (default 18091).
-   curl -fsS http://127.0.0.1:${CLICKHOUSE_ROUTER_PORT:-18091}/healthz
+   # The same command applies to the ClickHouse profile.
+   curl -fsS http://127.0.0.1:${ROUTER_PORT:-8090}/healthz
    ```
 
-The dashboard is available at `http://localhost:${ROUTER_PORT:-8090}/` for
-PostgreSQL or `http://localhost:${CLICKHOUSE_ROUTER_PORT:-18091}/` for
-ClickHouse.
+The dashboard is available at `http://localhost:${ROUTER_PORT:-8090}/`.
 
 ## Fully local installation
 
@@ -87,16 +90,31 @@ Local mode needs no PostgreSQL, ClickHouse, or Redis service. The Docker profile
 persists SQLite in its own named volume:
 
 ```bash
-docker compose --env-file .env -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
-To run without Docker, build and run the application with a private data directory:
+The equivalent local installation using `docker run` is:
 
 ```bash
-mkdir -p data
-chmod 700 data
-MASTER_KEY="$(openssl rand -base64 33)" DB_BACKEND=local DB_CONNECTION_URL=file://"$PWD/data/gorouter.db" go run ./cmd/gorouter
+docker run -d \
+  --name gorouter \
+  --restart unless-stopped \
+  -p 8090:8090 \
+  -v gorouter_data:/var/lib/gorouter \
+  ghcr.io/kimnt93/gorouter:latest
 ```
+
+Add `-e MASTER_KEY="$(openssl rand -base64 33)"` before the image name for an
+installation that is not strictly private and local.
+
+To run without Docker from the repository root:
+
+```bash
+go run ./cmd/gorouter
+```
+
+This creates `gorouter.db` in the current directory. Set `DB_CONNECTION_URL` to
+another plain filesystem path when a different location is preferred.
 
 Keep the same `MASTER_KEY` across restarts so encrypted provider credentials remain
 readable. Stop GoRouter before copying the SQLite database, or use a SQLite-aware

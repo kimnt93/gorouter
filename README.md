@@ -27,31 +27,40 @@ for methodology and limitations before quoting comparisons.
 
 ## Start with Docker
 
-Create `.env`, generate secrets, and choose one complete backend:
+The published image starts with local SQLite and no required environment
+variables:
 
 ```bash
-cp .env.example .env
-chmod 600 .env
+docker run -d \
+  --name gorouter \
+  --restart unless-stopped \
+  -p 8090:8090 \
+  -v gorouter_data:/var/lib/gorouter \
+  ghcr.io/kimnt93/gorouter:latest
 ```
 
-Set `MASTER_KEY`, `DB_BACKEND`, `DB_CONNECTION_URL`, and Redis settings for a
-distributed backend. Then start exactly one profile:
+The built-in master key is `secret`; override it with `-e MASTER_KEY=...` before
+exposing GoRouter outside a private local machine. The named volume persists
+`/var/lib/gorouter/gorouter.db`.
+
+Docker Compose also needs no `.env` file. Choose exactly one profile:
 
 ```bash
+# Local SQLite; no Redis or external database
+docker compose -f docker-compose.local.yml up -d --build
+
 # PostgreSQL
-# DB_CONNECTION_URL=postgres://user:password@postgres:5432/database?sslmode=disable
-docker compose --env-file .env -f docker-compose.postgres.yml up -d --build
+docker compose -f docker-compose.postgres.yml up -d --build
 
 # ClickHouse
-# DB_CONNECTION_URL=clickhouse://user:password@clickhouse:9000/database
-docker compose --env-file .env -f docker-compose.clickhouse.yml up -d --build
-
-# Local SQLite; no Redis or external database
-# DB_CONNECTION_URL=file:///var/lib/gorouter/gorouter.db
-docker compose --env-file .env -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.clickhouse.yml up -d --build
 ```
 
-Verify with `curl -fsS http://127.0.0.1:${ROUTER_PORT:-8090}/healthz`.
+All variables are optional for the default local runtime. Copy
+[`.env.example`](.env.example) only when overrides are needed, and replace the
+development secret/password defaults for any shared or exposed deployment.
+
+Verify with `curl -fsS http://127.0.0.1:8090/healthz`.
 Local mode is single-process; PostgreSQL and ClickHouse modes use Redis for
 shared production coordination. See [INSTALL.md](INSTALL.md) for safe upgrades.
 
@@ -71,25 +80,26 @@ Detailed configuration and API examples are in the [integration guide](docs/inte
 
 ## Environment configuration
 
-| Variable | Required | Description |
-|---|---:|---|
-| `MASTER_KEY` | Yes | Administrative login and root material; use a long random value. |
-| `DB_BACKEND` | Yes | `postgresql`, `clickhouse`, or `local`. |
-| `DB_CONNECTION_URL` | Yes | PostgreSQL DSN, ClickHouse DSN, or SQLite `file://` URL/path matching `DB_BACKEND`. |
-| `ROUTER_PORT` | Compose only | Published HTTP port; default `8090` (`CLICKHOUSE_ROUTER_PORT` defaults to `18091`). |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_USER`, `REDIS_PASSWORD` | Distributed modes | Shared coordination connection; ignored by local mode. |
-| `APP_ENV` | No | `development` by default; Compose profiles use `production`. |
-| `OTEL_SERVICE_NAME` | No | Service identity in logs and traces; default `gorouter`. |
-| `DEVELOPMENT_ENVIRONMENT` | No | Deployment label in logs and traces; default `local`. |
-| `LOG_LEVEL` | No | Minimum structured-log level; default `info`. Set `debug` to emit successful request logs. |
-| `LOG_TIME_FORMAT` | No | Structured-log timestamp format: `rfc3339` (default) or `rfc3339nano`. |
-| `OTEL_ENABLED` | No | Enables request tracing and OTLP export; default `false`. |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | When OTEL enabled | OTLP transport: `grpc` (default) or `http`. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | When OTEL enabled | Collector endpoint, such as `http://otel-agent:4317` (gRPC) or `http://otel-agent:4318` (HTTP). |
-| `CACHE_ENABLED`, `CACHE_TTL`, `CACHE_SCOPE` | No | Deterministic response-cache controls. |
-| `REQUEST_TIMEOUT`, `REQUEST_LIMIT_MB` | No | Request duration and body-size limits. |
-| `ROUTE_RETRIES` | No | Retry budget for providers without quota-aware account routing. |
-| `USAGE_WRITE_CONCURRENCY`, `USAGE_WRITE_QUEUE_SIZE` | No | Asynchronous usage writer controls. |
+| Variable | Required | Default | Description |
+|---|---:|---|---|
+| `ROUTER_PORT` | No; Compose only | `8090` | Published host port. The GoRouter process does not read it. |
+| `MASTER_KEY` | No | `secret` | Administrative login and root material. Override with a long random value outside private local use. |
+| `DB_BACKEND` | No | `local` | `postgresql`, `clickhouse`, or `local`. |
+| `DB_CONNECTION_URL` | No | `gorouter.db` in local mode | Plain SQLite path for local mode. A matching DSN is needed after explicitly selecting a distributed backend. |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_USER`, `REDIS_PASSWORD` | No | Compose: `redis`, `6379`, `gorouter`, `secret` | Shared coordination connection; ignored by local mode. |
+| `LISTEN` | No | `:8090` | Address and container port used by the GoRouter process. |
+| `APP_ENV` | No | `development` | Runtime safety mode; Compose profiles use `production`. |
+| `OTEL_SERVICE_NAME` | No | `gorouter` | Service identity in logs and traces. |
+| `DEVELOPMENT_ENVIRONMENT` | No | `local` | Deployment label in logs and traces. |
+| `LOG_LEVEL` | No | `info` | Minimum structured-log level. Set `debug` to emit successful request logs. |
+| `LOG_TIME_FORMAT` | No | `rfc3339` | Also accepts `rfc3339nano`. |
+| `OTEL_ENABLED` | No | `false` | Enables request tracing and OTLP export. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | No | `grpc` | OTLP transport: `grpc` or `http`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Empty | Collector endpoint; must be set only when OTEL is enabled. |
+| `CACHE_ENABLED`, `CACHE_TTL`, `CACHE_SCOPE` | No | `true`, `24h`, `key` | Deterministic response-cache controls. |
+| `REQUEST_TIMEOUT`, `REQUEST_LIMIT_MB` | No | `5m`, `20` | Request duration and body-size limits. |
+| `ROUTE_RETRIES` | No | `2` | Retry budget for providers without quota-aware account routing. |
+| `USAGE_WRITE_CONCURRENCY`, `USAGE_WRITE_QUEUE_SIZE` | No | `4`, `100000` | Asynchronous usage writer controls. |
 
 Examples:
 
@@ -101,7 +111,7 @@ DB_BACKEND=clickhouse
 DB_CONNECTION_URL=clickhouse://gorouter:password@clickhouse:9000/gorouter
 
 DB_BACKEND=local
-DB_CONNECTION_URL=file:///var/lib/gorouter/gorouter.db
+DB_CONNECTION_URL=/var/lib/gorouter/gorouter.db
 ```
 
 See [.env.example](.env.example) for Redis, OAuth, cache, pricing, and model-catalog options.

@@ -3,14 +3,14 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      MASTER_KEY: "${MASTER_KEY}"
+      MASTER_KEY: "${MASTER_KEY:-secret}"
       LISTEN: ":8090"
       DB_BACKEND: "postgresql"
-      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL:-postgres://gorouter:secret@postgres:5432/gorouter?sslmode=disable}"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       REDIS_USER: "${REDIS_USER:-gorouter}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-secret}"
       APP_ENV: "production"
       OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-gorouter}"
       DEVELOPMENT_ENVIRONMENT: "${DEVELOPMENT_ENVIRONMENT:-local}"
@@ -64,7 +64,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      DB_CONNECTION_URL: "${DB_CONNECTION_URL}"
+      DB_CONNECTION_URL: "${DB_CONNECTION_URL:-postgres://gorouter:secret@postgres:5432/gorouter?sslmode=disable}"
     entrypoint: ["/gorouter-database-entrypoint.sh", "postgres"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -85,7 +85,7 @@ services:
       - --user
       - "${REDIS_USER:-gorouter}"
       - "on"
-      - ">${REDIS_PASSWORD}"
+      - ">${REDIS_PASSWORD:-secret}"
       - "~*"
       - "&*"
       - "+@all"
@@ -95,7 +95,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--user", "${REDIS_USER:-gorouter}", "--pass", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "--user", "${REDIS_USER:-gorouter}", "--pass", "${REDIS_PASSWORD:-secret}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10

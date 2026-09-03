@@ -64,6 +64,9 @@ func main() {
 		os.Exit(1)
 	}
 	observability.SetupLogger(cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.LogLevel, cfg.LogTimeFormat)
+	if cfg.MasterKey == "secret" {
+		log.Warn().Msg("using default master key; override MASTER_KEY outside private local use")
+	}
 
 	ctx := context.Background()
 	shutdownTracer, err := observability.InitTracer(ctx, cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.Telemetry)

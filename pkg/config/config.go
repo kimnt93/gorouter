@@ -95,7 +95,7 @@ func Load() (*Config, error) {
 			Endpoint: strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
 		},
 		Listen:                       env("LISTEN", ":8090"),
-		MasterKey:                    os.Getenv("MASTER_KEY"),
+		MasterKey:                    env("MASTER_KEY", "secret"),
 		RequestLimit:                 20 << 20,
 		RequestTimeout:               5 * time.Minute,
 		RouteRetries:                 2,
@@ -154,9 +154,6 @@ func Load() (*Config, error) {
 	if cfg.Telemetry.Enabled && cfg.Telemetry.Endpoint == "" {
 		return nil, errors.New("OTEL_EXPORTER_OTLP_ENDPOINT is required when OTEL_ENABLED=true")
 	}
-	if cfg.MasterKey == "" {
-		return nil, errors.New("MASTER_KEY is required; set it during setup")
-	}
 	antigravityID := strings.TrimSpace(cfg.AntigravityOAuthClientID)
 	antigravitySecret := strings.TrimSpace(cfg.AntigravityOAuthClientSecret)
 	if (antigravityID == "") != (antigravitySecret == "") {
@@ -168,14 +165,17 @@ func Load() (*Config, error) {
 	cfg.EncryptionKey = deriveKey(cfg.MasterKey, "credential-encryption")
 	cfg.SessionSecret = deriveKey(cfg.MasterKey, "session-signing")
 
-	backend := strings.ToLower(strings.TrimSpace(env("DB_BACKEND", "postgresql")))
+	backend := strings.ToLower(strings.TrimSpace(env("DB_BACKEND", "local")))
 	if backend == "postgres" {
 		backend = "postgresql"
 	}
 	cfg.DatabaseBackend = backend
 	connection := strings.TrimSpace(os.Getenv("DB_CONNECTION_URL"))
+	if connection == "" && backend == "local" {
+		connection = "gorouter.db"
+	}
 	if connection == "" {
-		return nil, errors.New("DB_CONNECTION_URL is required")
+		return nil, errors.New("DB_CONNECTION_URL is required for PostgreSQL and ClickHouse")
 	}
 	switch backend {
 	case "postgresql":

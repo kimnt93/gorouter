@@ -9,6 +9,7 @@ FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/gorouter /usr/local/bin/gorouter
 RUN mkdir -p /var/lib/gorouter && chown 65532:65532 /var/lib/gorouter
+WORKDIR /var/lib/gorouter
 EXPOSE 8090
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/gorouter"]
