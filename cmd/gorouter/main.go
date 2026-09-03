@@ -63,7 +63,7 @@ func main() {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	observability.SetupLogger(cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.LogTimeFormat)
+	observability.SetupLogger(cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.LogLevel, cfg.LogTimeFormat)
 
 	ctx := context.Background()
 	shutdownTracer, err := observability.InitTracer(ctx, cfg.ServiceName, cfg.DevelopmentEnvironment, cfg.Telemetry)
@@ -269,7 +269,7 @@ func main() {
 		if redisClient != nil {
 			credSvc.SetModelDiscoveryCache(modeldiscovery.NewRedis(redisClient), cfg.ModelCatalog.CacheTTL)
 		}
-		catalogSync := &modelroute.CatalogSync{Credentials: credSvc, Models: modelSvc, Locker: distributedRefreshLock, Discoverer: func(providerID string) credential.ModelDiscoverer {
+		catalogSync := &modelroute.CatalogSync{Credentials: credSvc, Models: modelSvc, Discoverer: func(providerID string) credential.ModelDiscoverer {
 			return credential.ResolveModelDiscoverer(providerID, providerProbes, openai, anthropic, codex)
 		}, OrganizationName: func(ctx context.Context, id string) (string, error) {
 			organization, err := identityRepo.OrganizationByID(ctx, id)
@@ -278,6 +278,9 @@ func main() {
 			}
 			return organization.Name, nil
 		}}
+		if distributedRefreshLock != nil {
+			catalogSync.Locker = distributedRefreshLock
+		}
 		catalogSync.Start(ctx, cfg.ModelCatalog.SyncInterval, func(err error) { log.Warn().Err(err).Msg("failed to sync provider model catalogs") })
 		credSvc.SetCredentialsChanged(catalogSync.Trigger)
 	}

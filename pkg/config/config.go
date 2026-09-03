@@ -17,6 +17,7 @@ type Config struct {
 	Environment                  string
 	ServiceName                  string
 	DevelopmentEnvironment       string
+	LogLevel                     string
 	LogTimeFormat                string
 	Telemetry                    TelemetryConfig
 	Listen                       string
@@ -87,6 +88,7 @@ func Load() (*Config, error) {
 		Environment:            environment,
 		ServiceName:            strings.TrimSpace(env("OTEL_SERVICE_NAME", "gorouter")),
 		DevelopmentEnvironment: strings.TrimSpace(env("DEVELOPMENT_ENVIRONMENT", "local")),
+		LogLevel:               strings.ToLower(strings.TrimSpace(env("LOG_LEVEL", "info"))),
 		LogTimeFormat:          strings.ToLower(strings.TrimSpace(env("LOG_TIME_FORMAT", "rfc3339"))),
 		Telemetry: TelemetryConfig{
 			Protocol: strings.ToLower(strings.TrimSpace(env("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"))),
@@ -139,6 +141,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.DevelopmentEnvironment == "" {
 		return nil, errors.New("DEVELOPMENT_ENVIRONMENT must not be empty")
+	}
+	if !validLogLevel(cfg.LogLevel) {
+		return nil, errors.New("LOG_LEVEL must be trace, debug, info, warn, error, fatal, panic, or disabled")
 	}
 	if cfg.LogTimeFormat != "rfc3339" && cfg.LogTimeFormat != "rfc3339nano" {
 		return nil, errors.New("LOG_TIME_FORMAT must be rfc3339 or rfc3339nano")
@@ -352,6 +357,15 @@ func Load() (*Config, error) {
 		cfg.RedisURL = ""
 	}
 	return cfg, nil
+}
+
+func validLogLevel(value string) bool {
+	switch value {
+	case "trace", "debug", "info", "warn", "error", "fatal", "panic", "disabled":
+		return true
+	default:
+		return false
+	}
 }
 
 func connectionURL(scheme, host, port, user, password, name string) string {

@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -11,7 +12,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func SetupLogger(serviceName, environment, timeFormat string) {
+func SetupLogger(serviceName, environment, level, timeFormat string) {
+	logLevel, err := zerolog.ParseLevel(level)
+	if err != nil {
+		logLevel = zerolog.InfoLevel
+	}
+	zerolog.SetGlobalLevel(logLevel)
 	log.Logger = NewLogger(os.Stdout, serviceName, environment, timeFormat)
 }
 
@@ -36,21 +42,51 @@ func RequestLoggingMiddleware() fiber.Handler {
 	return func(c fiber.Ctx) error {
 		started := time.Now()
 		err := c.Next()
-		spanContext := trace.SpanFromContext(c.Context()).SpanContext()
+		status := requestStatus(c, err)
 
-		event := log.Info()
-		if err != nil {
-			event = log.Error().Err(err)
+		var event *zerolog.Event
+		switch {
+		case status >= fiber.StatusInternalServerError:
+			event = log.Error()
+		case status >= fiber.StatusBadRequest:
+			event = log.Warn()
+		default:
+			event = log.Debug()
 		}
+		if !event.Enabled() {
+			return err
+		}
+		if err != nil {
+			event = event.Err(err)
+		}
+		spanContext := trace.SpanFromContext(c.Context()).SpanContext()
 		event.
 			Str("method", c.Method()).
 			Str("path", c.Path()).
-			Int("status", c.Response().StatusCode()).
+			Int("status", status).
 			Dur("latency", time.Since(started)).
-			Str("client_ip", c.IP()).
-			Str("trace_id", spanContext.TraceID().String()).
-			Str("span_id", spanContext.SpanID().String()).
-			Msg("Request processed")
+			Str("client_ip", c.IP())
+		if spanContext.IsValid() {
+			event = event.
+				Str("trace_id", spanContext.TraceID().String()).
+				Str("span_id", spanContext.SpanID().String())
+		}
+		event.Msg("request completed")
 		return err
 	}
+}
+
+func requestStatus(c fiber.Ctx, err error) int {
+	status := c.Response().StatusCode()
+	if err == nil {
+		return status
+	}
+	var fiberError *fiber.Error
+	if errors.As(err, &fiberError) {
+		return fiberError.Code
+	}
+	if status < fiber.StatusBadRequest {
+		return fiber.StatusInternalServerError
+	}
+	return status
 }

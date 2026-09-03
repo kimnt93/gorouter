@@ -81,6 +81,7 @@ Detailed configuration and API examples are in the [integration guide](docs/inte
 | `APP_ENV` | No | `development` by default; Compose profiles use `production`. |
 | `OTEL_SERVICE_NAME` | No | Service identity in logs and traces; default `gorouter`. |
 | `DEVELOPMENT_ENVIRONMENT` | No | Deployment label in logs and traces; default `local`. |
+| `LOG_LEVEL` | No | Minimum structured-log level; default `info`. Set `debug` to emit successful request logs. |
 | `LOG_TIME_FORMAT` | No | Structured-log timestamp format: `rfc3339` (default) or `rfc3339nano`. |
 | `OTEL_ENABLED` | No | Enables request tracing and OTLP export; default `false`. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | When OTEL enabled | OTLP transport: `grpc` (default) or `http`. |
