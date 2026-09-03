@@ -699,6 +699,11 @@ func (q *gatewayProviderQuota) AdvanceAccount(provider, credentialID string, eli
 	}
 }
 
+func (q *gatewayProviderQuota) ExhaustAndAdvance(provider, credentialID string, eligible []string) {
+	q.MarkExhausted(credentialID)
+	q.AdvanceAccount(provider, credentialID, eligible)
+}
+
 func (q *gatewayProviderQuota) MarkExhausted(id string) {
 	q.available[id] = false
 	q.marked = append(q.marked, id)

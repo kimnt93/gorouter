@@ -51,6 +51,7 @@ type StateCache interface {
 	PutSnapshot(ctx context.Context, snapshot Snapshot) error
 	ExhaustedUntil(ctx context.Context, credentialID string) (time.Time, error)
 	MarkExhausted(ctx context.Context, credentialID string, until time.Time) error
+	ExhaustAndAdvance(ctx context.Context, provider, credentialID string, eligible []string, until time.Time) error
 	ClearExhausted(ctx context.Context, credentialID string) error
 	ActiveCredential(ctx context.Context, provider string) (string, error)
 	MarkActive(ctx context.Context, provider, credentialID string) (bool, error)
@@ -173,8 +174,8 @@ func (s *Service) SyncAccountRings(ctx context.Context) error {
 // model/owner context and rotates it to the shared checkpoint. The returned
 // slice is one complete cycle and never contains an account twice.
 func (s *Service) OrderCredentials(providerID string, eligible []string) []string {
-	if len(eligible) < 2 {
-		return append([]string(nil), eligible...)
+	if len(eligible) == 0 {
+		return nil
 	}
 	var ring []string
 	checkpoint := ""
@@ -357,7 +358,7 @@ func (s *Service) ActiveCredential(provider string) string {
 	return s.active[provider]
 }
 
-func (s *Service) MarkExhausted(id string) {
+func (s *Service) exhaustionUntil(id string) time.Time {
 	now := time.Now()
 	until := now.Add(5 * time.Minute)
 	s.mu.Lock()
@@ -369,16 +370,33 @@ func (s *Service) MarkExhausted(id string) {
 	}
 	if ok {
 		for _, window := range snapshot.Windows {
-			if window.ResetAt != nil && window.ResetAt.After(now) && (until.Equal(now.Add(5*time.Minute)) || window.ResetAt.Before(until)) {
+			if window.ResetAt != nil && window.ResetAt.After(now) && window.ResetAt.Before(until) {
 				until = *window.ResetAt
 			}
 		}
 	}
 	s.exhausted[id] = until
 	s.mu.Unlock()
+	return until
+}
+
+func (s *Service) MarkExhausted(id string) {
+	until := s.exhaustionUntil(id)
 	if s.state != nil {
 		_ = s.state.MarkExhausted(context.Background(), id, until)
 	}
+}
+
+// ExhaustAndAdvance atomically publishes quota exhaustion and advances the
+// provider checkpoint. No replica can observe the old account as active after
+// seeing its exhaustion marker.
+func (s *Service) ExhaustAndAdvance(providerID, credentialID string, eligible []string) {
+	until := s.exhaustionUntil(credentialID)
+	if s.state != nil {
+		_ = s.state.ExhaustAndAdvance(context.Background(), providerID, credentialID, eligible, until)
+		return
+	}
+	s.AdvanceAccount(providerID, credentialID, eligible)
 }
 
 // MarkInUse records the credential that most recently accepted a gateway

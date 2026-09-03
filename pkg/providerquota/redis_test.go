@@ -185,3 +185,76 @@ func TestDistributedProviderRingAdvancesFailuresAndStopsAfterOneCycle(t *testing
 		t.Fatalf("bounded cycle=%v", cycle)
 	}
 }
+
+func TestExhaustAndAdvanceAtomicallyMovesCurrentCheckpoint(t *testing.T) {
+	server := miniredis.RunT(t)
+	clientA := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	clientB := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = clientA.Close(); _ = clientB.Close() })
+	first, second := NewRedisState(clientA), NewRedisState(clientB)
+	ctx := t.Context()
+	eligible := []string{"c1", "c2", "c3", "c4"}
+	if err := first.SyncAccountRing(ctx, "codex", eligible); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := first.MarkActive(ctx, "codex", "c2"); err != nil || !accepted {
+		t.Fatalf("mark active accepted=%v err=%v", accepted, err)
+	}
+	until := time.Now().Add(time.Hour).Truncate(time.Second)
+	if err := first.ExhaustAndAdvance(ctx, "codex", "c2", eligible, until); err != nil {
+		t.Fatal(err)
+	}
+	if exhausted, err := second.ExhaustedUntil(ctx, "c2"); err != nil || !exhausted.Equal(until) {
+		t.Fatalf("exhausted=%s err=%v", exhausted, err)
+	}
+	if active, err := second.ActiveCredential(ctx, "codex"); err != nil || active != "c3" {
+		t.Fatalf("active=%q err=%v", active, err)
+	}
+}
+
+func TestExhaustAndAdvanceSkipsAlreadyExhaustedNextAccount(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	state := NewRedisState(client)
+	ctx := t.Context()
+	eligible := []string{"c1", "c2", "c3", "c4"}
+	if err := state.SyncAccountRing(ctx, "codex", eligible); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := state.MarkActive(ctx, "codex", "c2"); err != nil || !accepted {
+		t.Fatalf("mark active accepted=%v err=%v", accepted, err)
+	}
+	until := time.Now().Add(time.Hour)
+	if err := state.MarkExhausted(ctx, "c3", until); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.ExhaustAndAdvance(ctx, "codex", "c2", eligible, until); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := state.ActiveCredential(ctx, "codex"); err != nil || active != "c4" {
+		t.Fatalf("active=%q err=%v", active, err)
+	}
+}
+
+func TestSingleEligibleAccountRealignsExhaustedCheckpoint(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	state := NewRedisState(client)
+	service := New(nil, nil)
+	service.SetStateCache(state)
+	ctx := t.Context()
+	if err := state.SyncAccountRing(ctx, "codex", []string{"c1", "c2", "c3"}); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := state.MarkActive(ctx, "codex", "c2"); err != nil || !accepted {
+		t.Fatalf("mark active accepted=%v err=%v", accepted, err)
+	}
+	if got := service.OrderCredentials("codex", []string{"c3"}); len(got) != 1 || got[0] != "c3" {
+		t.Fatalf("order=%v", got)
+	}
+	if active, err := state.ActiveCredential(ctx, "codex"); err != nil || active != "c3" {
+		t.Fatalf("active=%q err=%v", active, err)
+	}
+}

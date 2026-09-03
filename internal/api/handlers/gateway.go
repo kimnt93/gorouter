@@ -54,6 +54,7 @@ type ProviderQuotaRouter interface {
 	OrderCredentials(provider string, eligible []string) []string
 	AdvanceAccount(provider, credentialID string, eligible []string)
 	MarkExhausted(credentialID string)
+	ExhaustAndAdvance(provider, credentialID string, eligible []string)
 	MarkInUse(credentialID string)
 }
 
@@ -407,11 +408,12 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 				onlyQuotaFailures = false
 			}
 			if fillFirstProvider != "" && g.ProviderQuotas != nil {
-				g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
-			}
-			// This account is exhausted for now; mark quota exhaustion so other
-			// replicas skip it, then move on to the next account.
-			if exhausted && g.ProviderQuotas != nil {
+				if exhausted {
+					g.ProviderQuotas.ExhaustAndAdvance(fillFirstProvider, credentialID, eligibleAccountIDs)
+				} else {
+					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+				}
+			} else if exhausted && g.ProviderQuotas != nil {
 				g.ProviderQuotas.MarkExhausted(credentialID)
 			}
 			if !exhausted || transportErr {

@@ -57,6 +57,50 @@ func (r *RedisState) MarkExhausted(ctx context.Context, id string, until time.Ti
 	return r.client.Set(ctx, quotaStatePrefix+"exhausted:"+id, strconv.FormatInt(until.Unix(), 10), ttl).Err()
 }
 
+var exhaustAndAdvanceScript = redis.NewScript(`
+redis.call("SET", KEYS[3], ARGV[2], "PX", ARGV[3])
+local current = redis.call("GET", KEYS[2])
+if current ~= ARGV[1] then
+  return 0
+end
+local eligible = {}
+for index = 4, #ARGV do
+  eligible[ARGV[index]] = true
+end
+local ring = redis.call("LRANGE", KEYS[1], 0, -1)
+for index, id in ipairs(ring) do
+  if id == ARGV[1] then
+    for offset = 1, #ring do
+      local nextIndex = ((index - 1 + offset) % #ring) + 1
+      local next = ring[nextIndex]
+      if eligible[next] and redis.call("EXISTS", KEYS[4] .. next) == 0 then
+        redis.call("SET", KEYS[2], next)
+        return 1
+      end
+    end
+  end
+end
+return 0
+`)
+
+func (r *RedisState) ExhaustAndAdvance(ctx context.Context, provider, credentialID string, eligible []string, until time.Time) error {
+	ttl := time.Until(until)
+	if ttl <= 0 {
+		return nil
+	}
+	args := make([]any, 0, 3+len(eligible))
+	args = append(args, credentialID, until.Unix(), ttl.Milliseconds())
+	for _, id := range eligible {
+		args = append(args, id)
+	}
+	return exhaustAndAdvanceScript.Run(ctx, r.client, []string{
+		quotaStatePrefix + "ring:" + provider,
+		quotaStatePrefix + "active:" + provider,
+		quotaStatePrefix + "exhausted:" + credentialID,
+		quotaStatePrefix + "exhausted:",
+	}, args...).Err()
+}
+
 func (r *RedisState) ClearExhausted(ctx context.Context, id string) error {
 	return r.client.Del(ctx, quotaStatePrefix+"exhausted:"+id).Err()
 }
