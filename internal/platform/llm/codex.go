@@ -408,6 +408,7 @@ func transformCodexStream(source io.Reader, target io.Writer, model string) erro
 	created := time.Now().Unix()
 	id := "chatcmpl-codex"
 	started := false
+	completed := false
 	toolCalls := make(map[string]*codexToolStreamState)
 	toolOrder := make([]*codexToolStreamState, 0)
 	currentTool := ""
@@ -506,7 +507,11 @@ func transformCodexStream(source io.Reader, target io.Writer, model string) erro
 			}
 			return nil
 		}
+		if value.Type == "response.failed" || value.Type == "response.incomplete" || value.Type == "error" {
+			return fmt.Errorf("Codex stream ended with %s", value.Type)
+		}
 		if value.Type == "response.completed" {
+			completed = true
 			for _, item := range value.Response.Output {
 				if item.Type != "function_call" || item.CallID == "" || item.Name == "" {
 					continue
@@ -538,6 +543,9 @@ func transformCodexStream(source io.Reader, target io.Writer, model string) erro
 	if err != nil {
 		return err
 	}
+	if !completed {
+		return io.ErrUnexpectedEOF
+	}
 	_, err = writer.WriteString("data: [DONE]\n\n")
 	if err == nil {
 		err = writer.Flush()
@@ -547,6 +555,7 @@ func transformCodexStream(source io.Reader, target io.Writer, model string) erro
 
 func collectCodexResponse(source io.Reader, model string) (Response, error) {
 	response := Response{ID: "chatcmpl-codex", Object: "chat.completion", Created: time.Now().Unix(), Model: model}
+	completed := false
 	var content strings.Builder
 	toolCalls := make(map[string]*ToolCall)
 	toolOrder := make([]string, 0)
@@ -606,7 +615,11 @@ func collectCodexResponse(source io.Reader, model string) (Response, error) {
 				}
 			}
 		}
+		if value.Type == "response.failed" || value.Type == "response.incomplete" || value.Type == "error" {
+			return fmt.Errorf("Codex response ended with %s", value.Type)
+		}
 		if value.Type == "response.completed" {
+			completed = true
 			response.Usage = codexUsage(value.Response.Usage.InputTokens, value.Response.Usage.OutputTokens, value.Response.Usage.InputDetails.CachedTokens)
 			if content.Len() == 0 {
 				for _, item := range value.Response.Output {
@@ -637,6 +650,9 @@ func collectCodexResponse(source io.Reader, model string) (Response, error) {
 	})
 	if err != nil {
 		return Response{}, err
+	}
+	if !completed {
+		return Response{}, io.ErrUnexpectedEOF
 	}
 	message := &ResponseMessage{Role: "assistant", Content: content.String()}
 	seen := make(map[*ToolCall]bool)

@@ -112,6 +112,23 @@ type gatewayUpstream struct {
 	models   []string
 }
 
+type failingGatewayStreamUpstream struct{}
+
+type failingStreamBody struct{ sent bool }
+
+func (body *failingStreamBody) Read(target []byte) (int, error) {
+	if body.sent {
+		return 0, io.ErrUnexpectedEOF
+	}
+	body.sent = true
+	return copy(target, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"), nil
+}
+func (*failingStreamBody) Close() error { return nil }
+
+func (failingGatewayStreamUpstream) Send(context.Context, *entities.CredentialRuntime, string, []byte) (*entities.UpstreamResult, error) {
+	return &entities.UpstreamResult{StatusCode: http.StatusOK, Body: &failingStreamBody{}}, nil
+}
+
 type gatewayStreamUpstream struct{}
 
 func (gatewayStreamUpstream) Send(context.Context, *entities.CredentialRuntime, string, []byte) (*entities.UpstreamResult, error) {
@@ -119,6 +136,34 @@ func (gatewayStreamUpstream) Send(context.Context, *entities.CredentialRuntime, 
 		"data: {\"id\":\"stream-1\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-a\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2}}\n\n" +
 		"data: [DONE]\n\n"
 	return &entities.UpstreamResult{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func TestGatewayAdvancesQuotaAccountWhenAcceptedStreamFails(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	runtime := &entities.CredentialRuntime{ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth}
+	secondRuntime := &entities.CredentialRuntime{ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth}
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}, active: map[string]string{"codex": "cred-a"}}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b"}}, runtimes: map[string]*entities.CredentialRuntime{"cred-a": runtime, "cred-b": secondRuntime}}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
+		Codex:  failingGatewayStreamUpstream{}, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if got := quotaState.active["codex"]; got != "cred-b" {
+		t.Fatalf("checkpoint=%q want cred-b", got)
+	}
 }
 
 func TestGatewayDoesNotCloseStreamingBodyBeforeWriterRuns(t *testing.T) {

@@ -351,3 +351,34 @@ func TestCodexSendUsesConversationIdentityForBodyAndSessionHeader(t *testing.T) 
 	}
 	result.Body.Close()
 }
+
+func TestCodexStreamingRequiresCompletedTerminalEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-1\"}}\n\n"+
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")
+	}))
+	defer server.Close()
+	body, _ := json.Marshal(ChatRequest{Model: "cx/gpt-5.5", Stream: true, Messages: []Message{{Role: "user", Content: json.RawMessage(`"hi"`)}}})
+	result, err := (&CodexAdapter{HTTP: server.Client()}).Send(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL, OAuthAccess: "token"}, "gpt-5.5", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := io.ReadAll(result.Body)
+	result.Body.Close()
+	if readErr == nil {
+		t.Fatal("incomplete Codex stream was accepted as successful")
+	}
+}
+
+func TestCodexNonStreamingRequiresCompletedTerminalEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")
+	}))
+	defer server.Close()
+	body, _ := json.Marshal(ChatRequest{Model: "cx/gpt-5.5", Messages: []Message{{Role: "user", Content: json.RawMessage(`"hi"`)}}})
+	if _, err := (&CodexAdapter{HTTP: server.Client()}).Send(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL, OAuthAccess: "token"}, "gpt-5.5", body); err == nil {
+		t.Fatal("incomplete non-streaming Codex response was accepted")
+	}
+}

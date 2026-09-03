@@ -419,13 +419,6 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			}
 			continue
 		}
-		g.Health.Report(credentialID, true)
-		if strategy == chat.StrategyRoundRobin {
-			g.Selector.BindAffinity(c.Context(), routeAffinity, candidate.ID)
-		}
-		if g.ProviderQuotas != nil {
-			g.ProviderQuotas.MarkInUse(credentialID)
-		}
 		routedModel := *model
 		routedModel.UpstreamModel = upstreamModel
 		routedModel.Metadata = cloneModelMetadata(model.Metadata)
@@ -435,7 +428,30 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		routedModel.Metadata.Provider = runtime.Provider
 		if req.Stream {
 			streamOwnsReservation = true
-			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
+			onStreamDone := func(providerSucceeded bool) {
+				if providerSucceeded {
+					g.Health.Report(credentialID, true)
+					if strategy == chat.StrategyRoundRobin {
+						g.Selector.BindAffinity(context.Background(), routeAffinity, candidate.ID)
+					}
+					if g.ProviderQuotas != nil {
+						g.ProviderQuotas.MarkInUse(credentialID)
+					}
+					return
+				}
+				g.Health.Report(credentialID, false)
+				if fillFirstProvider != "" && g.ProviderQuotas != nil {
+					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+				}
+			}
+			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation, onStreamDone)
+		}
+		g.Health.Report(credentialID, true)
+		if strategy == chat.StrategyRoundRobin {
+			g.Selector.BindAffinity(c.Context(), routeAffinity, candidate.ID)
+		}
+		if g.ProviderQuotas != nil {
+			g.ProviderQuotas.MarkInUse(credentialID)
 		}
 		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
 	}
@@ -804,7 +820,7 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 	return c.Send(body)
 }
 
-func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation) error {
+func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities.ModelDef, runtime *entities.CredentialRuntime, result *entities.UpstreamResult, raw []byte, deterministic bool, started time.Time, price *entities.Price, reservation *quota.Reservation, onDone func(bool)) error {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
@@ -930,6 +946,9 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_ = g.Quota.Release(ctx, reservation)
 			cancel()
+		}
+		if onDone != nil {
+			onDone(streamStatus == fiber.StatusOK)
 		}
 		conversationResponse, _ := json.Marshal(llm.Response{Model: model.Name, Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage})
 		g.recordCostConversation(key, model, runtime.ID, usage, false, streamStatus, started, cost, raw, conversationResponse)
