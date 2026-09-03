@@ -8,7 +8,7 @@ complete Docker procedure.
 ## Safety rules
 
 - Use Docker Engine and Docker Compose v2.
-- Run exactly one durable backend: PostgreSQL or ClickHouse.
+- Run exactly one durable backend: PostgreSQL, ClickHouse, or local SQLite.
 - Never run `docker compose down -v`, `docker system prune`, or a broad
   container stop/delete command.
 - Never stop, restart, or replace unrelated user services.
@@ -37,7 +37,7 @@ check out the selected tag and build the Docker image locally.
 
 ## New Docker installation
 
-Choose exactly one backend. PostgreSQL is the default recommendation.
+Choose exactly one backend. PostgreSQL is the default recommendation for distributed deployments; local mode is suitable for one-process installations.
 
 1. Create the configuration without overwriting an existing installation:
 
@@ -80,6 +80,29 @@ Choose exactly one backend. PostgreSQL is the default recommendation.
 The dashboard is available at `http://localhost:${ROUTER_PORT:-8090}/` for
 PostgreSQL or `http://localhost:${CLICKHOUSE_ROUTER_PORT:-18091}/` for
 ClickHouse.
+
+## Fully local installation
+
+Local mode needs no PostgreSQL, ClickHouse, or Redis service. The Docker profile
+persists SQLite in its own named volume:
+
+```bash
+docker compose --env-file .env -f docker-compose.local.yml up -d --build
+```
+
+To run without Docker, build and run the application with a private data directory:
+
+```bash
+mkdir -p data
+chmod 700 data
+MASTER_KEY="$(openssl rand -base64 33)" DB_BACKEND=local SQLITE_PATH=data/gorouter.db go run ./cmd/gorouter
+```
+
+Keep the same `MASTER_KEY` across restarts so encrypted provider credentials remain
+readable. Stop GoRouter before copying the SQLite database, or use a SQLite-aware
+online backup tool; copying only the main file while WAL mode is active can lose
+committed data. Local mode uses in-memory coordination and therefore supports only
+one GoRouter process.
 
 ## Duplicate services and upgrades
 

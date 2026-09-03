@@ -40,6 +40,23 @@ ClickHouse:
 docker compose --env-file .env -f docker-compose.clickhouse.yml up -d --build
 ```
 
+Fully local (no database or Redis service):
+
+```bash
+docker compose --env-file .env -f docker-compose.local.yml up -d --build
+```
+
+Or run the binary directly:
+
+```bash
+MASTER_KEY="$(openssl rand -base64 33)" DB_BACKEND=local go run ./cmd/gorouter
+```
+
+Local mode persists application data in `data/gorouter.db` by default and uses
+process memory for cache, quota/RPM, OAuth flow, and routing coordination. It is
+intended for one GoRouter process, not multiple replicas. Set `SQLITE_PATH` to
+choose another database file.
+
 Open <http://localhost:8090/> and sign in with `MASTER_KEY` or an enabled,
 appropriately scoped API key.
 
@@ -243,10 +260,11 @@ Required settings:
 |---|---|
 | `MASTER_KEY` | Administrative login and root key material. Use a long random value. |
 | `ROUTER_PORT` | Public Compose port; defaults to `8090`. |
-| `DB_BACKEND` | Primary storage mode: `postgresql` or `clickhouse`. |
-| `DB_USER`, `DB_PASSWORD`, `DB_NAME` | PostgreSQL connection settings. |
+| `DB_BACKEND` | Primary runtime mode: `postgresql`, `clickhouse`, or `local`. |
+| `DB_USER`, `DB_PASSWORD`, `DB_NAME` | PostgreSQL connection settings (PostgreSQL mode only). |
+| `SQLITE_PATH` | SQLite file path for local mode; defaults to `data/gorouter.db`. |
 | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DB` | ClickHouse connection settings. |
-| `REDIS_USER`, `REDIS_PASSWORD` | Redis authentication settings. |
+| `REDIS_USER`, `REDIS_PASSWORD` | Redis authentication settings (PostgreSQL/ClickHouse modes only). |
 
 Common optional settings:
 
@@ -266,7 +284,10 @@ Common optional settings:
 See [.env.example](.env.example) for every provider, OAuth, pricing-catalog,
 database, Redis, cache, and runtime option.
 
-PostgreSQL and ClickHouse are standalone alternatives. The application uses
+PostgreSQL, ClickHouse, and local SQLite are standalone alternatives. The
+application uses
 exactly one durable backend at runtime and does not mirror data between them.
-Redis coordinates distributed cache, quota, OAuth, routing-health, and pricing
-invalidation state. The in-memory fallback is development-only.
+PostgreSQL and ClickHouse use Redis for distributed coordination. Local mode is
+explicitly
+single-process and uses in-memory cache, quota, OAuth, and routing state; that ephemeral
+coordination state resets when the process restarts.

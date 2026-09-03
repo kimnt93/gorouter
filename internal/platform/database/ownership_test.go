@@ -11,7 +11,7 @@ func TestMigrationsDoNotGenerateIDsOrTimes(t *testing.T) {
 	for _, source := range []struct {
 		name, glob string
 		files      fs.FS
-	}{{"postgres", "migrations/*.sql", migrationsFS}, {"clickhouse", "clickhouse/*.sql", clickhouseMigrations}} {
+	}{{"postgres", "migrations/*.sql", migrationsFS}, {"clickhouse", "clickhouse/*.sql", clickhouseMigrations}, {"sqlite", "sqlite/*.sql", sqliteMigrations}} {
 		names, err := fs.Glob(source.files, source.glob)
 		if err != nil {
 			t.Fatal(err)

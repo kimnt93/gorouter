@@ -9,6 +9,7 @@ func requiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("MASTER_KEY", "master")
 	t.Setenv("DB_BACKEND", "postgresql")
+	t.Setenv("DATABASE_BACKEND", "")
 	t.Setenv("DB_HOST", "database.internal")
 	t.Setenv("DB_PORT", "5432")
 	t.Setenv("DB_USER", "gorouter")
@@ -289,5 +290,48 @@ func TestValidatesOptionalAntigravityOAuthConfiguration(t *testing.T) {
 	cfg, err = Load()
 	if err != nil || cfg.AntigravityOAuthClientID == "" {
 		t.Fatalf("valid Antigravity config rejected: %v", err)
+	}
+}
+
+func TestAcceptsFullyLocalBackendWithoutExternalServices(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("DB_BACKEND", "local")
+	t.Setenv("DB_USER", "")
+	t.Setenv("DB_PASSWORD", "")
+	t.Setenv("DB_NAME", "")
+	t.Setenv("REDIS_HOST", "redis-must-be-ignored")
+	t.Setenv("SQLITE_PATH", "/tmp/gorouter-local-test.db")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SQLitePath != "/tmp/gorouter-local-test.db" || cfg.RedisURL != "" || !cfg.Cache.AllowMemory {
+		t.Fatalf("local configuration = %+v", cfg)
+	}
+}
+
+func TestDatabaseBackendAliasCanSelectLocal(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("DB_BACKEND", "postgresql")
+	t.Setenv("DATABASE_BACKEND", "local")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseBackend != "local" {
+		t.Fatalf("database backend = %q", cfg.DatabaseBackend)
+	}
+}
+
+func TestLocalBackendUsesDefaultSQLitePath(t *testing.T) {
+	requiredEnv(t)
+	t.Setenv("DB_BACKEND", "local")
+	t.Setenv("SQLITE_PATH", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SQLitePath != "data/gorouter.db" {
+		t.Fatalf("SQLite path = %q", cfg.SQLitePath)
 	}
 }

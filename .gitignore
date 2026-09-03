@@ -25,3 +25,8 @@ go.work.sum
 
 # Local environment
 .env
+
+# Default local-mode durable data
+data/
+*.db-wal
+*.db-shm

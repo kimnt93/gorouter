@@ -31,6 +31,7 @@ import (
 	"github.com/kimnt93/gorouter/internal/platform/promptcache"
 	"github.com/kimnt93/gorouter/internal/platform/refreshlock"
 	clickhouserepo "github.com/kimnt93/gorouter/internal/repositories/clickhouse"
+	localrepo "github.com/kimnt93/gorouter/internal/repositories/local"
 	"github.com/kimnt93/gorouter/internal/repositories/postgres"
 	"github.com/kimnt93/gorouter/pkg/apikey"
 	"github.com/kimnt93/gorouter/pkg/auth"
@@ -72,7 +73,8 @@ func main() {
 	var generateSecret func() string
 	var clickhouseStore *clickhouserepo.Store
 	var providerQuotaStore providerquota.Store
-	if cfg.DatabaseBackend == "clickhouse" {
+	switch cfg.DatabaseBackend {
+	case "clickhouse":
 		db, connectErr := database.ConnectClickHouse(ctx, cfg.ClickHouseURL)
 		if connectErr != nil {
 			log.Fatal(connectErr)
@@ -88,7 +90,22 @@ func main() {
 		modelRepo, usageRepo = clickhouserepo.NewModelRouteRepo(store), clickhouserepo.NewUsageRepo(store)
 		identityRepo, auditRepo = clickhouserepo.NewIdentityRepo(store), clickhouserepo.NewAuditRepo(store)
 		hashSecret, generateSecret = clickhouserepo.HashSecret, clickhouserepo.GenerateSecret
-	} else {
+	case "local":
+		db, connectErr := database.ConnectSQLite(ctx, cfg.SQLitePath)
+		if connectErr != nil {
+			log.Fatal(connectErr)
+		}
+		defer db.Close()
+		if err := db.Migrate(ctx); err != nil {
+			log.Fatal(err)
+		}
+		store := localrepo.New(db.DB)
+		providerQuotaStore = localrepo.NewProviderQuotaRepo(store)
+		tenantRepo, credRepo, keyRepo = localrepo.NewTenantRepo(store), localrepo.NewCredentialRepo(store), localrepo.NewApiKeyRepo(store)
+		modelRepo, usageRepo = localrepo.NewModelRouteRepo(store), localrepo.NewUsageRepo(store)
+		identityRepo, auditRepo = localrepo.NewIdentityRepo(store), localrepo.NewAuditRepo(store)
+		hashSecret, generateSecret = localrepo.HashSecret, localrepo.GenerateSecret
+	case "postgresql":
 		db, connectErr := database.Connect(ctx, cfg.DatabaseURL)
 		if connectErr != nil {
 			log.Fatal(connectErr)
@@ -103,6 +120,8 @@ func main() {
 		modelRepo, usageRepo = postgres.NewModelRouteRepo(store), postgres.NewUsageRepo(store)
 		identityRepo, auditRepo = postgres.NewIdentityRepo(store), postgres.NewAuditRepo(store)
 		hashSecret, generateSecret = postgres.HashSecret, postgres.GenerateSecret
+	default:
+		log.Fatalf("unsupported database backend %q", cfg.DatabaseBackend)
 	}
 
 	box, err := seal.New(cfg.EncryptionKey)
@@ -187,7 +206,9 @@ func main() {
 	}
 	quota.SetWeekStart(cfg.WeekStart)
 	var quotaSvc quota.Coordinator
-	if redisClient != nil {
+	if cfg.DatabaseBackend == "local" {
+		quotaSvc = quota.NewMemory()
+	} else if redisClient != nil {
 		policy, parseErr := quota.ParsePolicy(cfg.Quota.RedisPolicy)
 		if parseErr != nil {
 			log.Fatal(parseErr)

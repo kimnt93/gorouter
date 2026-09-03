@@ -19,6 +19,7 @@ type Config struct {
 	DatabaseBackend              string
 	DatabaseURL                  string
 	ClickHouseURL                string
+	SQLitePath                   string
 	ClickHouseSingleWriter       bool
 	RedisURL                     string
 	APITokenCacheTTL             time.Duration
@@ -139,8 +140,11 @@ func Load() (*Config, error) {
 		cfg.DatabaseURL = postgresConnectionURL(env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"), env("DB_SSLMODE", "disable"))
 	case "clickhouse":
 		cfg.ClickHouseURL = clickhouseConnectionURL(env("CLICKHOUSE_HOST", "127.0.0.1"), env("CLICKHOUSE_PORT", "9000"), os.Getenv("CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_PASSWORD"), os.Getenv("CLICKHOUSE_DB"), strings.EqualFold(env("CLICKHOUSE_TLS", "false"), "true"))
+	case "local":
+		cfg.SQLitePath = env("SQLITE_PATH", "data/gorouter.db")
+		cfg.Cache.AllowMemory = true
 	default:
-		return nil, errors.New("DATABASE_BACKEND must be postgres/postgresql or clickhouse")
+		return nil, errors.New("DATABASE_BACKEND must be postgres/postgresql, clickhouse, or local")
 	}
 	if backend == "postgresql" && (os.Getenv("DB_USER") == "" || os.Getenv("DB_PASSWORD") == "" || os.Getenv("DB_NAME") == "") {
 		return nil, errors.New("DB_USER, DB_PASSWORD, and DB_NAME are required for PostgreSQL")
@@ -155,7 +159,7 @@ func Load() (*Config, error) {
 		}
 		cfg.ClickHouseSingleWriter = parsed
 	}
-	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" {
+	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" && backend != "local" {
 		cfg.RedisURL = connectionURL("redis", redisHost, env("REDIS_PORT", "6379"), os.Getenv("REDIS_USER"), os.Getenv("REDIS_PASSWORD"), "0")
 	}
 	if v := os.Getenv("REQUEST_LIMIT_MB"); v != "" {
@@ -237,10 +241,10 @@ func Load() (*Config, error) {
 	if v := os.Getenv("CACHE_MEMORY_FALLBACK"); v != "" {
 		cfg.Cache.AllowMemory = strings.EqualFold(v, "true") || v == "1"
 	}
-	if cfg.Environment != "development" && cfg.Cache.AllowMemory {
+	if cfg.Environment != "development" && backend != "local" && cfg.Cache.AllowMemory {
 		return nil, errors.New("CACHE_MEMORY_FALLBACK is allowed only in development")
 	}
-	if cfg.Environment != "development" && cfg.RedisURL == "" {
+	if cfg.Environment != "development" && backend != "local" && cfg.RedisURL == "" {
 		return nil, errors.New("Redis is required outside development for distributed runtime state")
 	}
 	switch strings.ToLower(os.Getenv("REDIS_OUTAGE_POLICY")) {
@@ -301,6 +305,10 @@ func Load() (*Config, error) {
 			return nil, errors.New("OPENROUTER_HTTP_TIMEOUT must be a positive duration")
 		}
 		cfg.Pricing.HTTPTimeout = d
+	}
+	if backend == "local" {
+		cfg.Cache.AllowMemory = true
+		cfg.RedisURL = ""
 	}
 	return cfg, nil
 }
