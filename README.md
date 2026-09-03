@@ -17,6 +17,20 @@ Google OAuth and exposes the account's live Cloud Code model catalog.
 | API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible |
 | OAuth | Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Grok Build, xAI, Kimi Code, Cline, ClinePass, Kilo Code, Kiro, Amazon Q, Google Antigravity |
 
+## Performance snapshot
+
+A same-host proxy-overhead benchmark used a 5 ms OpenAI-compatible mock,
+streaming and non-streaming calls, and concurrency 1, 8, and 32. GoRouter local
+and CLIProxyAPI each completed 240/240 requests; both reached about 1.65–1.70K
+requests/s at concurrency 32. GoRouter used about 30 MiB median memory and a
+28 MB image, with modestly better streaming p95/p99 latency at higher
+concurrency in this run. The tested OmniRoute configuration was substantially
+heavier and timed out under concurrency, but that result should not be
+extrapolated to every OmniRoute configuration.
+
+See the [dated benchmark report](docs/benchmarks/2026-09-03-local-proxy-comparison.md)
+for methodology, complete results, limitations, and reproduction notes.
+
 ## Start with Docker
 
 Create the environment file and replace every placeholder secret:
