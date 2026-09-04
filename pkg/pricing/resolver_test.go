@@ -251,3 +251,41 @@ func TestCatalogSyncSkipsWhenAnotherReplicaOwnsPricingRefresh(t *testing.T) {
 		t.Fatalf("locker=%d imports=%d prices=%+v", locker.calls, imports, repo.catalog)
 	}
 }
+
+func TestResolverNormalizesProviderVersionSeparators(t *testing.T) {
+	repo := &resolverRepo{catalog: []entities.CatalogPrice{
+		{Model: "anthropic/claude-opus-4.8", Price: entities.Price{InputPerM: 5, OutputPerM: 25, CacheWritePerM: 6.25}},
+		{Model: "future-vendor/model-v2.1", Price: entities.Price{InputPerM: 7}},
+	}}
+	r := NewResolver(repo)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		model, upstream string
+		want            float64
+	}{
+		{"cc/claude-opus-4-8", "claude-opus-4-8", 5},
+		{"alias", "future-vendor/model-v2-1", 7},
+	} {
+		price, ok := r.Resolve(test.model, test.upstream)
+		if !ok || price.InputPerM != test.want {
+			t.Fatalf("Resolve(%q, %q) = %+v, %v", test.model, test.upstream, price, ok)
+		}
+	}
+}
+
+func TestResolverRejectsAmbiguousNormalizedCatalogAliases(t *testing.T) {
+	repo := &resolverRepo{catalog: []entities.CatalogPrice{
+		{Model: "vendor-a/shared-model-2.1", Price: entities.Price{InputPerM: 1}},
+		{Model: "vendor-b/shared-model-2-1", Price: entities.Price{InputPerM: 2}},
+	}}
+	r := NewResolver(repo)
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	price, ok := r.Resolve("alias", "shared-model-2_1")
+	if !ok || price != (entities.Price{}) {
+		t.Fatalf("ambiguous alias should remain free, got %+v, %v", price, ok)
+	}
+}

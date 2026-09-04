@@ -19,8 +19,9 @@ type ResolverRepository interface {
 }
 
 type resolvedSnapshot struct {
-	manual  map[string]entities.Price
-	catalog map[string]entities.CatalogPrice
+	manual         map[string]entities.Price
+	catalog        map[string]entities.CatalogPrice
+	catalogAliases map[string]string
 }
 
 var publicProviderCatalogPrefixes = map[string]string{
@@ -77,10 +78,54 @@ func catalogCandidates(model string) []string {
 	return out
 }
 
+func normalizedModelKey(model string) string {
+	model = strings.TrimSpace(strings.ToLower(model))
+	parts := strings.FieldsFunc(model, func(char rune) bool {
+		return !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9')
+	})
+	return strings.Join(parts, "-")
+}
+
+// catalogAliasIndex maps punctuation-only model-name variants to a catalog ID.
+// Providers do not consistently represent version separators (for example,
+// "4-8" versus "4.8"). Ambiguous normalized names are deliberately excluded
+// so a fuzzy alias can never select an arbitrary vendor or model.
+func catalogAliasIndex(catalog map[string]entities.CatalogPrice) map[string]string {
+	aliases := make(map[string]string, len(catalog)*2)
+	for model := range catalog {
+		keys := []string{normalizedModelKey(model)}
+		if _, base, ok := strings.Cut(model, "/"); ok {
+			keys = append(keys, normalizedModelKey(base))
+		}
+		for _, key := range keys {
+			if key == "" {
+				continue
+			}
+			if existing, found := aliases[key]; found && existing != model {
+				aliases[key] = ""
+			} else if !found {
+				aliases[key] = model
+			}
+		}
+	}
+	for key, model := range aliases {
+		if model == "" {
+			delete(aliases, key)
+		}
+	}
+	return aliases
+}
+
 func catalogPrice(snapshot *resolvedSnapshot, model string) (entities.CatalogPrice, bool) {
-	for _, candidate := range catalogCandidates(model) {
+	candidates := catalogCandidates(model)
+	for _, candidate := range candidates {
 		if item, ok := snapshot.catalog[candidate]; ok {
 			return item, true
+		}
+	}
+	for _, candidate := range candidates {
+		if canonical := snapshot.catalogAliases[normalizedModelKey(candidate)]; canonical != "" {
+			return snapshot.catalog[canonical], true
 		}
 	}
 	return entities.CatalogPrice{}, false
@@ -98,7 +143,7 @@ type Resolver struct {
 
 func NewResolver(repo ResolverRepository) *Resolver {
 	r := &Resolver{repo: repo}
-	r.snapshot.Store(&resolvedSnapshot{manual: map[string]entities.Price{}, catalog: map[string]entities.CatalogPrice{}})
+	r.snapshot.Store(&resolvedSnapshot{manual: map[string]entities.Price{}, catalog: map[string]entities.CatalogPrice{}, catalogAliases: map[string]string{}})
 	return r
 }
 
@@ -151,9 +196,14 @@ func (r *Resolver) Refresh(ctx context.Context) error {
 	}
 	catalog := make(map[string]entities.CatalogPrice, len(items))
 	for _, item := range items {
-		catalog[item.Model] = item
+		model := strings.TrimSpace(strings.ToLower(item.Model))
+		if model == "" {
+			continue
+		}
+		item.Model = model
+		catalog[model] = item
 	}
-	r.snapshot.Store(&resolvedSnapshot{manual: manual, catalog: catalog})
+	r.snapshot.Store(&resolvedSnapshot{manual: manual, catalog: catalog, catalogAliases: catalogAliasIndex(catalog)})
 	return nil
 }
 
@@ -167,7 +217,7 @@ func (r *Resolver) SetManual(model string, price entities.Price) {
 			manual[name] = current
 		}
 		manual[model] = price
-		next := &resolvedSnapshot{manual: manual, catalog: old.catalog}
+		next := &resolvedSnapshot{manual: manual, catalog: old.catalog, catalogAliases: old.catalogAliases}
 		if r.snapshot.CompareAndSwap(old, next) {
 			r.NotifyChange(context.Background())
 			return
@@ -184,7 +234,7 @@ func (r *Resolver) DeleteManual(model string) {
 				manual[name] = current
 			}
 		}
-		next := &resolvedSnapshot{manual: manual, catalog: old.catalog}
+		next := &resolvedSnapshot{manual: manual, catalog: old.catalog, catalogAliases: old.catalogAliases}
 		if r.snapshot.CompareAndSwap(old, next) {
 			r.NotifyChange(context.Background())
 			return
