@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, expect, test, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ProvidersPage } from './ProvidersPage'
 
 const api = vi.hoisted(() => ({
@@ -7,7 +7,11 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('../api/client', () => api)
 
+afterEach(cleanup)
+
 beforeEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   vi.clearAllMocks()
   api.getProviders.mockResolvedValue({ data: [{ id: 'custom', name: 'Custom provider', description: 'Compatible endpoint', auth: 'api_key', protocol: 'openai', default_base_url: '', model_prefix: 'custom', custom_base_url: true, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
   api.getCredentials.mockResolvedValue([])
@@ -59,4 +63,29 @@ test('lays out connected accounts in a compact grid and opens reset credits moda
   const creditTitle = await screen.findByText('Weekly reset')
   expect(creditTitle.closest('.reset-credit-modal')).toBeInTheDocument()
   expect(creditTitle.closest('.reset-credit-modal')?.querySelector('button.button')).toHaveTextContent('Redeem')
+})
+
+test('redeems a reset credit without crypto.randomUUID and reuses the request ID after failure', async () => {
+  vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(7); return bytes } })
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  api.getProviders.mockResolvedValue({ data: [{ id: 'codex', name: 'OpenAI Codex', description: 'Codex subscription', auth: 'oauth', protocol: 'codex', default_base_url: '', model_prefix: 'cx', custom_base_url: false, oauth_supported: true, oauth_refresh_required: true, quota_supported: true }] })
+  api.getCredentials.mockResolvedValue([{ id: 'cred-1', name: 'Account 1', provider: 'codex', kind: 'oauth', base_url: 'https://chatgpt.com/backend-api', status: 'active', owner_tenant_id: null, created_at: '' }])
+  api.getCredentialQuota.mockResolvedValue({ credential_id: 'cred-1', provider: 'codex', account: 'account', available: true, windows: [] })
+  api.getCodexResetCredits.mockResolvedValue({ available_count: 1, credits: [{ selection_token: 'credit-1', title: 'Weekly reset', description: 'Reset weekly usage' }] })
+  api.redeemCodexResetCredit.mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValueOnce({ quota: { credential_id: 'cred-1', provider: 'codex', available: true, windows: [] } })
+
+  render(<ProvidersPage />)
+  const resetButtons = await screen.findAllByRole('button', { name: 'Reset credits' })
+  fireEvent.click(resetButtons[resetButtons.length - 1])
+  const redeemButtons = await screen.findAllByRole('button', { name: 'Redeem' })
+  fireEvent.click(redeemButtons[redeemButtons.length - 1])
+  expect(await screen.findByText('temporary failure')).toBeInTheDocument()
+  const firstRequestID = api.redeemCodexResetCredit.mock.calls[0][2]
+  expect(firstRequestID).toMatch(/^[0-9a-f-]{36}$/)
+
+  const retryButtons = screen.getAllByRole('button', { name: 'Redeem' })
+  fireEvent.click(retryButtons[retryButtons.length - 1])
+  await waitFor(() => expect(api.redeemCodexResetCredit).toHaveBeenCalledTimes(2))
+  expect(api.redeemCodexResetCredit).toHaveBeenLastCalledWith('cred-1', 'credit-1', firstRequestID)
+  expect(await screen.findByText('Codex reset credit redeemed')).toBeInTheDocument()
 })

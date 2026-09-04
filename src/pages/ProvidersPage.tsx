@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getOrganizations, getProviders, importModels, refreshCredentialQuota, getCodexResetCredits, redeemCodexResetCredit, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
 import type { CodexResetCredit, Credential, OAuthCompleteRequest, OAuthStartResponse, Organization, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
@@ -6,6 +6,7 @@ import { Modal } from '../components/Modal'
 import { PageLoading } from '../components/PageState'
 import { SearchableSelect, TruncatedText } from '../components/SearchableSelect'
 import { useSession } from '../context/SessionContext'
+import { createIdempotencyKey } from '../lib/idempotency'
 
 export function ProvidersPage() {
   const { isMaster, session, viewOrganizationID } = useSession()
@@ -55,6 +56,7 @@ function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh
   const [quota, setQuota] = useState<ProviderQuotaSnapshot | null>(null)
   const [quotaBusy, setQuotaBusy] = useState(false)
   const [resetCredits, setResetCredits] = useState<CodexResetCredit[] | null>(null)
+  const resetRequestIDs = useRef<Record<string, string>>({})
   useEffect(() => {
     if (!quotaSupported) return
     let active = true
@@ -67,7 +69,12 @@ function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh
   const redeem = async (credit: CodexResetCredit) => {
     if (!window.confirm(`Redeem this banked reset for ${credential.name}? It immediately resets eligible Codex usage windows and permanently consumes this credit.`)) return
     setQuotaBusy(true); setResult('')
-    try { const response = await redeemCodexResetCredit(credential.id, credit.selection_token, crypto.randomUUID()); setQuota(response.quota); setResetCredits((await getCodexResetCredits(credential.id)).credits); setResult('Codex reset credit redeemed') } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) }
+    const requestID = resetRequestIDs.current[credit.selection_token] ?? (resetRequestIDs.current[credit.selection_token] = createIdempotencyKey())
+    try {
+      const response = await redeemCodexResetCredit(credential.id, credit.selection_token, requestID)
+      delete resetRequestIDs.current[credit.selection_token]
+      setQuota(response.quota); setResetCredits((await getCodexResetCredits(credential.id)).credits); setResult('Codex reset credit redeemed')
+    } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) }
   }
   const displayName = maskEmail(credential.name)
   return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{displayName}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div>
