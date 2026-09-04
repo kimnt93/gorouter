@@ -197,7 +197,7 @@ func (s *Service) AddMembership(ctx context.Context, actor entities.Principal, o
 		return nil, ErrInactiveOrg
 	}
 	membership := &entities.Membership{OrganizationID: organizationID, UserID: userID, Role: role, CreatedAt: s.now(), CreatedByActorType: actor.Type, CreatedByActorID: actorID(actor)}
-	if err := s.repo.PutMembership(ctx, *membership); err != nil {
+	if err := s.repo.CreateMembership(ctx, *membership); err != nil {
 		return nil, err
 	}
 	if s.cache != nil {

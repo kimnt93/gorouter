@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,13 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 		if _, err := service.AddMembership(ctx, master, membership.organization, membership.user, membership.role); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := service.AddMembership(ctx, master, organization1.ID, user1.ID, entities.MembershipMember); !errors.Is(err, entities.ErrConflict) {
+		t.Fatalf("duplicate membership error=%v, want conflict", err)
+	}
+	existingMembership, err := backend.Identity.Membership(ctx, organization1.ID, user1.ID)
+	if err != nil || existingMembership.Role != entities.MembershipAdmin {
+		t.Fatalf("duplicate membership changed existing role: %+v err=%v", existingMembership, err)
 	}
 	if memberships, err := backend.Identity.ListMembershipsForUser(ctx, user1.ID); err != nil || len(memberships) != 2 {
 		t.Fatalf("multiple memberships=%+v err=%v", memberships, err)

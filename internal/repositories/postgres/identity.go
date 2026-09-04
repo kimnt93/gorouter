@@ -136,6 +136,18 @@ func (r *IdentityRepo) UpdateOrganization(ctx context.Context, organization enti
 	return err
 }
 
+func (r *IdentityRepo) CreateMembership(ctx context.Context, membership entities.Membership) error {
+	result, err := r.db.Pool.Exec(ctx, `INSERT INTO organization_memberships (organization_id,user_id,role,created_at,created_by_actor_type,created_by_actor_id)
+		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (organization_id,user_id) DO NOTHING`, membership.OrganizationID, membership.UserID, membership.Role, membership.CreatedAt, membership.CreatedByActorType, membership.CreatedByActorID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return entities.ErrConflict
+	}
+	return nil
+}
+
 func (r *IdentityRepo) PutMembership(ctx context.Context, membership entities.Membership) error {
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO organization_memberships (organization_id,user_id,role,created_at,created_by_actor_type,created_by_actor_id)
 		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (organization_id,user_id) DO UPDATE SET role=EXCLUDED.role`, membership.OrganizationID, membership.UserID, membership.Role, membership.CreatedAt, membership.CreatedByActorType, membership.CreatedByActorID)

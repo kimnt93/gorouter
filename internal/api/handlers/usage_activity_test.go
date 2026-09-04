@@ -54,6 +54,9 @@ func (*viewIdentityRepository) ListOrganizations(context.Context, entities.PageQ
 func (*viewIdentityRepository) UpdateOrganization(context.Context, entities.Organization) error {
 	return nil
 }
+func (*viewIdentityRepository) CreateMembership(context.Context, entities.Membership) error {
+	return nil
+}
 func (*viewIdentityRepository) PutMembership(context.Context, entities.Membership) error { return nil }
 func (*viewIdentityRepository) Membership(_ context.Context, organizationID, userID string) (*entities.Membership, error) {
 	if organizationID != "org_view" || userID != "user_view" {

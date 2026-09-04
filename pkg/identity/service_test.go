@@ -76,6 +76,14 @@ func (r *memoryRepo) UpdateOrganization(_ context.Context, o entities.Organizati
 	return nil
 }
 func membershipID(o, u string) string { return o + ":" + u }
+func (r *memoryRepo) CreateMembership(_ context.Context, m entities.Membership) error {
+	key := membershipID(m.OrganizationID, m.UserID)
+	if _, exists := r.memberships[key]; exists {
+		return entities.ErrConflict
+	}
+	r.memberships[key] = m
+	return nil
+}
 func (r *memoryRepo) PutMembership(_ context.Context, m entities.Membership) error {
 	r.memberships[membershipID(m.OrganizationID, m.UserID)] = m
 	return nil
@@ -187,5 +195,23 @@ func TestDisabledUserCannotBecomeMember(t *testing.T) {
 	_ = service.SetUserStatus(context.Background(), master, user.ID, entities.StatusDisabled)
 	if _, err := service.AddMembership(context.Background(), master, organization.ID, user.ID, entities.MembershipMember); !errors.Is(err, ErrInactiveUser) {
 		t.Fatalf("disabled user add=%v", err)
+	}
+}
+
+func TestAddMembershipRejectsDuplicateWithoutChangingRole(t *testing.T) {
+	repo := newMemoryRepo()
+	service := NewService(repo, nil)
+	master := entities.Principal{Type: entities.PrincipalMaster}
+	organization, _ := service.CreateOrganization(context.Background(), master, "Acme")
+	user, _ := service.CreateUser(context.Background(), master, "person@example.com")
+	if _, err := service.AddMembership(context.Background(), master, organization.ID, user.ID, entities.MembershipAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AddMembership(context.Background(), master, organization.ID, user.ID, entities.MembershipMember); !errors.Is(err, entities.ErrConflict) {
+		t.Fatalf("duplicate error=%v", err)
+	}
+	membership, _ := repo.Membership(context.Background(), organization.ID, user.ID)
+	if membership.Role != entities.MembershipAdmin {
+		t.Fatalf("role changed to %q", membership.Role)
 	}
 }

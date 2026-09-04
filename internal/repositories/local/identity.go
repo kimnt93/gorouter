@@ -175,6 +175,24 @@ func (r *IdentityRepo) UpdateOrganization(ctx context.Context, organization enti
 
 func membershipKey(organizationID, userID string) string { return organizationID + ":" + userID }
 
+func (r *IdentityRepo) CreateMembership(ctx context.Context, membership entities.Membership) error {
+	key := membershipKey(membership.OrganizationID, membership.UserID)
+	return r.s.mutate(ctx, "organization_membership:"+key, func() error {
+		if _, err := r.Membership(ctx, membership.OrganizationID, membership.UserID); err == nil {
+			return entities.ErrConflict
+		} else if !errors.Is(err, entities.ErrNotFound) {
+			return err
+		}
+		if _, err := r.OrganizationByID(ctx, membership.OrganizationID); err != nil {
+			return err
+		}
+		if _, err := r.UserByID(ctx, membership.UserID); err != nil {
+			return err
+		}
+		return r.s.put(ctx, "organization_membership", key, membership)
+	})
+}
+
 func (r *IdentityRepo) PutMembership(ctx context.Context, membership entities.Membership) error {
 	key := membershipKey(membership.OrganizationID, membership.UserID)
 	return r.s.mutate(ctx, "organization_membership:"+key, func() error {
