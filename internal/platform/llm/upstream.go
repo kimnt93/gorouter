@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
+	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 )
 
 const (
@@ -381,7 +382,7 @@ func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error)
 		}
 		headers["anthropic-dangerous-direct-browser-access"] = "true"
 		headers["x-app"] = "cli"
-		headers["User-Agent"] = "claude-cli/2.1.219 (external, cli)"
+		headers["User-Agent"] = "claude-cli/" + providerpkg.ClaudeCodeClientVersion + " (external, cli)"
 	default:
 		return nil, fmt.Errorf("unsupported credential kind %q", cr.Kind)
 	}
@@ -393,7 +394,7 @@ func prependClaudeCodeSystem(body *AnthropicRequest) {
 		return
 	}
 	identity := []AnthropicContentBlock{
-		{Type: "text", Text: "x-anthropic-billing-header: cc_version=2.1.220; cc_entrypoint=cli;"},
+		{Type: "text", Text: "x-anthropic-billing-header: cc_version=" + providerpkg.ClaudeCodeClientVersion + "; cc_entrypoint=cli;"},
 		{Type: "text", Text: "You are Claude Code, Anthropic's official CLI for Claude."},
 	}
 	body.System = append(identity, body.System...)

@@ -93,6 +93,9 @@ func TestClaudeCodeAdapterUsesSubscriptionMessagesContract(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer subscription-token" {
 			t.Fatalf("Authorization = %q", got)
 		}
+		if got := r.Header.Get("User-Agent"); got != "claude-cli/2.1.260 (external, cli)" {
+			t.Fatalf("User-Agent = %q", got)
+		}
 		if got := r.Header.Get("X-Claude-Code-Session-Id"); got == "" {
 			t.Fatal("Claude Code session header is missing")
 		}
@@ -100,7 +103,7 @@ func TestClaudeCodeAdapterUsesSubscriptionMessagesContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if len(request.System) < 2 || !strings.HasPrefix(request.System[0].Text, "x-anthropic-billing-header:") || !strings.HasPrefix(request.System[1].Text, "You are Claude Code") {
+		if len(request.System) < 2 || request.System[0].Text != "x-anthropic-billing-header: cc_version=2.1.260; cc_entrypoint=cli;" || !strings.HasPrefix(request.System[1].Text, "You are Claude Code") {
 			t.Fatalf("Claude Code system identity = %+v", request.System)
 		}
 		var identity struct {

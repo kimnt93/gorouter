@@ -17,6 +17,10 @@ const (
 	ProtocolKimi        = "kimi"
 	ProtocolKiro        = "kiro"
 	ProtocolAntigravity = "antigravity"
+
+	// ClaudeCodeClientVersion must meet the minimum version Anthropic requires
+	// for the subscription models exposed by its model catalog.
+	ClaudeCodeClientVersion = "2.1.260"
 )
 
 // Definition is safe, static provider metadata exposed to the console and API.
