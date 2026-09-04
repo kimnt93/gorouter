@@ -15,6 +15,13 @@ type UsageRepo struct{ s *Store }
 
 func NewUsageRepo(store *Store) *UsageRepo { return &UsageRepo{s: store} }
 
+func nullableConversation(value []byte) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
+}
+
 func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -24,7 +31,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		return err
 	}
 	defer tx.Rollback()
-	statement, err := tx.PrepareContext(ctx, `INSERT INTO usage_events(id,ts,payload) VALUES(?,?,?)`)
+	statement, err := tx.PrepareContext(ctx, `INSERT INTO usage_events(id,ts,payload,conversation_enc,content_truncated) VALUES(?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -45,7 +52,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if err != nil {
 			return err
 		}
-		if _, err := statement.ExecContext(ctx, event.ID, event.TS.Format(time.RFC3339Nano), payload); err != nil {
+		if _, err := statement.ExecContext(ctx, event.ID, event.TS.Format(time.RFC3339Nano), payload, nullableConversation(event.ConversationEnc), event.ContentTruncated); err != nil {
 			return err
 		}
 	}
@@ -53,21 +60,24 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 }
 
 func (r *UsageRepo) all(ctx context.Context) ([]entities.UsageEvent, error) {
-	rows, err := r.s.DB.QueryContext(ctx, `SELECT payload FROM usage_events ORDER BY ts DESC,id DESC`)
+	rows, err := r.s.DB.QueryContext(ctx, `SELECT payload,conversation_enc,content_truncated FROM usage_events ORDER BY ts DESC,id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	values := make([]entities.UsageEvent, 0)
 	for rows.Next() {
-		var payload []byte
-		if err := rows.Scan(&payload); err != nil {
+		var payload, conversation []byte
+		var contentTruncated bool
+		if err := rows.Scan(&payload, &conversation, &contentTruncated); err != nil {
 			return nil, err
 		}
 		var event entities.UsageEvent
 		if err := json.Unmarshal(payload, &event); err != nil {
 			return nil, err
 		}
+		event.ConversationEnc = append([]byte(nil), conversation...)
+		event.ContentTruncated = contentTruncated
 		values = append(values, event)
 	}
 	return values, rows.Err()
