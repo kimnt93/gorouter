@@ -1,4 +1,4 @@
 interface:
   display_name: "Development"
-  short_description: "Implement and update GoRouter features safely"
-  default_prompt: "Use $development to implement this GoRouter change using the project conventions."
+  short_description: "Code GoRouter across Go, Fiber, React, and three backends"
+  default_prompt: "Use $development to implement this GoRouter change across the applicable Go, Fiber, React, SQLite, PostgreSQL, and ClickHouse layers."

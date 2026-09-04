@@ -12,6 +12,20 @@
 - The composition root constructs concrete dependencies. Avoid hidden global
   service locators.
 
+## Framework boundaries
+
+- Fiber v3 belongs under `internal/api`. Bind and validate transport input there,
+  call typed services, and respond through `responseapi.For(c)`.
+- React/Vite/TypeScript belongs under `src`. Keep browser contracts in
+  `src/api/contracts.ts`, requests in `src/api/client.ts`, reusable controls in
+  `src/components`, pages in `src/pages`, and shared styling in
+  `src/styles/app.css`.
+- SQLite, PostgreSQL, and ClickHouse repositories implement the same domain
+  ports without leaking driver types upward. Backend-specific migrations live
+  under `internal/platform/database/{sqlite,migrations,clickhouse}`.
+- `cmd/gorouter/main.go` selects exactly one complete durable repository set and
+  wires Redis only for shared coordination required by distributed modes.
+
 ## Types and syntax
 
 - Prefer concrete typed structs for JSON, SQL scan targets, domain values, and

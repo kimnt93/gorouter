@@ -39,7 +39,8 @@ assuming every package listed is involved.
 
 | Path | Responsibility |
 |---|---|
-| `internal/platform/database/` | PostgreSQL and ClickHouse connectors plus embedded migrations |
+| `internal/platform/database/` | SQLite, PostgreSQL, and ClickHouse connectors plus backend-specific embedded migrations |
+| `internal/repositories/local/` | Complete local SQLite repository set; JSON payload records plus explicit columns where required |
 | `internal/repositories/postgres/` | Complete PostgreSQL repository set |
 | `internal/repositories/clickhouse/` | Complete ClickHouse repository set and Redis mutation locking |
 | `internal/platform/llm/` | Provider HTTP adapters, protocol translation, streaming, discovery |
@@ -68,11 +69,11 @@ For a new persisted admin feature, inspect in this order:
 ```text
 pkg/entities and feature interface
   -> pkg policy/service
-  -> postgres and clickhouse repositories/migrations
+  -> local, PostgreSQL, and ClickHouse repositories/migrations
   -> internal/api handler contract and route
   -> src API contract/client and page/component
   -> cmd/gorouter wiring
-  -> unit, backend-contract, route, React, and browser tests
+  -> unit, three-backend contract, route, React, and browser tests
   -> generated Swagger and SPA artifacts
 ```
 
