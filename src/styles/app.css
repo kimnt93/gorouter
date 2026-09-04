@@ -456,6 +456,9 @@ h2 { font-size: 19px; }
 .found-user strong, .found-user small { display: block; }
 .found-user strong { color: #eee; font-size: 14px; }
 .found-user small { margin-top: 3px; color: #929292; font: 11px ui-monospace, monospace; }
+.joined-organizations { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.joined-organizations > span { color: #999; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.joined-organizations em { padding: 3px 7px; border: 1px solid #4a4a4a; border-radius: 99px; color: #c9c9c9; background: #252525; font-size: 11px; font-style: normal; }
 .already-member { color: #e2b76d; }
 .organization-member-total { display: flex; align-items: baseline; justify-content: space-between; margin: 16px 0 0; padding: 12px; border: 1px solid #383838; border-radius: 8px; background: #191919; }
 .organization-member-total span { color: #aaa; font-size: 12px; }
@@ -543,10 +546,3 @@ h2 { font-size: 19px; }
 .conversation-message.trace-tool_call, .conversation-message.trace-tool_result { border-color: #355a4a; background: #1d2b25; }
 .conversation-message.trace-tool_call > span, .conversation-message.trace-tool_result > span { color: #78d6aa; }
 .conversation-message > small { display: block; margin: -3px 0 9px; color: #808991; font: 10px ui-monospace,monospace; }
-.joined-organizations-popover { position: relative; width: fit-content; }
-.joined-organizations-popover > button { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid #4a4a4a; border-radius: 6px; color: #c9c9c9; background: #252525; cursor: help; font-size: 11px; font-weight: 700; }
-.joined-organizations-popover > button span { color: #999; font-size: 15px; line-height: 1; }
-.joined-organizations-popover > div { position: absolute; z-index: 80; left: calc(100% + 8px); top: 50%; display: none; width: max-content; max-width: min(360px,calc(100vw - 48px)); transform: translateY(-50%); padding: 10px; border: 1px solid #505050; border-radius: 8px; background: #202020; box-shadow: 0 16px 45px rgba(0,0,0,.55); }
-.joined-organizations-popover:hover > div, .joined-organizations-popover:focus-within > div { display: grid; gap: 6px; }
-.joined-organizations-popover > div strong { color: #aaa; font-size: 10px; text-transform: uppercase; }
-.joined-organizations-popover > div em { padding: 4px 7px; border: 1px solid #4a4a4a; border-radius: 6px; color: #ddd; background: #292929; font-size: 11px; font-style: normal; }

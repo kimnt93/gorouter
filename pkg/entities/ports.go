@@ -115,7 +115,6 @@ type OrganizationRepository interface {
 }
 
 type MembershipRepository interface {
-	CreateMembership(ctx context.Context, membership Membership) error
 	PutMembership(ctx context.Context, membership Membership) error
 	Membership(ctx context.Context, organizationID, userID string) (*Membership, error)
 	ListMemberships(ctx context.Context, organizationID string) ([]Membership, error)

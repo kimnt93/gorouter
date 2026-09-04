@@ -98,9 +98,6 @@ func (*oauthRouteIdentityRepo) ListOrganizations(context.Context, entities.PageQ
 func (*oauthRouteIdentityRepo) UpdateOrganization(context.Context, entities.Organization) error {
 	return nil
 }
-func (*oauthRouteIdentityRepo) CreateMembership(context.Context, entities.Membership) error {
-	return nil
-}
 func (*oauthRouteIdentityRepo) PutMembership(context.Context, entities.Membership) error { return nil }
 func (*oauthRouteIdentityRepo) Membership(context.Context, string, string) (*entities.Membership, error) {
 	return nil, entities.ErrNotFound

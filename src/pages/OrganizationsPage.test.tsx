@@ -10,7 +10,6 @@ vi.mock('../api/client', () => api)
 vi.mock('../context/SessionContext', () => ({ useSession: () => ({ isMasterView: true, viewOrganizationID: '', viewUserID: '', has: () => true }) }))
 
 beforeEach(() => {
-  vi.clearAllMocks()
   api.getOrganizations.mockResolvedValue({ object: 'list', data: [
     { id: 'org-1', name: 'Microsoft', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', member_count: 1 },
     { id: 'org-2', name: 'NASA', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', member_count: 2 },
@@ -23,15 +22,13 @@ beforeEach(() => {
   api.addMember.mockResolvedValue({})
 })
 
-test('finds an exact email, exposes joined organizations beside the hover trigger, and defaults to member', async () => {
+test('finds an exact email, shows joined organizations, and defaults to member', async () => {
   render(<OrganizationsPage />)
   fireEvent.click((await screen.findAllByRole('button', { name: 'Manage members' }))[0])
   fireEvent.change(screen.getByLabelText('User email'), { target: { value: 'grace@example.com' } })
 
   expect(await screen.findByText('grace@example.com')).toBeInTheDocument()
-  const trigger = screen.getByRole('button', { name: /Organizations/ })
-  expect(trigger).toHaveAttribute('aria-describedby')
-  expect(screen.getByRole('tooltip')).toHaveTextContent('NASA (admin)')
+  expect(screen.getByText('NASA (admin)')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Add member' }))
   await waitFor(() => expect(api.addMember).toHaveBeenCalledWith('org-1', 'user-2', 'member'))
 })
@@ -42,18 +39,4 @@ test('shows user not found for an unknown exact email', async () => {
   fireEvent.click((await screen.findAllByRole('button', { name: 'Manage members' }))[0])
   fireEvent.change(screen.getByLabelText('User email'), { target: { value: 'missing@example.com' } })
   expect(await screen.findByText('User not found')).toBeInTheDocument()
-})
-
-
-test('does not submit an existing membership invitation', async () => {
-  api.getUsers.mockImplementation((email = '') => Promise.resolve({ object: 'list', data: email ? [{
-    id: 'user-1', username: 'member@example.com', status: 'active', created_at: '', updated_at: '',
-    memberships: [{ organization_id: 'org-1', user_id: 'user-1', role: 'member', created_at: '' }],
-  }] : [] }))
-  render(<OrganizationsPage />)
-  fireEvent.click((await screen.findAllByRole('button', { name: 'Manage members' }))[0])
-  fireEvent.change(screen.getByLabelText('User email'), { target: { value: 'member@example.com' } })
-  expect(await screen.findByText('Already a member of Microsoft')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Add member' })).toBeDisabled()
-  expect(api.addMember).not.toHaveBeenCalled()
 })
