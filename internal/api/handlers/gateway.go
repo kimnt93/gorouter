@@ -836,6 +836,21 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 	}
 	var usage llm.Usage
 	var content strings.Builder
+	var capturedResponse strings.Builder
+	capturedResponseTruncated := false
+	appendCaptured := func(value []byte) {
+		if capturedResponse.Len() >= 1<<20 {
+			capturedResponseTruncated = true
+			return
+		}
+		remaining := 1<<20 - capturedResponse.Len()
+		if len(value) > remaining {
+			value = value[:remaining]
+			capturedResponseTruncated = true
+		}
+		capturedResponse.Write(value)
+		capturedResponse.WriteByte('\n')
+	}
 	finishReason := "stop"
 	responsesMode, _ := c.Locals("responses_mode").(bool)
 	messagesMode, _ := c.Locals("messages_mode").(bool)
@@ -859,6 +874,7 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 					return err
 				}
 				for _, chunk := range chunks {
+					appendCaptured(chunk)
 					if responses != nil {
 						if err := responses.ChatChunk(w, chunk); err != nil {
 							return err
@@ -888,6 +904,9 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 			done := false
 			err := llm.ScanSSE(result.Body, func(ev llm.SSEEvent) error {
 				payload := string(ev.Data)
+				if payload != "[DONE]" {
+					appendCaptured(ev.Data)
+				}
 				if payload == "[DONE]" {
 					done = true
 				} else {
@@ -954,7 +973,13 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 		if onDone != nil {
 			onDone(streamStatus == fiber.StatusOK)
 		}
-		conversationResponse, _ := json.Marshal(llm.Response{Model: model.Name, Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage})
+		conversationResponse := []byte(capturedResponse.String())
+		if capturedResponseTruncated {
+			conversationResponse = append(conversationResponse, '\n')
+		}
+		if len(conversationResponse) == 0 {
+			conversationResponse, _ = json.Marshal(llm.Response{Model: model.Name, Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: content.String()}, FinishReason: finishReason}}, Usage: usage})
+		}
 		g.recordCostConversation(key, model, runtime.ID, usage, false, streamStatus, started, cost, raw, conversationResponse)
 		if streamStatus == fiber.StatusOK && deterministic && g.cacheEnabled() && content.Len() > 0 {
 			full := llm.Response{
@@ -1041,8 +1066,8 @@ func (g *Gateway) recordCost(key *GatewayAccessContext, model *entities.ModelDef
 	g.recordCostConversation(key, model, cred, u, hit, status, started, cost, nil, nil)
 }
 
-func (g *Gateway) recordCostConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, _, _ []byte) {
-	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, "")
+func (g *Gateway) recordCostConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, requestBody, responseBody []byte) {
+	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, "", requestBody, responseBody)
 }
 
 func (g *Gateway) recordError(key *GatewayAccessContext, model *entities.ModelDef, cred string, status int, started time.Time, summary string) {
@@ -1050,10 +1075,10 @@ func (g *Gateway) recordError(key *GatewayAccessContext, model *entities.ModelDe
 }
 
 func (g *Gateway) recordCostError(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
-	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, summary)
+	g.recordCostErrorConversation(key, model, cred, u, hit, status, started, cost, summary, nil, nil)
 }
 
-func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string) {
+func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *entities.ModelDef, cred string, u llm.Usage, hit bool, status int, started time.Time, cost entities.Cost, summary string, requestBody, responseBody []byte) {
 	if g.Usage == nil {
 		return
 	}
@@ -1065,7 +1090,8 @@ func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *
 	if model.Metadata != nil {
 		providerID = model.Metadata.Provider
 	}
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID})
+	conversation, truncated := g.Usage.CaptureConversation(requestBody, responseBody)
+	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, ConversationEnc: conversation, ContentTruncated: truncated})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

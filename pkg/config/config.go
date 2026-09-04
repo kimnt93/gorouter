@@ -29,6 +29,7 @@ type Config struct {
 	WeekStart                    time.Weekday
 	UsageWriteConcurrency        int
 	UsageWriteQueueSize          int
+	StoreCompletions             bool
 	MasterKey                    string
 	EncryptionKey                string
 	SessionSecret                string
@@ -128,6 +129,13 @@ func Load() (*Config, error) {
 			SyncInterval: time.Hour,
 			HTTPTimeout:  30 * time.Second,
 		},
+	}
+	if value := strings.TrimSpace(os.Getenv("ENABLE_STORE_COMPLLETIONS")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, errors.New("ENABLE_STORE_COMPLLETIONS must be true or false")
+		}
+		cfg.StoreCompletions = enabled
 	}
 	if value := strings.TrimSpace(os.Getenv("OTEL_ENABLED")); value != "" {
 		enabled, err := strconv.ParseBool(value)

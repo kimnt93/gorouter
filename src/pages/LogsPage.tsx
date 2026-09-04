@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getRecent } from '../api/client'
-import type { UsageEvent } from '../api/contracts'
+import { getRecent, getUsageDetail } from '../api/client'
+import type { UsageDetail, UsageEvent } from '../api/contracts'
 import { Modal } from '../components/Modal'
 import { PageError, PageLoading } from '../components/PageState'
 import { RangeSelector } from '../components/RangeSelector'
@@ -41,6 +41,14 @@ function CostLabel({ event }: { event: Pick<UsageEvent, 'cost_usd' | 'priced'> }
 
 
 function LogDetailModal({ event, onClose }: { event: UsageEvent; onClose: () => void }) {
+  const [content, setContent] = useState<UsageDetail | null>(null)
+  const [contentError, setContentError] = useState('')
+  useEffect(() => {
+    let live = true
+    const organization = new URLSearchParams(window.location.search).get('organization_id') ?? ''
+    void getUsageDetail(event.id, organization).then((detail) => { if (live) setContent(detail) }).catch((reason: Error) => { if (live) setContentError(reason.message) })
+    return () => { live = false }
+  }, [event.id])
   const actor = event.username || event.actor_type || 'legacy'
   const detail = [
     ['Status', String(event.status_code)], ['Time', formatDateTime(event.ts)],
@@ -52,8 +60,13 @@ function LogDetailModal({ event, onClose }: { event: UsageEvent; onClose: () => 
     ['Cache hit', event.cache_hit ? 'yes' : 'no'], ['Cost', !event.priced || event.cost_usd === 0 ? '$0.000000 · Free' : formatUSD(event.cost_usd)],
   ]
   return <Modal title={`Request ${event.id}`} onClose={onClose} className="usage-detail-modal">
-    <div className="safe-note"><strong>Safe metadata only</strong><span>Prompts, completions, credentials, and raw provider errors are not stored in request logs.</span></div>
+    <div className="safe-note"><strong>Conversation capture</strong><span>{content?.content_available ? 'Request and response content was captured for this request.' : contentError ? `Content could not be loaded: ${contentError}` : content ? 'No content is available. Enable ENABLE_STORE_COMPLLETIONS=true to capture future requests.' : 'Loading request content…'}</span></div>
     <dl className="detail-grid usage-detail-grid">{detail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     <section className="conversation-section"><div className="conversation-heading"><div><span className="eyebrow">Token accounting</span><h3>[input / output / cache read / cache write]</h3></div></div><TokenBreakdown input={event.prompt_tokens} output={event.completion_tokens} cacheRead={event.cache_read_tokens} cacheWrite={event.cache_write_tokens} /></section>
+    {content?.content_available && <section className="conversation-section"><div className="conversation-heading"><div><span className="eyebrow">Conversation</span><h3>Captured request and provider response</h3></div>{content.content_truncated && <span className="truncated-badge">truncated</span>}</div><div className="conversation-list"><article className="conversation-message role-user"><span>Request</span><pre>{formatConversation(content.request_body)}</pre></article><article className="conversation-message role-assistant"><span>Response</span><pre>{formatConversation(content.response_body)}</pre></article></div></section>}
   </Modal>
+}
+
+function formatConversation(value: string): string {
+  try { return JSON.stringify(JSON.parse(value), null, 2) } catch { return value || 'No content' }
 }

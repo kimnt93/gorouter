@@ -1,0 +1,2 @@
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS conversation_enc BYTEA;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS content_truncated BOOLEAN NOT NULL DEFAULT FALSE;

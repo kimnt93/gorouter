@@ -100,6 +100,7 @@ Detailed configuration and API examples are in the [integration guide](docs/inte
 | `REQUEST_TIMEOUT`, `REQUEST_LIMIT_MB` | No | `5m`, `20` | Request duration and body-size limits. |
 | `ROUTE_RETRIES` | No | `2` | Retry budget for providers without quota-aware account routing. |
 | `USAGE_WRITE_CONCURRENCY`, `USAGE_WRITE_QUEUE_SIZE` | No | `4`, `100000` | Asynchronous usage writer controls. |
+| `ENABLE_STORE_COMPLLETIONS` | No | `false` | Opt in to bounded, encrypted request/completion capture for the Logs detail popup. Applies only to future requests. |
 
 Examples:
 

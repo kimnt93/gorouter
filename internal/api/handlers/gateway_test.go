@@ -495,7 +495,7 @@ func TestGatewayRecordsPrincipalAttributionForSuccessCacheStreamAndError(t *test
 	}
 }
 
-func TestGatewayDoesNotCaptureConversationAndMarksFreeCostPriced(t *testing.T) {
+func TestGatewayDoesNotCaptureConversationByDefaultAndMarksFreeCostPriced(t *testing.T) {
 	repository := &captureUsageRepository{}
 	service := usage.NewService(repository, 16, nil)
 	gateway := &Gateway{Usage: service}

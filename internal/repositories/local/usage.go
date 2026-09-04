@@ -314,3 +314,18 @@ func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery
 	})
 	return out, nil
 }
+
+func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	events, err := r.all(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, event := range events {
+		if event.ID != id || !usageMatches(event, entities.UsageQuery{Visibility: visibility}, auditCursor{}) {
+			continue
+		}
+		value := recent(event)
+		return &entities.UsageDetail{RecentEvent: value, ContentTruncated: event.ContentTruncated, ConversationEncrypted: append([]byte(nil), event.ConversationEnc...)}, nil
+	}
+	return nil, entities.ErrNotFound
+}

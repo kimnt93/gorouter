@@ -1,4 +1,4 @@
-import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteRequest, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteRequest, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
 import { groupByForUsageRange } from '../lib/usageResolution'
 
 export class APIError extends Error {
@@ -90,6 +90,11 @@ export function getRecent(filters: UsageFilters, cursor = ''): Promise<UsageRece
 }
 
 
+
+export const getUsageDetail = (id: string, organizationId = ''): Promise<UsageDetail> => {
+  const params = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : ''
+  return request(`/admin/usage/events/${encodeURIComponent(id)}${params}`)
+}
 
 const normalizeList = <T>(response: ListResponse<T>): ListResponse<T> => ({ ...response, data: response.data ?? [] })
 export const getUsers = (email = '', organizationId = ''): Promise<ListResponse<User>> => {

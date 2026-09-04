@@ -451,13 +451,13 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	body, _ := json.Marshal(req)
 	result, err := upstream.Send(c.Context(), runtime, input.Model, body)
 	if err != nil {
-		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, fiber.StatusBadGateway, started, "provider chat test failed")
+		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, fiber.StatusBadGateway, started, "provider chat test failed", body, nil)
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider chat test failed", "upstream_error", "").Send()
 	}
 	if result.StatusCode < 200 || result.StatusCode >= 300 {
 		defer result.Body.Close()
 		_, _ = io.Copy(io.Discard, io.LimitReader(result.Body, 1<<20))
-		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, result.StatusCode, started, "provider rejected chat test")
+		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, result.StatusCode, started, "provider rejected chat test", body, nil)
 		return responseapi.For(c).Error(fiber.StatusBadGateway, fmt.Sprintf("provider returned HTTP %d", result.StatusCode), "upstream_error", "").Send()
 	}
 	c.Set(fiber.HeaderContentType, "text/event-stream")
@@ -518,7 +518,8 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 		if streamStatus != fiber.StatusOK {
 			summary = "provider chat test stream failed"
 		}
-		h.recordChatTest(logContext, collected, streamStatus, started, summary)
+		response, _ := json.Marshal(llm.Response{Model: logContext.Model, Choices: []llm.Choice{{Index: 0, Message: &llm.ResponseMessage{Role: "assistant", Content: completion.String()}, FinishReason: "stop"}}, Usage: collected})
+		h.recordChatTest(logContext, collected, streamStatus, started, summary, body, response)
 	})
 }
 
@@ -559,10 +560,11 @@ func newChatTestLogContext(session *entities.Session, credentialRecord *entities
 	return context
 }
 
-func (h *CredentialConnectivity) recordChatTest(logContext chatTestLogContext, tokenUsage llm.Usage, status int, started time.Time, summary string) {
+func (h *CredentialConnectivity) recordChatTest(logContext chatTestLogContext, tokenUsage llm.Usage, status int, started time.Time, summary string, requestBody, responseBody []byte) {
 	if h.Usage == nil {
 		return
 	}
+	conversation, truncated := h.Usage.CaptureConversation(requestBody, responseBody)
 	h.Usage.Record(entities.UsageEvent{
 		TS: time.Now(), TenantID: logContext.TenantID, ApiKeyID: logContext.APIKeyID, CredentialID: logContext.CredentialID,
 		Provider: logContext.Provider, Model: logContext.Model, UpstreamModel: logContext.UpstreamModel,
@@ -570,6 +572,7 @@ func (h *CredentialConnectivity) recordChatTest(logContext chatTestLogContext, t
 		CacheReadTokens: tokenUsage.CacheReadTokens, CacheWriteTokens: tokenUsage.CacheWriteTokens,
 		Priced: true, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary,
 		ActorType: logContext.Actor.Type, UserID: logContext.Actor.UserID, Username: logContext.Actor.Username, OrganizationID: logContext.Actor.OrganizationID,
+		ConversationEnc: conversation, ContentTruncated: truncated,
 	})
 }
 

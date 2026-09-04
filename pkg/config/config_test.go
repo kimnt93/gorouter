@@ -17,7 +17,7 @@ func requiredEnv(t *testing.T) {
 	t.Setenv("REDIS_PORT", "6379")
 	t.Setenv("REDIS_USER", "gorouter")
 	t.Setenv("REDIS_PASSWORD", "redis-secret")
-	for _, key := range []string{"CACHE_MEMORY_FALLBACK", "CACHE_MAX_ENTRY_BYTES", "CACHE_MAX_TOTAL_BYTES", "CACHE_SCOPE", "CACHE_TTL", "CACHE_ENABLED", "REQUEST_LIMIT_MB", "REQUEST_TIMEOUT", "API_TOKEN_CACHE_TTL", "WEEK_START", "USAGE_WRITE_CONCURRENCY", "USAGE_WRITE_QUEUE_SIZE", "MODEL_CATALOG_SYNC_ENABLED", "MODEL_CATALOG_SYNC_INTERVAL", "MODEL_CATALOG_CACHE_TTL", "OPENROUTER_CATALOG_ENABLED", "OPENROUTER_CATALOG_URL", "OPENROUTER_SYNC_INTERVAL", "OPENROUTER_HTTP_TIMEOUT", "ANTIGRAVITY_OAUTH_CLIENT_ID", "ANTIGRAVITY_OAUTH_CLIENT_SECRET", "OTEL_ENABLED", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_SERVICE_NAME", "DEVELOPMENT_ENVIRONMENT", "LOG_LEVEL", "LOG_TIME_FORMAT"} {
+	for _, key := range []string{"CACHE_MEMORY_FALLBACK", "CACHE_MAX_ENTRY_BYTES", "CACHE_MAX_TOTAL_BYTES", "CACHE_SCOPE", "CACHE_TTL", "CACHE_ENABLED", "REQUEST_LIMIT_MB", "REQUEST_TIMEOUT", "API_TOKEN_CACHE_TTL", "WEEK_START", "USAGE_WRITE_CONCURRENCY", "USAGE_WRITE_QUEUE_SIZE", "ENABLE_STORE_COMPLLETIONS", "MODEL_CATALOG_SYNC_ENABLED", "MODEL_CATALOG_SYNC_INTERVAL", "MODEL_CATALOG_CACHE_TTL", "OPENROUTER_CATALOG_ENABLED", "OPENROUTER_CATALOG_URL", "OPENROUTER_SYNC_INTERVAL", "OPENROUTER_HTTP_TIMEOUT", "ANTIGRAVITY_OAUTH_CLIENT_ID", "ANTIGRAVITY_OAUTH_CLIENT_SECRET", "OTEL_ENABLED", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_SERVICE_NAME", "DEVELOPMENT_ENVIRONMENT", "LOG_LEVEL", "LOG_TIME_FORMAT"} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("APP_ENV", "production")
@@ -374,5 +374,22 @@ func TestLocalBackendAcceptsSQLitePathAndMemory(t *testing.T) {
 				t.Fatalf("connection=%q path=%q err=%v", connection, cfg.DatabaseConnectionURL, err)
 			}
 		})
+	}
+}
+
+func TestStoreCompletionsIsExplicitOptIn(t *testing.T) {
+	requiredEnv(t)
+	cfg, err := Load()
+	if err != nil || cfg.StoreCompletions {
+		t.Fatalf("default store completions=%v err=%v", cfg.StoreCompletions, err)
+	}
+	t.Setenv("ENABLE_STORE_COMPLLETIONS", "true")
+	cfg, err = Load()
+	if err != nil || !cfg.StoreCompletions {
+		t.Fatalf("enabled store completions=%v err=%v", cfg.StoreCompletions, err)
+	}
+	t.Setenv("ENABLE_STORE_COMPLLETIONS", "invalid")
+	if _, err = Load(); err == nil {
+		t.Fatal("invalid ENABLE_STORE_COMPLLETIONS accepted")
 	}
 }

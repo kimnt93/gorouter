@@ -153,6 +153,10 @@ type PrincipalUsageRepository interface {
 	SummaryUsage(ctx context.Context, query UsageQuery) (*UsageSummary, error)
 }
 
+type UsageDetailRepository interface {
+	UsageDetail(ctx context.Context, id string, visibility UsageVisibility) (*UsageDetail, error)
+}
+
 type UsageActivityRepository interface {
 	ActivityUsage(ctx context.Context, query UsageQuery, groupBy string) ([]UsageActivityBucket, error)
 }

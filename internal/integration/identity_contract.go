@@ -21,6 +21,7 @@ type IdentityKeyRepository interface {
 type IdentityUsageRepository interface {
 	entities.PrincipalUsageRepository
 	entities.UsageHealthRepository
+	entities.UsageDetailRepository
 	InsertBatch(context.Context, []entities.UsageEvent) error
 }
 
@@ -146,6 +147,13 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 	}
 	if err := backend.Usage.InsertBatch(ctx, events); err != nil {
 		t.Fatal(err)
+	}
+	detail, err := backend.Usage.UsageDetail(ctx, events[0].ID, entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: user1.ID})
+	if err != nil || detail.ID != events[0].ID {
+		t.Fatalf("owned usage detail=%+v err=%v", detail, err)
+	}
+	if _, err := backend.Usage.UsageDetail(ctx, events[0].ID, entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: user2.ID}); err == nil {
+		t.Fatal("foreign usage detail was visible")
 	}
 	userPage, err := backend.Usage.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: user1.ID}, Limit: 20})
 	if err != nil || len(userPage.Data) != 2 {

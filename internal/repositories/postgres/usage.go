@@ -28,12 +28,12 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		}
 		b.Queue(`INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 			prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,
-			actor_type,user_id,username,organization_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+			actor_type,user_id,username,organization_id,conversation_enc,content_truncated)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
 			ev.ID, ev.TS, ev.TenantID, ev.ApiKeyID, ev.CredentialID, ev.Provider, ev.Model, ev.UpstreamModel,
 			ev.PromptTokens, ev.CompletionTokens, ev.CacheReadTokens, ev.CacheWriteTokens,
 			ev.CostUSD, ev.InputCostUSD, ev.OutputCostUSD, ev.CacheReadCostUSD, ev.CacheWriteCostUSD, ev.Priced, ev.CacheHit, ev.StatusCode, ev.DurationMS, ev.Error,
-			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID)
+			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID, nullableBytes(ev.ConversationEnc), ev.ContentTruncated)
 	}
 	return r.db.Pool.SendBatch(ctx, b).Close()
 }
@@ -275,4 +275,35 @@ func postgresUsageFilter(query entities.UsageQuery) (string, []any) {
 		status = *query.StatusCode
 	}
 	return `($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND ($5='' OR organization_id=ANY(string_to_array($5,','))) AND ($6='' OR user_id=ANY(string_to_array($6,','))) AND ($7='' OR model=$7) AND ($8='' OR api_key_id=ANY(string_to_array($8,','))) AND (NOT $9 OR status_code=$10) AND ($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND ($12::timestamptz='0001-01-01 00:00:00+00' OR ts <= $12)`, []any{master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID, query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until}
+}
+
+func nullableBytes(value []byte) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
+}
+
+func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	master := visibility.PrincipalType == entities.PrincipalMaster
+	organizationWide := visibility.OrganizationWide && visibility.OrganizationID != ""
+	var event entities.UsageDetail
+	var encrypted []byte
+	err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
+		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
+		actor_type,user_id,username,organization_id,COALESCE(conversation_enc,''::bytea),content_truncated
+		FROM usage_events WHERE COALESCE(event_id,'legacy_' || seq::text)=$1 AND
+		($2 OR ($3 AND organization_id=$4) OR (NOT $3 AND user_id=$5))`, id, master, organizationWide, visibility.OrganizationID, visibility.UserID).Scan(
+		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
+		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
+		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID,
+		&encrypted, &event.ContentTruncated)
+	if err == pgx.ErrNoRows {
+		return nil, entities.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	event.ConversationEncrypted = encrypted
+	return &event, nil
 }

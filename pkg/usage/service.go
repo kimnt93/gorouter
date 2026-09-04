@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -23,17 +24,18 @@ type principalRepository interface {
 }
 
 type Service struct {
-	repo      Repository
-	ch        chan entities.UsageEvent
-	jobs      chan []entities.UsageEvent
-	force     chan struct{}
-	done      chan struct{}
-	pending   *Pending
-	mu        sync.RWMutex
-	closed    bool
-	closeOnce sync.Once
-	forceOnce sync.Once
-	workers   sync.WaitGroup
+	repo            Repository
+	ch              chan entities.UsageEvent
+	jobs            chan []entities.UsageEvent
+	force           chan struct{}
+	done            chan struct{}
+	pending         *Pending
+	mu              sync.RWMutex
+	closed          bool
+	closeOnce       sync.Once
+	forceOnce       sync.Once
+	workers         sync.WaitGroup
+	conversationBox conversationSealer
 }
 
 var ErrClosed = errors.New("usage service closed")
@@ -220,4 +222,68 @@ func (s *Service) Health(ctx context.Context, query entities.UsageQuery) ([]enti
 		return nil, errors.New("usage health queries unavailable")
 	}
 	return repo.HealthUsage(ctx, query)
+}
+
+const maxConversationBytes = 1 << 20
+
+type conversationSealer interface {
+	Seal([]byte) ([]byte, error)
+	Open([]byte) ([]byte, error)
+}
+
+type conversationEnvelope struct {
+	Request  string `json:"request"`
+	Response string `json:"response"`
+}
+
+func (s *Service) EnableConversationCapture(box conversationSealer) { s.conversationBox = box }
+
+func (s *Service) CaptureConversation(request, response []byte) ([]byte, bool) {
+	if s.conversationBox == nil {
+		return nil, false
+	}
+	truncated := false
+	bounded := func(value []byte) string {
+		if len(value) > maxConversationBytes {
+			value, truncated = value[:maxConversationBytes], true
+		}
+		return string(value)
+	}
+	requestValue, responseValue := bounded(request), bounded(response)
+	if requestValue == "" && responseValue == "" {
+		return nil, false
+	}
+	plain, err := json.Marshal(conversationEnvelope{Request: requestValue, Response: responseValue})
+	if err != nil {
+		return nil, false
+	}
+	sealed, err := s.conversationBox.Seal(plain)
+	if err != nil {
+		return nil, false
+	}
+	return sealed, truncated
+}
+
+func (s *Service) Detail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	repo, ok := s.repo.(entities.UsageDetailRepository)
+	if !ok {
+		return nil, errors.New("usage detail unavailable")
+	}
+	detail, err := repo.UsageDetail(ctx, id, visibility)
+	if err != nil {
+		return nil, err
+	}
+	if len(detail.ConversationEncrypted) == 0 || s.conversationBox == nil {
+		return detail, nil
+	}
+	plain, err := s.conversationBox.Open(detail.ConversationEncrypted)
+	if err != nil {
+		return nil, errors.New("decrypt usage detail")
+	}
+	var envelope conversationEnvelope
+	if json.Unmarshal(plain, &envelope) != nil {
+		return nil, errors.New("decode usage detail")
+	}
+	detail.RequestBody, detail.ResponseBody, detail.ContentAvailable = envelope.Request, envelope.Response, true
+	return detail, nil
 }

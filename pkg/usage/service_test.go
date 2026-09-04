@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/seal"
 )
 
 type testRepo struct {
@@ -35,6 +37,17 @@ func (*testRepo) Summary(context.Context, time.Time) (*entities.UsageSummary, er
 func (*testRepo) Recent(context.Context, int) ([]entities.RecentEvent, error)        { return nil, nil }
 func (*testRepo) SummaryForTenant(context.Context, string, time.Time) (*entities.UsageSummary, error) {
 	return nil, nil
+}
+
+func (r *testRepo) UsageDetail(_ context.Context, id string, _ entities.UsageVisibility) (*entities.UsageDetail, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, event := range r.events {
+		if event.ID == id {
+			return &entities.UsageDetail{RecentEvent: entities.RecentEvent{ID: event.ID}, ConversationEncrypted: event.ConversationEnc, ContentTruncated: event.ContentTruncated}, nil
+		}
+	}
+	return nil, entities.ErrNotFound
 }
 
 func TestSpendForKeySinceIncludesPendingAndPassesUTCWindow(t *testing.T) {
@@ -137,5 +150,45 @@ func TestServiceUsesConfiguredWritersAndDrains(t *testing.T) {
 	}
 	if repo.max < 2 {
 		t.Fatalf("max concurrent writes=%d, want at least 2", repo.max)
+	}
+}
+
+func TestConversationCaptureIsDisabledByDefaultAndEncryptedWhenEnabled(t *testing.T) {
+	svc := NewService(&testRepo{}, 1, nil)
+	defer svc.Close()
+	if body, truncated := svc.CaptureConversation([]byte(`{"secret":"prompt"}`), []byte(`{"answer":"response"}`)); len(body) != 0 || truncated {
+		t.Fatalf("disabled capture body=%q truncated=%v", body, truncated)
+	}
+	box, err := seal.New("synthetic-conversation-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.EnableConversationCapture(box)
+	body, truncated := svc.CaptureConversation([]byte(`{"prompt":"hello"}`), []byte(`{"answer":"world"}`))
+	if truncated || bytes.Contains(body, []byte("hello")) || bytes.Contains(body, []byte("world")) {
+		t.Fatalf("capture is not encrypted or unexpectedly truncated")
+	}
+	plain, err := box.Open(body)
+	if err != nil || !bytes.Contains(plain, []byte("hello")) || !bytes.Contains(plain, []byte("world")) {
+		t.Fatalf("open capture=%q err=%v", plain, err)
+	}
+}
+
+func TestConversationDetailDecryptsCapturedContent(t *testing.T) {
+	repo := &testRepo{}
+	svc := NewService(repo, 1, nil)
+	box, err := seal.New("synthetic-conversation-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.EnableConversationCapture(box)
+	sealed, truncated := svc.CaptureConversation([]byte(`{"prompt":"hello"}`), []byte(`{"answer":"world"}`))
+	if err := svc.RecordContext(context.Background(), entities.UsageEvent{ID: "usage-detail", ConversationEnc: sealed, ContentTruncated: truncated}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Close()
+	detail, err := svc.Detail(context.Background(), "usage-detail", entities.UsageVisibility{PrincipalType: entities.PrincipalMaster})
+	if err != nil || !detail.ContentAvailable || detail.RequestBody != `{"prompt":"hello"}` || detail.ResponseBody != `{"answer":"world"}` {
+		t.Fatalf("detail=%+v err=%v", detail, err)
 	}
 }

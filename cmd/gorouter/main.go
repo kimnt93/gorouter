@@ -162,6 +162,10 @@ func main() {
 	modelSvc.SetPriceCache(priceResolver)
 	pending := usage.NewPending()
 	usageSvc := usage.NewServiceWithConcurrency(usageRepo, cfg.UsageWriteQueueSize, cfg.UsageWriteConcurrency, pending)
+	if cfg.StoreCompletions {
+		usageSvc.EnableConversationCapture(box)
+		log.Warn().Msg("request and completion content storage is enabled")
+	}
 	defer usageSvc.Close()
 	authSvc := auth.NewServiceWithIdentity(cfg.MasterKey, cfg.SessionSecret, keySvc, identityRepo)
 	cacheSvc, redisClient, err := promptcache.New(cfg.Cache, cfg.RedisURL)

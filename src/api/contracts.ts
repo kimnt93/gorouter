@@ -22,6 +22,13 @@ export interface UsageEvent {
   organization_id: string
 }
 
+export interface UsageDetail extends UsageEvent {
+  request_body: string
+  response_body: string
+  content_available: boolean
+  content_truncated: boolean
+}
+
 export interface UsageRecentResponse {
   object: 'list'
   data: UsageEvent[]
