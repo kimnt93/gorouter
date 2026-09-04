@@ -38,7 +38,16 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 export async function requestStream(path: string, body: object, onText: (text: string) => void, signal?: AbortSignal): Promise<void> {
   const response = await fetch(path, { method: 'POST', credentials: 'include', signal, headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  if (!response.ok || !response.body) throw new APIError(response.status, `Request failed (${response.status})`)
+  if (!response.ok || !response.body) {
+    let message = `Request failed (${response.status})`
+    try {
+      const payload = (await response.json()) as { error?: { message?: string }; message?: string }
+      message = payload.error?.message ?? payload.message ?? message
+    } catch {
+      // Keep the HTTP status when an intermediary returns a non-JSON body.
+    }
+    throw new APIError(response.status, message)
+  }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''

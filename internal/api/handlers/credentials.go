@@ -458,7 +458,11 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 		defer result.Body.Close()
 		_, _ = io.Copy(io.Discard, io.LimitReader(result.Body, 1<<20))
 		h.recordChatTest(logContext, llm.Usage{PromptTokens: req.EstimatePromptTokens()}, result.StatusCode, started, "provider rejected chat test", body, nil)
-		return responseapi.For(c).Error(fiber.StatusBadGateway, fmt.Sprintf("provider returned HTTP %d", result.StatusCode), "upstream_error", "").Send()
+		status := result.StatusCode
+		if status < fiber.StatusBadRequest || status >= fiber.StatusInternalServerError {
+			status = fiber.StatusBadGateway
+		}
+		return responseapi.For(c).Error(status, fmt.Sprintf("provider returned HTTP %d", result.StatusCode), "upstream_error", "upstream_rejected").Send()
 	}
 	c.Set(fiber.HeaderContentType, "text/event-stream")
 	c.Set("Cache-Control", "no-cache")

@@ -104,6 +104,15 @@ func (connectivityRouteProvider) Send(context.Context, *entities.CredentialRunti
 	}, nil
 }
 
+type rejectedConnectivityProvider struct{ status int }
+
+func (p rejectedConnectivityProvider) Probe(context.Context, *entities.CredentialRuntime) (int, error) {
+	return p.status, nil
+}
+func (p rejectedConnectivityProvider) Send(context.Context, *entities.CredentialRuntime, string, []byte) (*entities.UpstreamResult, error) {
+	return &entities.UpstreamResult{StatusCode: p.status, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"sensitive upstream detail"}}`))}, nil
+}
+
 type connectivityUsageRepo struct {
 	mu     sync.Mutex
 	events []entities.UsageEvent
@@ -239,5 +248,24 @@ func assertConnectivityRouteStatus(t *testing.T, app *fiber.App, method, path, c
 	if response.StatusCode != want {
 		responseBody, _ := io.ReadAll(response.Body)
 		t.Fatalf("%s %s as %q: status=%d, want=%d body=%s", method, path, bearer, response.StatusCode, want, responseBody)
+	}
+}
+
+func TestCredentialChatPreservesSafeUpstreamClientStatus(t *testing.T) {
+	tenantID := "tenant-a"
+	repo := &connectivityRouteCredentialRepo{
+		credentials: []entities.Credential{{ID: "own", OwnerTenantID: &tenantID}},
+		runtimes:    map[string]*entities.CredentialRuntime{"own": {ID: "own", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}},
+	}
+	provider := rejectedConnectivityProvider{status: http.StatusForbidden}
+	app := routes.New(routes.Dependencies{
+		Auth:        auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}),
+		Credentials: credential.NewService(repo, oauthRouteBox{}), OpenAI: provider,
+	})
+	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/credentials/own/chat-tests", "master-secret", map[string]string{"model": "provider-model", "prompt": "hello"})
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "provider returned HTTP 403") || strings.Contains(string(body), "sensitive upstream detail") {
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
 	}
 }
