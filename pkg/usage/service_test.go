@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -188,7 +189,45 @@ func TestConversationDetailDecryptsCapturedContent(t *testing.T) {
 	}
 	svc.Close()
 	detail, err := svc.Detail(context.Background(), "usage-detail", entities.UsageVisibility{PrincipalType: entities.PrincipalMaster})
-	if err != nil || !detail.ContentAvailable || detail.RequestBody != `{"prompt":"hello"}` || detail.ResponseBody != `{"answer":"world"}` {
+	if err != nil || !detail.ContentAvailable || len(detail.Conversation) != 2 || detail.Conversation[0].Content != `{"prompt":"hello"}` || detail.Conversation[1].Content != `{"answer":"world"}` {
 		t.Fatalf("detail=%+v err=%v", detail, err)
+	}
+}
+
+func TestConversationDetailNormalizesReasoningAndToolCalls(t *testing.T) {
+	repo := &testRepo{}
+	svc := NewService(repo, 1, nil)
+	box, _ := seal.New("synthetic-conversation-key")
+	svc.EnableConversationCapture(box)
+	request := []byte(`{"messages":[{"role":"system","content":"instructions"},{"role":"user","content":"question"}]}`)
+	response := []byte("{\"choices\":[{\"delta\":{\"reasoning_content\":\"considering\"}}]}\n{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"arguments\":\"1}\"}}]}}]}\n{\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}")
+	sealed, truncated := svc.CaptureConversation(request, response)
+	if err := svc.RecordContext(context.Background(), entities.UsageEvent{ID: "usage-trace", ConversationEnc: sealed, ContentTruncated: truncated}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Close()
+	detail, err := svc.Detail(context.Background(), "usage-trace", entities.UsageVisibility{PrincipalType: entities.PrincipalMaster})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasoning, tool, answer bool
+	for _, entry := range detail.Conversation {
+		reasoning = reasoning || entry.Type == "reasoning" && entry.Content == "considering"
+		tool = tool || entry.Type == "tool_call" && entry.Name == "lookup" && entry.Content == `{"q":1}`
+		answer = answer || entry.Type == "text" && entry.Content == "answer"
+	}
+	if !reasoning || !tool || !answer {
+		t.Fatalf("conversation=%+v", detail.Conversation)
+	}
+}
+
+func BenchmarkNormalizeConversationLargeStream(b *testing.B) {
+	request := `{"messages":[{"role":"user","content":"question"}]}`
+	line := `{"choices":[{"delta":{"content":"abcdefghijklmnopqrstuvwxyz0123456789"}}]}` + "\n"
+	response := strings.Repeat(line, 12000)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(request) + len(response)))
+	for b.Loop() {
+		normalizeConversation(request, response)
 	}
 }

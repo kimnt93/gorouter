@@ -432,6 +432,19 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_kimnt93_gorouter_pkg_entities.ConversationEntry:
+    properties:
+      content:
+        type: string
+      name:
+        type: string
+      role:
+        type: string
+      tool_call_id:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_kimnt93_gorouter_pkg_entities.Cost:
     properties:
       cache_read_usd:
@@ -718,6 +731,10 @@ definitions:
         type: boolean
       content_truncated:
         type: boolean
+      conversation:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.ConversationEntry'
+        type: array
       cost_usd:
         type: number
       credential_id:
@@ -737,10 +754,6 @@ definitions:
       prompt_tokens:
         type: integer
       provider:
-        type: string
-      request_body:
-        type: string
-      response_body:
         type: string
       status_code:
         type: integer

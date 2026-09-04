@@ -284,6 +284,9 @@ func (s *Service) Detail(ctx context.Context, id string, visibility entities.Usa
 	if json.Unmarshal(plain, &envelope) != nil {
 		return nil, errors.New("decode usage detail")
 	}
-	detail.RequestBody, detail.ResponseBody, detail.ContentAvailable = envelope.Request, envelope.Response, true
+	storedTruncated := detail.ContentTruncated
+	detail.Conversation, detail.ContentTruncated = normalizeConversation(envelope.Request, envelope.Response)
+	detail.ContentTruncated = storedTruncated || detail.ContentTruncated
+	detail.ContentAvailable = len(detail.Conversation) > 0
 	return detail, nil
 }

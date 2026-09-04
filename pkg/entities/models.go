@@ -227,13 +227,20 @@ type RecentEvent struct {
 	OrganizationID   string    `json:"organization_id"`
 }
 
+type ConversationEntry struct {
+	Role       string `json:"role"`
+	Type       string `json:"type"`
+	Name       string `json:"name,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Content    string `json:"content,omitempty"`
+}
+
 type UsageDetail struct {
 	RecentEvent
-	RequestBody           string `json:"request_body"`
-	ResponseBody          string `json:"response_body"`
-	ContentAvailable      bool   `json:"content_available"`
-	ContentTruncated      bool   `json:"content_truncated"`
-	ConversationEncrypted []byte `json:"-"`
+	Conversation          []ConversationEntry `json:"conversation,omitempty"`
+	ContentAvailable      bool                `json:"content_available"`
+	ContentTruncated      bool                `json:"content_truncated"`
+	ConversationEncrypted []byte              `json:"-"`
 }
 
 type UsageHealthMetric struct {

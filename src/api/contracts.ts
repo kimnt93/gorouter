@@ -22,9 +22,16 @@ export interface UsageEvent {
   organization_id: string
 }
 
+export interface ConversationEntry {
+  role: string
+  type: 'text' | 'reasoning' | 'tool_call' | 'tool_result'
+  name?: string
+  tool_call_id?: string
+  content?: string
+}
+
 export interface UsageDetail extends UsageEvent {
-  request_body: string
-  response_body: string
+  conversation?: ConversationEntry[]
   content_available: boolean
   content_truncated: boolean
 }

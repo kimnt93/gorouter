@@ -541,3 +541,8 @@ h2 { font-size: 19px; }
 .reset-credit-list small { margin-top: 4px; color: #999; font-size: 11px; }
 @media (max-width: 1280px) { .connection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 800px) { .connection-grid { grid-template-columns: 1fr; } }
+.conversation-message.trace-reasoning { border-color: #5d5139; background: #2a261d; }
+.conversation-message.trace-reasoning > span { color: #d2ae61; }
+.conversation-message.trace-tool_call, .conversation-message.trace-tool_result { border-color: #355a4a; background: #1d2b25; }
+.conversation-message.trace-tool_call > span, .conversation-message.trace-tool_result > span { color: #78d6aa; }
+.conversation-message > small { display: block; margin: -3px 0 9px; color: #808991; font: 10px ui-monospace,monospace; }

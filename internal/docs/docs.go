@@ -4690,6 +4690,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_kimnt93_gorouter_pkg_entities.ConversationEntry": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "tool_call_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_kimnt93_gorouter_pkg_entities.Cost": {
             "type": "object",
             "properties": {
@@ -5126,6 +5146,12 @@ const docTemplate = `{
                 "content_truncated": {
                     "type": "boolean"
                 },
+                "conversation": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ConversationEntry"
+                    }
+                },
                 "cost_usd": {
                     "type": "number"
                 },
@@ -5154,12 +5180,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "provider": {
-                    "type": "string"
-                },
-                "request_body": {
-                    "type": "string"
-                },
-                "response_body": {
                     "type": "string"
                 },
                 "status_code": {

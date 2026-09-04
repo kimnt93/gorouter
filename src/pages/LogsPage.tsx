@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getRecent, getUsageDetail } from '../api/client'
-import type { UsageDetail, UsageEvent } from '../api/contracts'
+import type { ConversationEntry, UsageDetail, UsageEvent } from '../api/contracts'
 import { Modal } from '../components/Modal'
 import { PageError, PageLoading } from '../components/PageState'
 import { RangeSelector } from '../components/RangeSelector'
@@ -63,10 +63,15 @@ function LogDetailModal({ event, onClose }: { event: UsageEvent; onClose: () => 
     <div className="safe-note"><strong>Conversation capture</strong><span>{content?.content_available ? 'Request and response content was captured for this request.' : contentError ? `Content could not be loaded: ${contentError}` : content ? 'No content is available. Enable ENABLE_STORE_COMPLLETIONS=true to capture future requests.' : 'Loading request content…'}</span></div>
     <dl className="detail-grid usage-detail-grid">{detail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     <section className="conversation-section"><div className="conversation-heading"><div><span className="eyebrow">Token accounting</span><h3>[input / output / cache read / cache write]</h3></div></div><TokenBreakdown input={event.prompt_tokens} output={event.completion_tokens} cacheRead={event.cache_read_tokens} cacheWrite={event.cache_write_tokens} /></section>
-    {content?.content_available && <section className="conversation-section"><div className="conversation-heading"><div><span className="eyebrow">Conversation</span><h3>Captured request and provider response</h3></div>{content.content_truncated && <span className="truncated-badge">truncated</span>}</div><div className="conversation-list"><article className="conversation-message role-user"><span>Request</span><pre>{formatConversation(content.request_body)}</pre></article><article className="conversation-message role-assistant"><span>Response</span><pre>{formatConversation(content.response_body)}</pre></article></div></section>}
+    {content?.content_available && <section className="conversation-section"><div className="conversation-heading"><div><span className="eyebrow">Conversation</span><h3>Messages, reasoning, and tool activity</h3></div>{content.content_truncated && <span className="truncated-badge">truncated</span>}</div><div className="conversation-list">{content.conversation?.map((entry, index) => <ConversationItem entry={entry} key={`${entry.type}-${entry.tool_call_id || index}`} />)}</div></section>}
   </Modal>
 }
 
-function formatConversation(value: string): string {
+function ConversationItem({ entry }: { entry: ConversationEntry }) {
+  const label = entry.type === 'reasoning' ? 'Reasoning' : entry.type === 'tool_call' ? `Tool call${entry.name ? ` · ${entry.name}` : ''}` : entry.type === 'tool_result' ? `Tool result${entry.name ? ` · ${entry.name}` : ''}` : entry.role
+  return <article className={`conversation-message role-${entry.role} trace-${entry.type}`}><span>{label}</span>{entry.tool_call_id && <small>{entry.tool_call_id}</small>}<pre>{formatContent(entry.content || '')}</pre></article>
+}
+
+function formatContent(value: string): string {
   try { return JSON.stringify(JSON.parse(value), null, 2) } catch { return value || 'No content' }
 }
