@@ -90,3 +90,28 @@ test('redeems a reset credit without crypto.randomUUID and reuses the request ID
   expect(api.redeemCodexResetCredit).toHaveBeenLastCalledWith('cred-1', 'credit-1', firstRequestID)
   expect(await screen.findByText('Codex reset credit redeemed')).toBeInTheDocument()
 })
+
+test('runs one bounded chat test for every active account in a provider', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'codex', name: 'OpenAI Codex', description: 'Codex subscription', auth: 'oauth', protocol: 'codex', default_base_url: '', model_prefix: 'cx', custom_base_url: false, oauth_supported: true, oauth_refresh_required: true, quota_supported: false }] })
+  api.getCredentials.mockResolvedValue([
+    { id: 'cred-1', name: 'Account 1', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', owner_tenant_id: null, created_at: '' },
+    { id: 'cred-2', name: 'Account 2', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', owner_tenant_id: null, created_at: '' },
+    { id: 'cred-off', name: 'Disabled', provider: 'codex', kind: 'oauth', base_url: '', status: 'disabled', owner_tenant_id: null, created_at: '' },
+  ])
+  api.discoverModels.mockImplementation((id: string) => Promise.resolve({ object: 'list', data: [{ id: `${id}-model`, public_id: `cx/${id}-model`, object: 'model', permission: [], parent: null }], default_model: `${id}-model` }))
+  api.requestStream.mockImplementation((_path: string, _body: object, onText: (text: string) => void) => { onText('connection healthy'); return Promise.resolve() })
+
+  render(<ProvidersPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Chat all accounts' }))
+  expect(screen.getByRole('dialog', { name: 'Chat all · OpenAI Codex' })).toBeInTheDocument()
+  expect(screen.getByText('2 active accounts')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Run all accounts' }))
+
+  await waitFor(() => expect(api.requestStream).toHaveBeenCalledTimes(2))
+  expect(api.discoverModels).toHaveBeenCalledTimes(2)
+  expect(api.requestStream.mock.calls.map((call: unknown[]) => call[0])).toEqual(expect.arrayContaining([
+    '/admin/credentials/cred-1/chat-tests', '/admin/credentials/cred-2/chat-tests',
+  ]))
+  expect(screen.getByText('2/2 passed')).toBeInTheDocument()
+  expect(api.requestStream.mock.calls.some((call: unknown[]) => String(call[0]).includes('cred-off'))).toBe(false)
+})

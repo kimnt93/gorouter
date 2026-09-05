@@ -99,6 +99,7 @@ Detailed configuration and API examples are in the [integration guide](docs/inte
 | `CACHE_ENABLED`, `CACHE_TTL`, `CACHE_SCOPE` | No | `true`, `24h`, `key` | Deterministic response-cache controls. |
 | `REQUEST_TIMEOUT`, `REQUEST_LIMIT_MB` | No | `5m`, `20` | Request duration and body-size limits. |
 | `ROUTE_RETRIES` | No | `2` | Retry budget for providers without quota-aware account routing. |
+| `AUTO_MAX_TRIES` | No | `3` | Maximum distinct route attempts for the virtual `auto` model (1-20). |
 | `USAGE_WRITE_CONCURRENCY`, `USAGE_WRITE_QUEUE_SIZE` | No | `4`, `100000` | Asynchronous usage writer controls. |
 | `ENABLE_STORE_COMPLLETIONS` | No | `false` | Opt in to bounded, encrypted request/completion capture for the Logs detail popup. Applies only to future requests. |
 

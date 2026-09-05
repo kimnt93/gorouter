@@ -216,7 +216,7 @@ func sessionResponse(sess *entities.Session) loginResponse {
 	if sess == nil {
 		return loginResponse{Scopes: []string{}}
 	}
-	return loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, Scopes: append([]string(nil), sess.Scopes...)}
+	return loginResponse{OK: true, Role: sess.Role, PrincipalType: sess.PrincipalType, UserID: sess.UserID, Username: sess.Username, OrganizationID: sess.OrganizationID, MembershipRole: sess.MembershipRole, UserRole: sess.UserRole, Scopes: append([]string(nil), sess.Scopes...)}
 }
 
 // Logout clears the signed session cookie.

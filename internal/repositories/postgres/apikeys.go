@@ -452,7 +452,7 @@ func (r *ApiKeyRepo) CreateUserWithInitialKey(ctx context.Context, user entities
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `INSERT INTO users (id,username,normalized_username,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6)`, user.ID, user.Username, user.NormalizedUsername, user.Status, user.CreatedAt, user.UpdatedAt); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO users (id,username,normalized_username,status,role,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`, user.ID, user.Username, user.NormalizedUsername, user.Status, user.Role, user.CreatedAt, user.UpdatedAt); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id,credential_owner_user_id)

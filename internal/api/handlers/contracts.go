@@ -27,6 +27,7 @@ type LoginResponse struct {
 	Username       string   `json:"username,omitempty"`
 	OrganizationID string   `json:"organization_id,omitempty"`
 	MembershipRole string   `json:"membership_role,omitempty"`
+	UserRole       string   `json:"user_role,omitempty"`
 	Scopes         []string `json:"scopes"`
 }
 type TenantCreateRequest struct {
@@ -171,6 +172,7 @@ type InitialKeyRequest struct {
 }
 type UserCreateRequest struct {
 	Username           string            `json:"username"`
+	Role               string            `json:"role"`
 	GenerateInitialKey bool              `json:"generate_initial_key"`
 	InitialKey         InitialKeyRequest `json:"initial_key"`
 }

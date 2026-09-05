@@ -1188,3 +1188,76 @@ func TestGatewayCacheAffinityPinsReusablePrefixWithoutExplicitSession(t *testing
 		t.Fatalf("cache-affinity calls=%v", upstream.calls)
 	}
 }
+
+type gatewayAutoCredRepo struct{ gatewayCredRepo }
+
+func (r gatewayAutoCredRepo) RoutesForModel(_ context.Context, model string) ([]entities.RouteCandidate, error) {
+	if model == "model-a" {
+		return []entities.RouteCandidate{{CredentialID: "cred-a"}}, nil
+	}
+	if model == "model-b" {
+		return []entities.RouteCandidate{{CredentialID: "cred-b"}}, nil
+	}
+	return nil, nil
+}
+
+func TestGatewayAutoFailsOverAcrossRandomEligibleModelsWithinMaxTries(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-auto", Models: []string{"auto"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	models := []entities.ModelDef{
+		{Name: "model-a", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}}},
+		{Name: "model-b", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-b", Enabled: true}}},
+	}
+	runtimes := map[string]*entities.CredentialRuntime{
+		"cred-a": {ID: "cred-a", Provider: "openai", Kind: entities.KindAPIKey},
+		"cred-b": {ID: "cred-b", Provider: "openai", Kind: entities.KindAPIKey},
+	}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusServiceUnavailable, "cred-b": http.StatusServiceUnavailable}}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key: key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayAutoCredRepo{gatewayCredRepo{runtimes: runtimes}}, nil),
+		Models: modelroute.NewService(gatewayModelsRepo{models: models}), OpenAI: upstream,
+		Selector: &chat.Selector{}, Health: chat.NewHealth(), AutoMaxTries: 2,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, Scopes: key.Scopes})
+		return gateway.Chat(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable && response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	if len(upstream.calls) != 2 {
+		t.Fatalf("calls=%v, want two distinct model attempts", upstream.calls)
+	}
+}
+
+func TestListModelsIncludesAutoOnlyWhenKeyWasAssignedAuto(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-auto", Models: []string{"auto"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key: key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive}}}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}}}}),
+	}
+	app := fiber.New()
+	app.Get("/v1/models", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, Scopes: key.Scopes})
+		return gateway.ListModels(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body llm.ModelList
+	if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Data) != 2 || body.Data[0].ID != "auto" || body.Data[1].ID != "model-a" {
+		t.Fatalf("models=%+v", body.Data)
+	}
+}

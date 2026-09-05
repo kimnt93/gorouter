@@ -127,7 +127,7 @@ export const addMember = (id: string, userId: string, role: string): Promise<Mem
 export const updateMember = (id: string, userId: string, role: string): Promise<{ ok: boolean }> => request(`/admin/organizations/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ role }) })
 export const deleteMember = (id: string, userId: string): Promise<{ ok: boolean }> => request(`/admin/organizations/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' })
 
-export const createUser = (username: string, generateInitialKey: boolean, models: string[] = []): Promise<UserCreateResponse> => request('/admin/users', { method: 'POST', body: JSON.stringify({ username, generate_initial_key: generateInitialKey, initial_key: { name: 'Initial user key', models, scopes: ['chat'] } }) })
+export const createUser = (username: string, role: 'org_manager' | 'user'): Promise<UserCreateResponse> => request('/admin/users', { method: 'POST', body: JSON.stringify({ username, role }) })
 export const setUserStatus = (id: string, status: string): Promise<{ ok: boolean }> => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) })
 
 export const createAPIKey = (body: object): Promise<CreatedAPIKey> => request('/admin/api-keys', { method: 'POST', body: JSON.stringify(body) })

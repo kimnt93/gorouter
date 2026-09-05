@@ -3,10 +3,12 @@ package handlers
 import (
 	"bufio"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,6 +49,8 @@ type Gateway struct {
 	// composition root supplies the configured value; zero means no retry for
 	// lightweight/unit gateway constructions.
 	RouteRetries int
+	// AutoMaxTries bounds distinct model/route attempts for the virtual auto model.
+	AutoMaxTries int
 }
 
 type ProviderQuotaRouter interface {
@@ -114,6 +118,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).Unauthorized("API key required").Send()
 	}
+	autoRequested := req.Model == "auto"
 	if !key.Master && !contains(key.Models, req.Model) {
 		return responseapi.For(c).Forbidden("model is not allowed for this API key").Send()
 	}
@@ -122,10 +127,34 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load model").Send()
 	}
 	var model *entities.ModelDef
-	for i := range models {
-		if models[i].Name == req.Model && models[i].Enabled {
-			model = &models[i]
-			break
+	var autoModels []*entities.ModelDef
+	if autoRequested {
+		eligible := make([]int, 0, len(models))
+		for i := range models {
+			if models[i].Enabled && (key.Master || contains(key.Models, "auto") || contains(key.Models, models[i].Name)) {
+				eligible = append(eligible, i)
+			}
+		}
+		shuffleIndexes(eligible)
+		limit := g.AutoMaxTries
+		if limit <= 0 {
+			limit = 3
+		}
+		if len(eligible) > limit {
+			eligible = eligible[:limit]
+		}
+		for _, index := range eligible {
+			autoModels = append(autoModels, &models[index])
+		}
+		if len(autoModels) > 0 {
+			model = autoModels[0]
+		}
+	} else {
+		for i := range models {
+			if models[i].Name == req.Model && models[i].Enabled {
+				model = &models[i]
+				break
+			}
 		}
 	}
 	if model == nil {
@@ -146,7 +175,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			return responseapi.For(c).Error(fiber.StatusTooManyRequests, "requests-per-minute limit exceeded", "rate_limit_error", "rate_limit_exceeded").Send()
 		}
 	}
-	deterministic := llm.IsDeterministic(req)
+	deterministic := llm.IsDeterministic(req) && !autoRequested
 	cacheEnabled := g.cacheEnabled()
 	if cacheEnabled && deterministic {
 		if cached, ok := g.Cache.Lookup(key.ID, key.TenantID, model.Name, raw); ok {
@@ -215,45 +244,73 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			return responseapi.For(c).InternalError("failed to reserve quota").Send()
 		}
 	}
-	routes, err := g.Creds.Routes(c.Context(), model.Name)
-	if err != nil || len(routes) == 0 {
+	if autoRequested {
+		c.Set("X-GoRouter-Auto-Model", model.Name)
+	}
+	type modelRoutes struct {
+		model  *entities.ModelDef
+		routes []entities.RouteCandidate
+	}
+	routeGroups := make([]modelRoutes, 0, 1)
+	if autoRequested {
+		for _, candidateModel := range autoModels {
+			routes, routeErr := g.Creds.Routes(c.Context(), candidateModel.Name)
+			if routeErr == nil && len(routes) > 0 {
+				routeGroups = append(routeGroups, modelRoutes{candidateModel, routes})
+			}
+		}
+	} else {
+		routes, routeErr := g.Creds.Routes(c.Context(), model.Name)
+		if routeErr == nil && len(routes) > 0 {
+			routeGroups = append(routeGroups, modelRoutes{model, routes})
+		}
+	}
+	if len(routeGroups) == 0 {
 		g.recordError(key, model, "", fiber.StatusServiceUnavailable, started, "no credentials available")
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "no credentials available", "service_unavailable", "no_credentials").Send()
 	}
-	candidates := make([]chat.Candidate, 0, len(routes))
-	runtimes := make(map[string]*entities.CredentialRuntime, len(routes))
-	credentialIDs := make(map[string]string, len(routes))
-	upstreamModels := make(map[string]string, len(routes))
+	totalRoutes := 0
+	for _, group := range routeGroups {
+		totalRoutes += len(group.routes)
+	}
+	candidates := make([]chat.Candidate, 0, totalRoutes)
+	runtimes := make(map[string]*entities.CredentialRuntime, totalRoutes)
+	credentialIDs := make(map[string]string, totalRoutes)
+	upstreamModels := make(map[string]string, totalRoutes)
+	candidateModels := make(map[string]*entities.ModelDef, totalRoutes)
 	fillFirstProvider := ""
 	fillFirst := true
-	for _, route := range routes {
-		if key.CredentialOwnerUserID != "" && route.OwnerUserID == "" {
-			continue
+	for _, group := range routeGroups {
+		for _, route := range group.routes {
+			if key.CredentialOwnerUserID != "" && route.OwnerUserID == "" {
+				continue
+			}
+			if route.OwnerUserID != "" && !key.Master && route.OwnerUserID != providerOwnerUserID(key) {
+				continue
+			}
+			if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
+				continue
+			}
+			runtime, runtimeErr := g.Creds.Runtime(c.Context(), route.CredentialID)
+			if runtimeErr != nil {
+				g.Health.Report(route.CredentialID, false)
+				continue
+			}
+			candidateID := group.model.Name + "\x00" + route.CredentialID + "\x00" + route.UpstreamModel
+			runtimes[candidateID] = runtime
+			credentialIDs[candidateID] = route.CredentialID
+			upstreamModels[candidateID] = route.UpstreamModel
+			candidateModels[candidateID] = group.model
+			definition, knownProvider := providerpkg.Lookup(runtime.Provider)
+			if !knownProvider || !definition.QuotaSupported {
+				fillFirst = false
+			} else if fillFirstProvider == "" {
+				fillFirstProvider = runtime.Provider
+			} else if fillFirstProvider != runtime.Provider {
+				fillFirst = false
+			}
+			candidates = append(candidates, chat.Candidate{ID: candidateID, Priority: route.Priority, Weight: route.Weight})
 		}
-		if route.OwnerUserID != "" && !key.Master && route.OwnerUserID != providerOwnerUserID(key) {
-			continue
-		}
-		if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
-			continue
-		}
-		runtime, runtimeErr := g.Creds.Runtime(c.Context(), route.CredentialID)
-		if runtimeErr != nil {
-			g.Health.Report(route.CredentialID, false)
-			continue
-		}
-		candidateID := route.CredentialID + "\x00" + route.UpstreamModel
-		runtimes[candidateID] = runtime
-		credentialIDs[candidateID] = route.CredentialID
-		upstreamModels[candidateID] = route.UpstreamModel
-		definition, knownProvider := providerpkg.Lookup(runtime.Provider)
-		if !knownProvider || !definition.QuotaSupported {
-			fillFirst = false
-		} else if fillFirstProvider == "" {
-			fillFirstProvider = runtime.Provider
-		} else if fillFirstProvider != runtime.Provider {
-			fillFirst = false
-		}
-		candidates = append(candidates, chat.Candidate{ID: candidateID, Priority: route.Priority, Weight: route.Weight})
 	}
 	strategy := model.Strategy
 	if fillFirst && fillFirstProvider != "" {
@@ -436,13 +493,25 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			}
 			continue
 		}
-		routedModel := *model
+		selectedModel := candidateModels[candidate.ID]
+		if selectedModel == nil {
+			selectedModel = model
+		}
+		routedModel := *selectedModel
 		routedModel.UpstreamModel = upstreamModel
-		routedModel.Metadata = cloneModelMetadata(model.Metadata)
+		routedModel.Metadata = cloneModelMetadata(selectedModel.Metadata)
 		if routedModel.Metadata == nil {
 			routedModel.Metadata = &entities.ModelMetadata{}
 		}
 		routedModel.Metadata.Provider = runtime.Provider
+		selectedPrice := pricePtr
+		if autoRequested {
+			if resolved, ok, e := g.resolvePrice(c.Context(), selectedModel); e == nil && ok {
+				selectedPrice = &resolved
+			} else if e == nil {
+				selectedPrice = nil
+			}
+		}
 		if req.Stream {
 			streamOwnsReservation = true
 			onStreamDone := func(providerSucceeded bool) {
@@ -461,7 +530,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
 				}
 			}
-			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation, onStreamDone)
+			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation, onStreamDone)
 		}
 		g.Health.Report(credentialID, true)
 		if strategy == chat.StrategyRoundRobin {
@@ -470,7 +539,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if g.ProviderQuotas != nil {
 			g.ProviderQuotas.MarkInUse(credentialID)
 		}
-		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, pricePtr, reservation)
+		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation)
 	}
 	c.Set("X-Cache", "bypass")
 	if onlyQuotaFailures && quotaFailures > 0 {
@@ -655,7 +724,7 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	}
 	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}, Models: []llm.CodexModelInfo{}}
 	for _, model := range models {
-		if !model.Enabled || !key.Master && !contains(key.Models, model.Name) || !hasCallableRoute(model.Routes, callableCredentials) {
+		if !model.Enabled || !key.Master && !contains(key.Models, "auto") && !contains(key.Models, model.Name) || !hasCallableRoute(model.Routes, callableCredentials) {
 			continue
 		}
 		var price *entities.Price
@@ -665,7 +734,22 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 		out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
 		out.Models = append(out.Models, codexModelInfo(model))
 	}
+	if sess != nil && !key.Master && contains(key.Models, "auto") && len(out.Data) > 0 {
+		out.Data = append([]llm.ModelInfo{{ID: "auto", Object: "model", OwnedBy: "gorouter"}}, out.Data...)
+		out.Models = append([]llm.CodexModelInfo{{Slug: "auto", DisplayName: "Auto", Description: "Randomly selects an eligible model and fails over within the configured routing budget", Visibility: "list", SupportedInAPI: true, ContextWindow: 128000, MaxContextWindow: 128000, InputModalities: []string{"text"}}}, out.Models...)
+	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
+}
+
+func shuffleIndexes(values []int) {
+	for i := len(values) - 1; i > 0; i-- {
+		n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			continue
+		}
+		j := int(n.Int64())
+		values[i], values[j] = values[j], values[i]
+	}
 }
 
 func hasCallableRoute(routes []entities.ModelRoute, callableCredentials map[string]bool) bool {

@@ -16,33 +16,34 @@ type IdentityRepo struct{ db *DB }
 func NewIdentityRepo(db *DB) *IdentityRepo { return &IdentityRepo{db: db} }
 
 func (r *IdentityRepo) CreateUser(ctx context.Context, user entities.User) error {
-	_, err := r.db.Pool.Exec(ctx, `INSERT INTO users (id,username,normalized_username,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6)`, user.ID, user.Username, user.NormalizedUsername, user.Status, user.CreatedAt, user.UpdatedAt)
+	_, err := r.db.Pool.Exec(ctx, `INSERT INTO users (id,username,normalized_username,status,role,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`, user.ID, user.Username, user.NormalizedUsername, user.Status, user.Role, user.CreatedAt, user.UpdatedAt)
 	return err
 }
 
 func scanUser(row pgx.Row) (*entities.User, error) {
 	var user entities.User
-	if err := row.Scan(&user.ID, &user.Username, &user.NormalizedUsername, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.NormalizedUsername, &user.Status, &user.Role, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, entities.ErrNotFound
 		}
 		return nil, err
 	}
+	user.Role = entities.NormalizeUserRole(user.Role)
 	return &user, nil
 }
 
 func (r *IdentityRepo) UserByID(ctx context.Context, id string) (*entities.User, error) {
-	return scanUser(r.db.Pool.QueryRow(ctx, `SELECT id,username,normalized_username,status,created_at,updated_at FROM users WHERE id=$1`, id))
+	return scanUser(r.db.Pool.QueryRow(ctx, `SELECT id,username,normalized_username,status,role,created_at,updated_at FROM users WHERE id=$1`, id))
 }
 
 func (r *IdentityRepo) UserByNormalizedUsername(ctx context.Context, normalized string) (*entities.User, error) {
-	return scanUser(r.db.Pool.QueryRow(ctx, `SELECT id,username,normalized_username,status,created_at,updated_at FROM users WHERE normalized_username=$1`, normalized))
+	return scanUser(r.db.Pool.QueryRow(ctx, `SELECT id,username,normalized_username,status,role,created_at,updated_at FROM users WHERE normalized_username=$1`, normalized))
 }
 
 func (r *IdentityRepo) ListUsers(ctx context.Context, query entities.PageQuery) ([]entities.User, string, error) {
 	limit := boundedLimit(query.Limit)
 	cursor := decodeIDCursor(query.Cursor)
-	rows, err := r.db.Pool.Query(ctx, `SELECT id,username,normalized_username,status,created_at,updated_at FROM users
+	rows, err := r.db.Pool.Query(ctx, `SELECT id,username,normalized_username,status,role,created_at,updated_at FROM users
 		WHERE ($1='' OR id < $1) AND ($2='' OR normalized_username LIKE '%' || lower($2) || '%') AND ($3='' OR status=$3)
 		ORDER BY id DESC LIMIT $4`, cursor, strings.TrimSpace(query.Query), query.Status, limit+1)
 	if err != nil {
@@ -52,9 +53,10 @@ func (r *IdentityRepo) ListUsers(ctx context.Context, query entities.PageQuery) 
 	out := make([]entities.User, 0, limit)
 	for rows.Next() {
 		var user entities.User
-		if err := rows.Scan(&user.ID, &user.Username, &user.NormalizedUsername, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.NormalizedUsername, &user.Status, &user.Role, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, "", err
 		}
+		user.Role = entities.NormalizeUserRole(user.Role)
 		out = append(out, user)
 	}
 	if err := rows.Err(); err != nil {

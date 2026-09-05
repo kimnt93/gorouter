@@ -21,7 +21,7 @@ func ManageUsers(actor entities.Principal) error {
 }
 
 func ManageOrganizations(actor entities.Principal) error {
-	if actor.Type == entities.PrincipalMaster || actor.Type == entities.PrincipalUser && actor.UserID != "" {
+	if actor.Type == entities.PrincipalMaster || actor.Type == entities.PrincipalUser && actor.UserID != "" && actor.UserRole == entities.UserRoleOrgManager {
 		return nil
 	}
 	return ErrForbidden

@@ -74,8 +74,8 @@ func TestCredentialVisibility(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedUserCanCreateOrganization(t *testing.T) {
-	if err := ManageOrganizations(entities.Principal{Type: entities.PrincipalUser, UserID: "user-1"}); err != nil {
+func TestRoleBasedUserCanCreateOrganization(t *testing.T) {
+	if err := ManageOrganizations(entities.Principal{Type: entities.PrincipalUser, UserID: "user-1", UserRole: entities.UserRoleOrgManager}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ManageOrganizations(entities.Principal{Type: entities.PrincipalOrganization, OrganizationID: "org-1"}); !errors.Is(err, ErrForbidden) {

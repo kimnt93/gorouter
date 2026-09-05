@@ -25,7 +25,7 @@ func principalFromSession(session *entities.Session) entities.Principal {
 			typeName = entities.PrincipalOrganization
 		}
 	}
-	return entities.Principal{Type: typeName, KeyID: session.KeyID, UserID: session.UserID, Username: session.Username, OrganizationID: session.OrganizationID, MembershipRole: session.MembershipRole, Scopes: append([]string(nil), session.Scopes...)}
+	return entities.Principal{Type: typeName, KeyID: session.KeyID, UserID: session.UserID, Username: session.Username, OrganizationID: session.OrganizationID, MembershipRole: session.MembershipRole, UserRole: session.UserRole, Scopes: append([]string(nil), session.Scopes...)}
 }
 
 // principalForRead applies the master's optional user inspection lens. The
@@ -44,7 +44,7 @@ func (a *Admin) principalForRead(c fiber.Ctx) (entities.Principal, error) {
 	if err != nil || user.Status != entities.StatusActive {
 		return entities.Principal{}, entities.ErrNotFound
 	}
-	actor = entities.Principal{Type: entities.PrincipalUser, UserID: user.ID, Username: user.Username, Scopes: append([]string(nil), entities.AllScopes...)}
+	actor = entities.Principal{Type: entities.PrincipalUser, UserID: user.ID, Username: user.Username, UserRole: user.Role, Scopes: append([]string(nil), entities.AllScopes...)}
 	if organizationID := strings.TrimSpace(c.Query("organization_id")); organizationID != "" {
 		membership, membershipErr := a.IdentityRepo.Membership(c.Context(), organizationID, user.ID)
 		organization, organizationErr := a.IdentityRepo.OrganizationByID(c.Context(), organizationID)
@@ -72,7 +72,7 @@ func pageQuery(c fiber.Ctx) entities.PageQuery {
 
 // Users lists or creates users.
 // @Summary List or create users
-// @Description Lists users visible to the current principal or creates a new user and optional initial API key.
+// @Description Lists users visible to the current principal or creates a role-based user with one generated initial API key and the virtual auto model.
 // @Tags users
 // @Security BearerAuth
 // @Param cursor query string false "Opaque cursor"
@@ -155,29 +155,26 @@ func (a *Admin) Users(c fiber.Ctx) error {
 			Send()
 	}
 	if err := policy.ManageUsers(actor); err != nil {
-		return responseapi.For(c).Forbidden("only master may manage users").Send()
+		return responseapi.For(c).Forbidden("user management requires the manager role").Send()
 	}
 	var body UserCreateRequest
 	if err := c.Bind().Body(&body); err != nil {
 		return responseapi.For(c).BadRequest("invalid user request").Send()
 	}
-	if body.GenerateInitialKey {
-		name := strings.TrimSpace(body.InitialKey.Name)
-		if name == "" {
-			name = "Initial login key"
-		}
-		user, key, err := a.IdentitySvc.CreateUserWithInitialKey(c.Context(), actor, body.Username, a.KeysSvc, apikey.CreateInput{Name: name, Models: body.InitialKey.Models, Scopes: body.InitialKey.Scopes})
-		if err != nil {
-			return identityError(c, err)
-		}
-		initial := keyCreatedResponse(key)
-		return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(UserCreateResponse{User: user, InitialKey: &initial}).Send()
+	name := strings.TrimSpace(body.InitialKey.Name)
+	if name == "" {
+		name = "Initial user key"
 	}
-	user, err := a.IdentitySvc.CreateUser(c.Context(), actor, body.Username)
+	models := body.InitialKey.Models
+	if len(models) == 0 {
+		models = []string{"auto"}
+	}
+	user, key, err := a.IdentitySvc.CreateUserWithInitialKey(c.Context(), actor, body.Username, a.KeysSvc, apikey.CreateInput{Name: name, Models: models, Scopes: append([]string(nil), entities.AllScopes...)}, body.Role)
 	if err != nil {
 		return identityError(c, err)
 	}
-	return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(UserCreateResponse{User: user}).Send()
+	initial := keyCreatedResponse(key)
+	return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(UserCreateResponse{User: user, InitialKey: &initial}).Send()
 }
 
 // UserByID returns user detail or changes user status.
@@ -194,7 +191,7 @@ func (a *Admin) Users(c fiber.Ctx) error {
 func (a *Admin) UserByID(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if err := policy.ManageUsers(actor); err != nil {
-		return responseapi.For(c).Forbidden("only master may manage users").Send()
+		return responseapi.For(c).Forbidden("user management requires the manager role").Send()
 	}
 	user, err := a.IdentityRepo.UserByID(c.Context(), c.Params("id"))
 	if err != nil {

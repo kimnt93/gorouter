@@ -139,7 +139,7 @@ func (s *Service) sessionForKey(ctx context.Context, key *entities.ApiKey, expir
 		if err != nil || user.Status != entities.StatusActive {
 			return nil, ErrDisabled
 		}
-		sess.UserID, sess.Username = user.ID, user.Username
+		sess.UserID, sess.Username, sess.UserRole = user.ID, user.Username, user.Role
 		if key.ContextOrganizationID != "" {
 			organization, orgErr := s.identity.OrganizationByID(ctx, key.ContextOrganizationID)
 			if orgErr != nil || organization.Status != entities.StatusActive {

@@ -17,6 +17,7 @@ export function ProvidersPage() {
   const [connect, setConnect] = useState<ProviderDefinition | null>(null)
   const [modelsFor, setModelsFor] = useState<Credential | null>(null)
   const [chatFor, setChatFor] = useState<Credential | null>(null)
+  const [chatAllFor, setChatAllFor] = useState<{ provider: ProviderDefinition; accounts: Credential[] } | null>(null)
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -30,20 +31,21 @@ export function ProvidersPage() {
   return <>
     <header className="page-header"><div><span className="eyebrow">Manage / Providers</span><h1>Provider connections</h1><p>Connect subscriptions and API keys, check health, discover models, and run bounded streaming tests.</p></div><a className="button secondary" href={viewOrganizationID ? `/dashboard/credentials?organization_id=${encodeURIComponent(viewOrganizationID)}` : '/dashboard/credentials'}>Connection inventory</a></header>
     <ErrorBanner message={error} />
-    <ProviderSection title="OAuth subscriptions" detail="Guided browser and device authorization flows." providers={grouped.oauth} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onRefresh={load} />
-    <ProviderSection title="API-key providers" detail="Preset and custom OpenAI-compatible endpoints." providers={grouped.api} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onRefresh={load} />
+    <ProviderSection title="OAuth subscriptions" detail="Guided browser and device authorization flows." providers={grouped.oauth} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onChatAll={(provider, accounts) => setChatAllFor({ provider, accounts })} onRefresh={load} />
+    <ProviderSection title="API-key providers" detail="Preset and custom OpenAI-compatible endpoints." providers={grouped.api} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onChatAll={(provider, accounts) => setChatAllFor({ provider, accounts })} onRefresh={load} />
     {connect && <ConnectProviderModal provider={connect} onClose={() => setConnect(null)} onConnected={() => { setConnect(null); void load() }} />}
     {modelsFor && <ModelsModal credential={modelsFor} canImport onClose={() => setModelsFor(null)} />}
     {chatFor && <ChatTestModal credential={chatFor} onClose={() => setChatFor(null)} />}
+    {chatAllFor && <ChatAllProviderModal provider={chatAllFor.provider} accounts={chatAllFor.accounts} onClose={() => setChatAllFor(null)} />}
   </>
 }
 
-interface SectionProps { title: string; detail: string; providers: ProviderDefinition[]; credentials: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onRefresh: () => Promise<void> }
-function ProviderSection({ title, detail, providers, credentials, onConnect, onModels, onChat, onRefresh }: SectionProps) {
+interface SectionProps { title: string; detail: string; providers: ProviderDefinition[]; credentials: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }
+function ProviderSection({ title, detail, providers, credentials, onConnect, onModels, onChat, onChatAll, onRefresh }: SectionProps) {
   return <section className="provider-section-react"><div className="section-heading"><div><h2>{title}</h2><p>{detail}</p></div><Badge>{providers.length}</Badge></div><div className="provider-grid-react">{providers.map((provider) => {
     const accounts = credentials.filter((credential) => credential.provider === provider.id)
     return <article className={`provider-card-react ${accounts.length ? 'has-accounts' : ''}`} key={provider.id}><div className="provider-card-head"><span className="provider-monogram">{provider.name.slice(0, 2)}</span><div><h3><TruncatedText>{provider.name}</TruncatedText></h3><p title={provider.description}>{provider.description}</p></div><Badge tone={accounts.length ? 'good' : ''}>{accounts.length ? `${accounts.length} connected` : provider.auth}</Badge></div>
-      {accounts.length > 0 && <div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div>}
+      {accounts.length > 0 && <><div className="provider-bulk-actions"><button className="button secondary" disabled={!accounts.some((account) => account.status === 'active')} onClick={() => onChatAll(provider, accounts.filter((account) => account.status === 'active'))}>Chat all accounts</button><small>One bounded test per active connection</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
       <button className="button connect-button" onClick={() => onConnect(provider)}>Connect {provider.name}</button>
     </article>
   })}</div></section>
@@ -143,6 +145,45 @@ function ModelsModal({ credential, canImport, onClose }: { credential: Credentia
   const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   const visibleModels = models.filter((model) => `${model.public_id} ${model.id} ${model.owned_by ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   return <Modal title={`${credential.name} models`} onClose={onClose}>{loading ? <PageLoading /> : <><ErrorBanner message={error} /><SuccessBanner message={message} /><div className="select-search model-list-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search models" /></div><div className="model-picker-react">{visibleModels.map((model) => { const number = models.findIndex((candidate) => candidate.id === model.id) + 1; return <label key={model.id} title={model.public_id}><b>{String(number).padStart(2, '0')}</b><input type="checkbox" checked={selected.includes(model.id)} onChange={() => toggle(model.id)} /><span><strong>{model.public_id}</strong><small>{model.owned_by || model.id}{model.context_length ? ` · ${model.context_length.toLocaleString()} context` : ''}</small></span></label> })}</div><div className="select-count">{visibleModels.length} of {models.length} models</div>{models.length === 0 && <Empty title="No models returned" detail="Check the connection and provider permissions." />}{canImport && models.length > 0 && <div className="dialog-actions"><button className="button secondary" onClick={() => setSelected(models.map((model) => model.id))}>Select all</button><button className="button" disabled={!selected.length} onClick={() => void importModels(credential.id, selected).then((response) => setMessage(`Imported ${response.imported.length} model routes`)).catch((reason: Error) => setError(reason.message))}>Import selected</button></div>}</>}</Modal>
+}
+
+type BulkChatResult = { credential: Credential; model: string; status: 'pending' | 'running' | 'passed' | 'failed'; output: string; error: string }
+
+function ChatAllProviderModal({ provider, accounts, onClose }: { provider: ProviderDefinition; accounts: Credential[]; onClose: () => void }) {
+  const defaultPrompt = 'Reply with exactly: connection healthy'
+  const [prompt, setPrompt] = useState(defaultPrompt)
+  const [results, setResults] = useState<BulkChatResult[]>(() => accounts.map((credential) => ({ credential, model: '', status: 'pending', output: '', error: '' })))
+  const [busy, setBusy] = useState(false)
+  const controllers = useRef<AbortController[]>([])
+  useEffect(() => () => controllers.current.forEach((controller) => controller.abort()), [])
+  const update = (id: string, change: Partial<BulkChatResult>) => setResults((current) => current.map((item) => item.credential.id === id ? { ...item, ...change } : item))
+  const runOne = async (credential: Credential) => {
+    update(credential.id, { status: 'running', output: '', error: '' })
+    try {
+      const discovered = await discoverModels(credential.id)
+      const model = discovered.default_model || discovered.data[0]?.id || ''
+      if (!model) throw new Error('No provider model available')
+      update(credential.id, { model })
+      const controller = new AbortController(); controllers.current.push(controller)
+      let output = ''
+      await requestStream(`/admin/credentials/${encodeURIComponent(credential.id)}/chat-tests`, { model, prompt }, (text) => { output += text; update(credential.id, { output }) }, controller.signal)
+      update(credential.id, { status: 'passed', output })
+    } catch (reason) {
+      const message = reason instanceof Error && reason.name === 'AbortError' ? 'Cancelled' : (reason as Error).message
+      update(credential.id, { status: 'failed', error: message })
+    }
+  }
+  const runAll = async () => {
+    setBusy(true); controllers.current.forEach((controller) => controller.abort()); controllers.current = []
+    setResults(accounts.map((credential) => ({ credential, model: '', status: 'pending', output: '', error: '' })))
+    let next = 0
+    const worker = async () => { while (next < accounts.length) { const credential = accounts[next++]; await runOne(credential) } }
+    await Promise.all(Array.from({ length: Math.min(3, accounts.length) }, worker))
+    setBusy(false)
+  }
+  const passed = results.filter((result) => result.status === 'passed').length
+  const finished = results.filter((result) => result.status === 'passed' || result.status === 'failed').length
+  return <Modal title={`Chat all · ${provider.name}`} onClose={onClose} className="chat-all-modal"><div className="safe-note"><strong>Bounded test</strong><span>Sends one streaming request with at most 128 output tokens to each active account. Up to three accounts run concurrently.</span></div><Field label="Prompt"><textarea rows={3} value={prompt} disabled={busy} onChange={(event) => setPrompt(event.target.value)} /></Field><div className="bulk-chat-toolbar"><span>{busy ? `${finished}/${accounts.length} finished` : finished ? `${passed}/${accounts.length} passed` : `${accounts.length} active accounts`}</span><button className="button" disabled={busy || !accounts.length || !prompt.trim()} onClick={() => void runAll()}>{busy ? 'Testing all…' : finished ? 'Run all again' : 'Run all accounts'}</button></div><div className="bulk-chat-results">{results.map((result, index) => <article key={result.credential.id} className={`bulk-chat-result ${result.status}`}><div><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{maskEmail(result.credential.name)}</strong><small>{result.model || result.credential.id}</small></span><Badge tone={result.status === 'passed' ? 'good' : ''}>{result.status}</Badge></div>{result.error && <p className="bulk-chat-error">{result.error}</p>}{result.output && <pre>{result.output}</pre>}</article>)}</div></Modal>
 }
 
 function ChatTestModal({ credential, onClose }: { credential: Credential; onClose: () => void }) {

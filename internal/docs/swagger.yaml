@@ -834,6 +834,8 @@ definitions:
         type: string
       normalized_username:
         type: string
+      role:
+        type: string
       status:
         type: string
       updated_at:
@@ -1156,6 +1158,8 @@ definitions:
           type: string
         type: array
       user_id:
+        type: string
+      user_role:
         type: string
       username:
         type: string
@@ -1706,6 +1710,8 @@ definitions:
         type: boolean
       initial_key:
         $ref: '#/definitions/internal_api_handlers.InitialKeyRequest'
+      role:
+        type: string
       username:
         type: string
     type: object
@@ -1746,6 +1752,8 @@ definitions:
           $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Membership'
         type: array
       normalized_username:
+        type: string
+      role:
         type: string
       status:
         type: string
@@ -3969,8 +3977,8 @@ paths:
       - usage
   /admin/users:
     get:
-      description: Lists users visible to the current principal or creates a new user
-        and optional initial API key.
+      description: Lists users visible to the current principal or creates a role-based
+        user with one generated initial API key and the virtual auto model.
       parameters:
       - description: Opaque cursor
         in: query
@@ -4034,8 +4042,8 @@ paths:
       tags:
       - users
     post:
-      description: Lists users visible to the current principal or creates a new user
-        and optional initial API key.
+      description: Lists users visible to the current principal or creates a role-based
+        user with one generated initial API key and the virtual auto model.
       parameters:
       - description: Opaque cursor
         in: query
