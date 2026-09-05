@@ -41,13 +41,13 @@ test('lists connected public model with inherited original-model cost and prefil
   render(<ModelsPage />)
 
   expect(await screen.findByText('cx/gpt-5.6-luna')).toBeInTheDocument()
-  expect(screen.getByText('In $0.2000')).toBeInTheDocument()
-  expect(screen.getByText('Out $1.2000')).toBeInTheDocument()
-  expect(screen.getByText('Read $0.0200')).toBeInTheDocument()
-  expect(screen.getByText('Write $0.2500')).toBeInTheDocument()
+  expect(screen.getAllByText('In $0.2000').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Out $1.2000').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Read $0.0200').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Write $0.2500').length).toBeGreaterThan(0)
   expect(screen.getByText('catalog · openai/gpt-5.6-luna')).toBeInTheDocument()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Add to blends' }))
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add to blends' }).at(-1)!)
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   expect(screen.getByLabelText('Public model name')).toHaveValue('cx/gpt-5.6-luna')
   expect(screen.getByLabelText('Original upstream model')).toHaveValue('gpt-5.6-luna')
@@ -58,9 +58,23 @@ test('offers and saves prompt-cache affinity routing for a blend', async () => {
   api.saveModel.mockResolvedValue({ ok: true })
   render(<ModelsPage />)
   await screen.findByText('cx/gpt-5.6-luna')
-  fireEvent.click(screen.getByRole('button', { name: 'Add to blends' }))
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add to blends' }).at(-1)!)
   fireEvent.click(screen.getByRole('button', { name: 'Strategy' }))
   fireEvent.click(screen.getByRole('option', { name: /Prompt-cache affinity/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Save blend' }))
   expect(api.saveModel).toHaveBeenCalledWith(expect.objectContaining({ strategy: 'cache_affinity' }))
+})
+
+test('shows provider auto with average pricing rounded to four digits', async () => {
+  api.getPricingCatalog.mockResolvedValue([
+    { model: 'openai/gpt-a', provider: 'openai', cache_supported: false, source: 'catalog', updated_at: '', price: { input_per_m: 1, output_per_m: 2, cached_input_per_m: 0.2, cache_write_per_m: 0.4 } },
+    { model: 'openai/gpt-b', provider: 'openai', cache_supported: false, source: 'catalog', updated_at: '', price: { input_per_m: 2, output_per_m: 4, cached_input_per_m: 0.4, cache_write_per_m: 0.8 } },
+  ])
+  api.discoverModels.mockResolvedValue({ object: 'list', provider: 'codex', data: [{ id: 'gpt-a', public_id: 'cx/gpt-a' }, { id: 'gpt-b', public_id: 'cx/gpt-b' }] })
+  render(<ModelsPage />)
+  expect(await screen.findByText('cx/auto')).toBeInTheDocument()
+  expect(screen.getByText('Auto · 2 models')).toBeInTheDocument()
+  expect(screen.getByText('In $1.5000')).toBeInTheDocument()
+  expect(screen.getByText('Out $3.0000')).toBeInTheDocument()
+  expect(screen.getByText('average · 2 provider models')).toBeInTheDocument()
 })

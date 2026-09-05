@@ -87,3 +87,29 @@ func TestPriceWritesUpdateConfiguredCache(t *testing.T) {
 		t.Fatalf("cache delete = %q", cache.deletedModel)
 	}
 }
+
+func TestUpsertBlendCreatesStaticAutoAlias(t *testing.T) {
+	repo := &recordingModelRepository{}
+	service := NewService(repo)
+	blend := entities.ModelDef{Name: "my-blend", Strategy: chat.StrategyPriority, Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", UpstreamModel: "model-a", Weight: 1, Enabled: true}, {CredentialID: "cred-b", UpstreamModel: "model-b", Weight: 1, Enabled: true}}}
+	if err := service.Upsert(context.Background(), blend); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.models) != 2 {
+		t.Fatalf("upserts=%+v", repo.models)
+	}
+	auto := repo.models[1]
+	if auto.Name != "my-blend/auto" || auto.UpstreamModel != "auto" || auto.Strategy != chat.StrategyRoundRobin || len(auto.Routes) != 2 {
+		t.Fatalf("auto=%+v", auto)
+	}
+}
+
+type recordingModelRepository struct {
+	modelRepositoryStub
+	models []entities.ModelDef
+}
+
+func (r *recordingModelRepository) Upsert(_ context.Context, model entities.ModelDef) error {
+	r.models = append(r.models, model)
+	return nil
+}

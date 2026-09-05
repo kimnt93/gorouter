@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/provider"
@@ -149,6 +150,29 @@ func (s *CatalogSync) refreshLocked(ctx context.Context) error {
 		}
 	}
 
+	// Every successfully discovered provider gets a durable static auto alias.
+	providerAutos := map[string]entities.ModelDef{}
+	for _, state := range states {
+		if !state.successful || len(state.discovered) == 0 {
+			continue
+		}
+		autoName := provider.PublicModelID(state.provider, "auto")
+		if state.orgName != "" {
+			autoName = provider.OrganizationModelID(state.orgName, state.provider, "auto")
+		}
+		auto := providerAutos[autoName]
+		if auto.Name == "" {
+			auto = entities.ModelDef{Name: autoName, Strategy: chat.StrategyRoundRobin, UpstreamModel: "auto", Enabled: true, Routes: []entities.ModelRoute{}, Metadata: &entities.ModelMetadata{Provider: state.provider}}
+		}
+		for _, item := range state.discovered {
+			auto.Routes = append(auto.Routes, entities.ModelRoute{CredentialID: state.definition.ID, UpstreamModel: item.ID, Priority: 0, Weight: 1, Enabled: true})
+		}
+		providerAutos[autoName] = auto
+	}
+	for name, auto := range providerAutos {
+		byName[name] = auto
+	}
+
 	names := make([]string, 0, len(byName))
 	for name := range byName {
 		names = append(names, name)
@@ -166,7 +190,7 @@ func (s *CatalogSync) refreshLocked(ctx context.Context) error {
 			if state.orgName != "" {
 				canonical = provider.OrganizationModelID(state.orgName, state.provider, model.UpstreamModel)
 			}
-			managedRoute := name == canonical
+			managedRoute := name == canonical && model.UpstreamModel != "auto"
 			if managedRoute && state.definition.Status != "" && state.definition.Status != entities.StatusActive {
 				continue
 			}

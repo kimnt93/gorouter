@@ -825,7 +825,7 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
 	sess := SessionFrom(c)
-	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+	if sess == nil {
 		return responseapi.For(c).Response().Status(fiber.StatusOK).Data([]entities.ModelDef{}).Send()
 	}
 	credentials, err := a.CredsSvc.List(c.Context())
@@ -834,7 +834,7 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 	}
 	allowed := make(map[string]bool)
 	for _, credential := range credentials {
-		if credential.OwnerUserID == sess.UserID {
+		if sess.IsMaster() || sess.PrincipalType == entities.PrincipalUser && credential.OwnerUserID == sess.UserID {
 			allowed[credential.ID] = true
 		}
 	}

@@ -118,7 +118,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).Unauthorized("API key required").Send()
 	}
-	autoRequested := req.Model == "auto"
+	autoRequested := req.Model == "auto" || strings.HasSuffix(req.Model, "/auto")
 	if !key.Master && !contains(key.Models, req.Model) {
 		return responseapi.For(c).Forbidden("model is not allowed for this API key").Send()
 	}
@@ -129,12 +129,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	var model *entities.ModelDef
 	var autoModels []*entities.ModelDef
 	if autoRequested {
-		eligible := make([]int, 0, len(models))
-		for i := range models {
-			if models[i].Enabled && (key.Master || contains(key.Models, "auto") || contains(key.Models, models[i].Name)) {
-				eligible = append(eligible, i)
+		eligible := autoModelIndexes(req.Model, models)
+		filtered := eligible[:0]
+		for _, index := range eligible {
+			if models[index].Enabled {
+				filtered = append(filtered, index)
 			}
 		}
+		eligible = filtered
 		shuffleIndexes(eligible)
 		limit := g.AutoMaxTries
 		if limit <= 0 {
@@ -333,6 +335,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	}
 	routeAffinity := chat.RouteAffinity{ScopeID: key.ID, TenantID: key.TenantID, Model: model.Name, Value: affinityValue}
 	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
+	if autoRequested {
+		shuffleCandidates(candidates)
+	}
 	available := candidates[:0]
 	quotaBlocked := 0
 	healthBlocked := 0
@@ -739,6 +744,50 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 		out.Models = append([]llm.CodexModelInfo{{Slug: "auto", DisplayName: "Auto", Description: "Randomly selects an eligible model and fails over within the configured routing budget", Visibility: "list", SupportedInAPI: true, ContextWindow: 128000, MaxContextWindow: 128000, InputModalities: []string{"text"}}}, out.Models...)
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
+}
+
+func autoModelIndexes(requested string, models []entities.ModelDef) []int {
+	indexes := make([]int, 0, len(models))
+	switch {
+	case requested == "auto":
+		for i := range models {
+			if !strings.HasSuffix(models[i].Name, "/auto") {
+				indexes = append(indexes, i)
+			}
+		}
+	default:
+		for i := range models {
+			if models[i].Name == requested && models[i].UpstreamModel == "auto" {
+				return []int{i}
+			}
+		}
+		base := strings.TrimSuffix(requested, "/auto")
+		// A configured blend gets an automatic randomized alias using the same route stack.
+		for i := range models {
+			if models[i].Name == base {
+				return []int{i}
+			}
+		}
+		prefix := base + "/"
+		for i := range models {
+			if strings.HasPrefix(models[i].Name, prefix) && !strings.HasSuffix(models[i].Name, "/auto") {
+				indexes = append(indexes, i)
+			}
+		}
+	}
+	return indexes
+}
+
+func shuffleCandidates(values []chat.Candidate) {
+	indexes := make([]int, len(values))
+	for i := range indexes {
+		indexes[i] = i
+	}
+	shuffleIndexes(indexes)
+	copyValues := append([]chat.Candidate(nil), values...)
+	for i, index := range indexes {
+		values[i] = copyValues[index]
+	}
 }
 
 func shuffleIndexes(values []int) {

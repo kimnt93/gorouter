@@ -71,7 +71,16 @@ func (s *Service) Upsert(ctx context.Context, m entities.ModelDef) error {
 		}
 		seen[routeKey] = struct{}{}
 	}
-	return s.repo.Upsert(ctx, m)
+	if err := s.repo.Upsert(ctx, m); err != nil {
+		return err
+	}
+	if !strings.HasSuffix(m.Name, "/auto") && len(m.Routes) > 1 {
+		auto := entities.ModelDef{Name: m.Name + "/auto", Strategy: chat.StrategyRoundRobin, UpstreamModel: "auto", Enabled: m.Enabled, Routes: append([]entities.ModelRoute(nil), m.Routes...)}
+		if err := s.repo.Upsert(ctx, auto); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) Delete(ctx context.Context, name string) error { return s.repo.Delete(ctx, name) }

@@ -98,7 +98,7 @@ func TestCatalogSyncRefreshesExistingRoutesAndImportsNewModels(t *testing.T) {
 	if err := sync.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.upserts) != 2 || repo.upserts[0].Name != "openai/existing" || repo.upserts[0].Metadata == nil || repo.upserts[0].Metadata.DisplayName != "Updated" || repo.upserts[1].Name != "openai/new-model" {
+	if len(repo.upserts) != 3 || repo.upserts[0].Name != "openai/auto" || len(repo.upserts[0].Routes) != 2 || repo.upserts[1].Name != "openai/existing" || repo.upserts[1].Metadata == nil || repo.upserts[1].Metadata.DisplayName != "Updated" || repo.upserts[2].Name != "openai/new-model" {
 		t.Fatalf("upserts = %+v", repo.upserts)
 	}
 }
@@ -124,7 +124,7 @@ func TestCatalogSyncImportsCanonicalProviderName(t *testing.T) {
 	if err := sync.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.upserts) != 1 || repo.upserts[0].Name != "ocz/gpt-5.6-luna" || len(repo.upserts[0].Routes) != 1 {
+	if len(repo.upserts) != 2 || repo.upserts[0].Name != "ocz/auto" || repo.upserts[1].Name != "ocz/gpt-5.6-luna" || len(repo.upserts[1].Routes) != 1 {
 		t.Fatalf("upserts=%+v", repo.upserts)
 	}
 }
