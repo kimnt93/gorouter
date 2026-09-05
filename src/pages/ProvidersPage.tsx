@@ -18,6 +18,7 @@ export function ProvidersPage() {
   const [modelsFor, setModelsFor] = useState<Credential | null>(null)
   const [chatFor, setChatFor] = useState<Credential | null>(null)
   const [chatAllFor, setChatAllFor] = useState<{ provider: ProviderDefinition; accounts: Credential[] } | null>(null)
+  const [testAllFor, setTestAllFor] = useState<{ provider: ProviderDefinition; accounts: Credential[] } | null>(null)
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -31,32 +32,26 @@ export function ProvidersPage() {
   return <>
     <header className="page-header"><div><span className="eyebrow">Manage / Providers</span><h1>Provider connections</h1><p>Connect subscriptions and API keys, check health, discover models, and run bounded streaming tests.</p></div><a className="button secondary" href={viewOrganizationID ? `/dashboard/credentials?organization_id=${encodeURIComponent(viewOrganizationID)}` : '/dashboard/credentials'}>Connection inventory</a></header>
     <ErrorBanner message={error} />
-    <ProviderSection title="OAuth subscriptions" detail="Guided browser and device authorization flows." providers={grouped.oauth} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onChatAll={(provider, accounts) => setChatAllFor({ provider, accounts })} onRefresh={load} />
-    <ProviderSection title="API-key providers" detail="Preset and custom OpenAI-compatible endpoints." providers={grouped.api} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onChatAll={(provider, accounts) => setChatAllFor({ provider, accounts })} onRefresh={load} />
+    <ProviderSection title="OAuth subscriptions" detail="Guided browser and device authorization flows." providers={grouped.oauth} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onChatAll={(provider, accounts) => setChatAllFor({ provider, accounts })} onTestAll={(provider, accounts) => setTestAllFor({ provider, accounts })} onRefresh={load} />
+    <ProviderSection title="API-key providers" detail="Preset and custom OpenAI-compatible endpoints." providers={grouped.api} credentials={credentials} onConnect={setConnect} onModels={setModelsFor} onChat={setChatFor} onChatAll={(provider, accounts) => setChatAllFor({ provider, accounts })} onTestAll={(provider, accounts) => setTestAllFor({ provider, accounts })} onRefresh={load} />
     {connect && <ConnectProviderModal provider={connect} onClose={() => setConnect(null)} onConnected={() => { setConnect(null); void load() }} />}
     {modelsFor && <ModelsModal credential={modelsFor} canImport onClose={() => setModelsFor(null)} />}
     {chatFor && <ChatTestModal credential={chatFor} onClose={() => setChatFor(null)} />}
+    {testAllFor && <TestAllProviderModal provider={testAllFor.provider} accounts={testAllFor.accounts} onClose={() => setTestAllFor(null)} />}
     {chatAllFor && <ChatAllProviderModal provider={chatAllFor.provider} accounts={chatAllFor.accounts} onClose={() => setChatAllFor(null)} />}
   </>
 }
 
-interface SectionProps { title: string; detail: string; providers: ProviderDefinition[]; credentials: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }
-function ProviderSection({ title, detail, providers, credentials, onConnect, onModels, onChat, onChatAll, onRefresh }: SectionProps) {
-  return <section className="provider-section-react"><div className="section-heading"><div><h2>{title}</h2><p>{detail}</p></div><Badge>{providers.length}</Badge></div><div className="provider-grid-react">{providers.map((provider) => <ProviderCard provider={provider} accounts={credentials.filter((credential) => credential.provider === provider.id)} onConnect={onConnect} onModels={onModels} onChat={onChat} onChatAll={onChatAll} onRefresh={onRefresh} key={provider.id} />)}</div></section>
+interface SectionProps { title: string; detail: string; providers: ProviderDefinition[]; credentials: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onTestAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }
+function ProviderSection({ title, detail, providers, credentials, onConnect, onModels, onChat, onChatAll, onTestAll, onRefresh }: SectionProps) {
+  return <section className="provider-section-react"><div className="section-heading"><div><h2>{title}</h2><p>{detail}</p></div><Badge>{providers.length}</Badge></div><div className="provider-grid-react">{providers.map((provider) => <ProviderCard provider={provider} accounts={credentials.filter((credential) => credential.provider === provider.id)} onConnect={onConnect} onModels={onModels} onChat={onChat} onChatAll={onChatAll} onTestAll={onTestAll} onRefresh={onRefresh} key={provider.id} />)}</div></section>
 }
 
-function ProviderCard({ provider, accounts, onConnect, onModels, onChat, onChatAll, onRefresh }: { provider: ProviderDefinition; accounts: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }) {
+function ProviderCard({ provider, accounts, onConnect, onModels, onChat, onChatAll, onTestAll, onRefresh }: { provider: ProviderDefinition; accounts: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onTestAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }) {
   const [quotaReloadVersion, setQuotaReloadVersion] = useState(0)
   const [reloadingAll, setReloadingAll] = useState(false)
   const [reloadResult, setReloadResult] = useState('')
-  const [testingAll, setTestingAll] = useState(false)
   const activeAccounts = accounts.filter((account) => account.status === 'active')
-  const testAll = async () => {
-    setTestingAll(true); setReloadResult('')
-    const results = await Promise.allSettled(activeAccounts.map((account) => testCredential(account.id)))
-    const passed = results.filter((result) => result.status === 'fulfilled' && result.value.ok).length
-    setReloadResult(`${passed}/${activeAccounts.length} accounts healthy`); setTestingAll(false)
-  }
   const reloadAll = async () => {
     setReloadingAll(true); setReloadResult('')
     const results = await Promise.allSettled(activeAccounts.map((account) => refreshCredentialQuota(account.id)))
@@ -66,7 +61,7 @@ function ProviderCard({ provider, accounts, onConnect, onModels, onChat, onChatA
     setReloadingAll(false)
   }
   return <article className={`provider-card-react ${accounts.length ? 'has-accounts' : ''}`}><div className="provider-card-head"><span className="provider-monogram">{provider.name.slice(0, 2)}</span><div><h3><TruncatedText>{provider.name}</TruncatedText></h3><p title={provider.description}>{provider.description}</p></div><Badge tone={accounts.length ? 'good' : ''}>{accounts.length ? `${accounts.length} connected` : provider.auth}</Badge></div>
-    {accounts.length > 0 && <><div className="provider-bulk-actions"><div><button className="button secondary" disabled={!activeAccounts.length} onClick={() => onChatAll(provider, activeAccounts)}>Chat all accounts</button><button className="button secondary" disabled={testingAll || !activeAccounts.length} onClick={() => void testAll()}>{testingAll ? 'Testing all…' : 'Test all accounts'}</button>{provider.quota_supported && <button className="button secondary" disabled={reloadingAll || !activeAccounts.length} onClick={() => void reloadAll()}>{reloadingAll ? 'Reloading all…' : 'Reload all accounts'}</button>}</div><small>{reloadResult || 'One bounded action per active connection'}</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} quotaReloadVersion={quotaReloadVersion} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
+    {accounts.length > 0 && <><div className="provider-bulk-actions"><div><button className="button secondary" disabled={!activeAccounts.length} onClick={() => onChatAll(provider, activeAccounts)}>Chat all accounts</button><button className="button secondary" disabled={!activeAccounts.length} onClick={() => onTestAll(provider, activeAccounts)}>Test all accounts</button>{provider.quota_supported && <button className="button secondary" disabled={reloadingAll || !activeAccounts.length} onClick={() => void reloadAll()}>{reloadingAll ? 'Reloading all…' : 'Reload all accounts'}</button>}</div><small>{reloadResult || 'One bounded action per active connection'}</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} quotaReloadVersion={quotaReloadVersion} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
     <button className="button connect-button" onClick={() => onConnect(provider)}>Connect {provider.name}</button>
   </article>
 }
@@ -165,6 +160,30 @@ function ModelsModal({ credential, canImport, onClose }: { credential: Credentia
   const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   const visibleModels = models.filter((model) => `${model.public_id} ${model.id} ${model.owned_by ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   return <Modal title={`${credential.name} models`} onClose={onClose}>{loading ? <PageLoading /> : <><ErrorBanner message={error} /><SuccessBanner message={message} /><div className="select-search model-list-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search models" /></div><div className="model-picker-react">{visibleModels.map((model) => { const number = models.findIndex((candidate) => candidate.id === model.id) + 1; return <label key={model.id} title={model.public_id}><b>{String(number).padStart(2, '0')}</b><input type="checkbox" checked={selected.includes(model.id)} onChange={() => toggle(model.id)} /><span><strong>{model.public_id}</strong><small>{model.owned_by || model.id}{model.context_length ? ` · ${model.context_length.toLocaleString()} context` : ''}</small></span></label> })}</div><div className="select-count">{visibleModels.length} of {models.length} models</div>{models.length === 0 && <Empty title="No models returned" detail="Check the connection and provider permissions." />}{canImport && models.length > 0 && <div className="dialog-actions"><button className="button secondary" onClick={() => setSelected(models.map((model) => model.id))}>Select all</button><button className="button" disabled={!selected.length} onClick={() => void importModels(credential.id, selected).then((response) => setMessage(`Imported ${response.imported.length} model routes`)).catch((reason: Error) => setError(reason.message))}>Import selected</button></div>}</>}</Modal>
+}
+
+type BulkTestResult = { credential: Credential; status: 'pending' | 'running' | 'passed' | 'failed'; detail: string }
+
+function TestAllProviderModal({ provider, accounts, onClose }: { provider: ProviderDefinition; accounts: Credential[]; onClose: () => void }) {
+  const [results, setResults] = useState<BulkTestResult[]>(() => accounts.map((credential) => ({ credential, status: 'pending', detail: '' })))
+  const [busy, setBusy] = useState(false)
+  const update = (id: string, change: Partial<BulkTestResult>) => setResults((current) => current.map((item) => item.credential.id === id ? { ...item, ...change } : item))
+  const runOne = async (credential: Credential) => {
+    update(credential.id, { status: 'running', detail: '' })
+    try {
+      const result = await testCredential(credential.id)
+      update(credential.id, { status: result.ok ? 'passed' : 'failed', detail: result.ok ? `${result.status ?? 'OK'} · ${result.latency_ms} ms` : 'Health check failed' })
+    } catch (reason) { update(credential.id, { status: 'failed', detail: (reason as Error).message }) }
+  }
+  const runAll = async () => {
+    setBusy(true); setResults(accounts.map((credential) => ({ credential, status: 'pending', detail: '' })))
+    let next = 0
+    const worker = async () => { while (next < accounts.length) await runOne(accounts[next++]) }
+    await Promise.all(Array.from({ length: Math.min(5, accounts.length) }, worker)); setBusy(false)
+  }
+  const passed = results.filter((result) => result.status === 'passed').length
+  const finished = results.filter((result) => result.status === 'passed' || result.status === 'failed').length
+  return <Modal title={`Test all · ${provider.name}`} onClose={onClose} className="chat-all-modal"><div className="safe-note"><strong>Connectivity tests</strong><span>Runs the lightweight provider health probe for every active account, with up to five concurrent checks.</span></div><div className="bulk-chat-toolbar"><span>{busy ? `${finished}/${accounts.length} finished` : finished ? `${passed}/${accounts.length} healthy` : `${accounts.length} active accounts`}</span><button className="button" disabled={busy || !accounts.length} onClick={() => void runAll()}>{busy ? 'Testing all…' : finished ? 'Test all again' : 'Start all tests'}</button></div><div className="bulk-chat-results">{results.map((result, index) => <article className={`bulk-chat-result ${result.status}`} key={result.credential.id}><div><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{maskEmail(result.credential.name)}</strong><small>{result.detail || result.credential.id}</small></span><Badge tone={result.status === 'passed' ? 'good' : ''}>{result.status}</Badge></div>{result.status === 'failed' && result.detail && <p className="bulk-chat-error">{result.detail}</p>}</article>)}</div></Modal>
 }
 
 type BulkChatResult = { credential: Credential; model: string; status: 'pending' | 'running' | 'passed' | 'failed'; output: string; error: string }
