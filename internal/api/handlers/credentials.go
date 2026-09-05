@@ -16,7 +16,6 @@ import (
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
-	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
@@ -35,7 +34,6 @@ type CredentialConnectivity struct {
 	Quotas      *providerquota.Service
 	Usage       *usage.Service
 	Health      *chat.Health
-	Identities  identity.Repository
 }
 
 // Quota returns the cached provider quota or refreshes it on explicit POST.
@@ -88,9 +86,6 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 // @Failure 400,401,403,404,500,502 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/models/import [post]
 func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
-	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
-		return responseapi.For(c).Forbidden("only the master session can import model routes").Send()
-	}
 	if !h.authorize(c) {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
@@ -114,21 +109,6 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	for _, model := range discovered {
 		byUpstream[model.ID] = model
 	}
-	metadata, err := h.credential(c, runtime.ID)
-	if err != nil {
-		return responseapi.For(c).NotFound("credential not found").Send()
-	}
-	organizationName := ""
-	if metadata.OwnerTenantID != nil {
-		if h.Identities == nil {
-			return responseapi.For(c).InternalError("identity repository is unavailable").Send()
-		}
-		organization, organizationErr := h.Identities.OrganizationByID(c.Context(), *metadata.OwnerTenantID)
-		if organizationErr != nil || organization.Status != entities.StatusActive {
-			return responseapi.For(c).BadRequest("credential organization is unavailable").Send()
-		}
-		organizationName = organization.Name
-	}
 	existing, err := h.ModelRoutes.List(c.Context())
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load models").Send()
@@ -150,9 +130,6 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 			return responseapi.For(c).BadRequest(fmt.Sprintf("model %s was not reported by the provider", upstream)).Send()
 		}
 		name := providerpkg.PublicModelID(runtime.Provider, upstream)
-		if organizationName != "" {
-			name = providerpkg.OrganizationModelID(organizationName, runtime.Provider, upstream)
-		}
 		model, ok := byName[name]
 		if !ok {
 			model = entities.ModelDef{Name: name, Strategy: "priority", UpstreamModel: upstream, Enabled: true, Routes: []entities.ModelRoute{}}
@@ -257,23 +234,20 @@ func (h *CredentialConnectivity) credential(c fiber.Ctx, id string) (*entities.C
 }
 
 func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
-	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
-		credentials, err := h.Credentials.List(c.Context())
-		if err != nil {
-			return false
-		}
-		for _, candidate := range credentials {
-			if candidate.ID != c.Params("id") {
-				continue
-			}
-			if candidate.OwnerUserID != "" {
-				return candidate.OwnerUserID == sess.UserID
-			}
-			return candidate.OwnerTenantID != nil && *candidate.OwnerTenantID == sess.TenantID
-		}
+	sess := SessionFrom(c)
+	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
 		return false
 	}
-	return true
+	credentials, err := h.Credentials.List(c.Context())
+	if err != nil {
+		return false
+	}
+	for _, candidate := range credentials {
+		if candidate.ID == c.Params("id") {
+			return candidate.OwnerUserID == sess.UserID
+		}
+	}
+	return false
 }
 
 func (h *CredentialConnectivity) adapter(providerID string) (credential.ConnectivityProber, credential.ModelDiscoverer, entities.Upstream) {

@@ -30,17 +30,18 @@ func ValidScope(s string) bool {
 }
 
 type Session struct {
-	Role           string
-	KeyID          string
-	TenantID       string
-	Scopes         []string
-	Expires        int64
-	PrincipalType  string   `json:"principal_type,omitempty"`
-	UserID         string   `json:"user_id,omitempty"`
-	Username       string   `json:"username,omitempty"`
-	OrganizationID string   `json:"organization_id,omitempty"`
-	MembershipRole string   `json:"membership_role,omitempty"`
-	AllowedModels  []string `json:"-"`
+	Role                  string
+	KeyID                 string
+	TenantID              string
+	Scopes                []string
+	Expires               int64
+	PrincipalType         string   `json:"principal_type,omitempty"`
+	UserID                string   `json:"user_id,omitempty"`
+	Username              string   `json:"username,omitempty"`
+	OrganizationID        string   `json:"organization_id,omitempty"`
+	MembershipRole        string   `json:"membership_role,omitempty"`
+	AllowedModels         []string `json:"-"`
+	CredentialOwnerUserID string   `json:"-"`
 }
 
 const (

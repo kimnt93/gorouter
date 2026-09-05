@@ -851,13 +851,8 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest("unknown API-key provider").Send()
 	}
 	sess := SessionFrom(c)
-	var owner *string
-	ownerUserID := ""
-	if sess != nil && !sess.IsMaster() {
-		ownerUserID = sess.UserID
-		if ownerUserID == "" {
-			owner = &sess.TenantID
-		}
+	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
 	name := strings.TrimSpace(c.FormValue("name"))
 	if name == "" {
@@ -865,7 +860,7 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 	}
 	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{
 		Name: name, Provider: definition.ID, Kind: entities.KindAPIKey,
-		BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OwnerTenant: owner, OwnerUserID: ownerUserID,
+		BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OwnerUserID: sess.UserID,
 	})
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
@@ -875,15 +870,10 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 
 func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	var owner *string
-	ownerUserID := ""
-	if sess != nil && !sess.IsMaster() {
-		ownerUserID = sess.UserID
-		if ownerUserID == "" {
-			owner = &sess.TenantID
-		}
+	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
-	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{Name: c.FormValue("name"), Provider: c.FormValue("provider"), Kind: c.FormValue("kind"), BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OAuthAccess: c.FormValue("oauth_access"), OAuthRefresh: c.FormValue("oauth_refresh"), OwnerTenant: owner, OwnerUserID: ownerUserID})
+	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{Name: c.FormValue("name"), Provider: c.FormValue("provider"), Kind: c.FormValue("kind"), BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OAuthAccess: c.FormValue("oauth_access"), OAuthRefresh: c.FormValue("oauth_refresh"), OwnerUserID: sess.UserID})
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
@@ -892,7 +882,7 @@ func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 
 func (u *UI) CredentialDelete(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	if sess != nil && !sess.IsMaster() && !u.sessionOwnsCredential(c, sess, c.Params("id")) {
+	if sess == nil || !u.sessionOwnsCredential(c, sess, c.Params("id")) {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	if err := u.Credentials.Delete(c.Context(), c.Params("id")); err != nil {
@@ -1148,10 +1138,7 @@ func (u *UI) sessionOwnsCredential(c fiber.Ctx, session *entities.Session, crede
 }
 
 func credentialOwnedBySession(credential entities.Credential, session *entities.Session) bool {
-	if credential.OwnerUserID != "" {
-		return credential.OwnerUserID == session.UserID
-	}
-	return credential.OwnerTenantID != nil && *credential.OwnerTenantID == session.TenantID
+	return session != nil && session.UserID != "" && credential.OwnerUserID == session.UserID
 }
 
 func filterTenants(in []entities.Tenant, tenantID string) []entities.Tenant {
@@ -1167,13 +1154,7 @@ func filterTenants(in []entities.Tenant, tenantID string) []entities.Tenant {
 func filterCredentialsForSession(in []entities.Credential, session *entities.Session) []entities.Credential {
 	out := make([]entities.Credential, 0, len(in))
 	for _, item := range in {
-		if item.OwnerUserID != "" {
-			if item.OwnerUserID == session.UserID {
-				out = append(out, item)
-			}
-			continue
-		}
-		if policy.CredentialVisible(false, session.TenantID, item.OwnerTenantID) {
+		if session != nil && session.UserID != "" && item.OwnerUserID == session.UserID {
 			out = append(out, item)
 		}
 	}

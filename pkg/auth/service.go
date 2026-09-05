@@ -126,7 +126,7 @@ func (s *Service) sessionForKey(ctx context.Context, key *entities.ApiKey, expir
 		key.OwnerOrganizationID = key.TenantID
 		key.ContextOrganizationID = key.TenantID
 	}
-	sess := &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: append([]string(nil), key.Scopes...), AllowedModels: append([]string(nil), key.Models...), Expires: expires, PrincipalType: ownerType, OrganizationID: key.ContextOrganizationID}
+	sess := &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: append([]string(nil), key.Scopes...), AllowedModels: append([]string(nil), key.Models...), CredentialOwnerUserID: key.CredentialOwnerUserID, Expires: expires, PrincipalType: ownerType, OrganizationID: key.ContextOrganizationID}
 	if s.identity == nil {
 		if key.OwnerType != "" {
 			return nil, ErrInvalidKey

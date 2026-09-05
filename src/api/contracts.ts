@@ -147,14 +147,14 @@ export interface ProviderQuotaSnapshot {
 
 export interface Credential {
   id: string; name: string; provider: string; kind: string; base_url: string; status: string
-  key_preview?: string; owner_tenant_id: string | null; owner_user_id?: string; created_at: string
+  key_preview?: string; owner_user_id?: string; created_at: string
 }
 
 export interface ConnectivityResult { ok: boolean; status?: number; latency_ms: number }
 export interface ProviderModel { id: string; public_id: string; name?: string; owned_by?: string; context_length?: number; default?: boolean }
 export interface ProviderModelsResponse { object: 'list'; provider: string; default_model?: string; data: ProviderModel[] }
 export interface OAuthStartResponse { flow_id: string; flow_type: string; authorize_url: string; verification_uri?: string; verification_uri_complete?: string; user_code?: string; interval?: number; expires_in?: number; instructions: string }
-export interface OAuthCompleteRequest { flow_id: string; callback?: string; name?: string; owner_type?: 'user' | 'organization'; owner_user_id?: string; owner_organization_id?: string }
+export interface OAuthCompleteRequest { flow_id: string; callback?: string; name?: string }
 export interface OAuthCompleteResponse { id?: string; provider?: string; name?: string; status?: string }
 
 export interface ModelRoute { credential_id: string; upstream_model?: string; priority: number; weight: number; enabled: boolean }

@@ -152,6 +152,7 @@ func main() {
 	}
 	credSvc := credential.NewService(credRepo, box)
 	keySvc := apikey.NewService(keyRepo, hashSecret, generateSecret)
+	keySvc.SetSecretBox(box)
 	identitySvc := identity.NewService(identityRepo, auditRepo)
 	identitySvc.SetAuthorizationCache(keySvc)
 	modelSvc := modelroute.NewService(modelRepo)

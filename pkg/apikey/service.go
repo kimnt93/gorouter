@@ -46,6 +46,11 @@ type ownedRepository interface {
 	Rotate(ctx context.Context, id string) (*entities.ApiKey, error)
 }
 
+type secretRepository interface {
+	StorePlaintext(ctx context.Context, id, plaintext string, box entities.SecretBox) error
+	RevealPlaintext(ctx context.Context, id string, box entities.SecretBox) (string, error)
+}
+
 type compoundUserRepository interface {
 	CreateUserWithInitialKey(context.Context, entities.User, entities.ApiKey, []entities.AuditEvent) error
 }
@@ -55,6 +60,7 @@ type Service struct {
 	hashFn func(string) string
 	genFn  func() string
 	cache  *tokenCache
+	box    entities.SecretBox
 }
 
 func NewService(repo Repository, hashFn func(string) string, genFn func() string) *Service {
@@ -62,6 +68,30 @@ func NewService(repo Repository, hashFn func(string) string, genFn func() string
 }
 
 func (s *Service) hash(secret string) string { return s.hashFn(secret) }
+
+func (s *Service) SetSecretBox(box entities.SecretBox) { s.box = box }
+
+func (s *Service) persistPlaintext(ctx context.Context, key *entities.ApiKey) error {
+	if key == nil || key.Plaintext == "" || s.box == nil {
+		return nil
+	}
+	repo, ok := s.repo.(secretRepository)
+	if !ok {
+		return errors.New("API key repository does not support encrypted key reveal")
+	}
+	return repo.StorePlaintext(ctx, key.ID, key.Plaintext, s.box)
+}
+
+func (s *Service) Reveal(ctx context.Context, id string) (string, error) {
+	if s.box == nil {
+		return "", entities.ErrNotFound
+	}
+	repo, ok := s.repo.(secretRepository)
+	if !ok {
+		return "", entities.ErrNotFound
+	}
+	return repo.RevealPlaintext(ctx, strings.TrimSpace(id), s.box)
+}
 
 type CreateInput struct {
 	TenantID              string
@@ -75,6 +105,7 @@ type CreateInput struct {
 	OwnerUserID           string
 	OwnerOrganizationID   string
 	ContextOrganizationID string
+	CredentialOwnerUserID string
 }
 
 // CreateUserWithInitialKey persists a prepared user, its first personal key,
@@ -84,6 +115,7 @@ type CreateInput struct {
 func (s *Service) CreateUserWithInitialKey(ctx context.Context, user entities.User, in CreateInput, audits []entities.AuditEvent) (*entities.ApiKey, error) {
 	in.OwnerType, in.OwnerUserID = entities.OwnerUser, user.ID
 	in.OwnerOrganizationID, in.ContextOrganizationID, in.TenantID = "", "", ""
+	in.CredentialOwnerUserID = user.ID
 	key, err := s.prepareOwned(in)
 	if err != nil {
 		return nil, err
@@ -98,6 +130,9 @@ func (s *Service) CreateUserWithInitialKey(ctx context.Context, user entities.Us
 		}
 	}
 	if err = repository.CreateUserWithInitialKey(ctx, user, *key, audits); err != nil {
+		return nil, err
+	}
+	if err = s.persistPlaintext(ctx, key); err != nil {
 		return nil, err
 	}
 	if s.cache != nil {
@@ -130,7 +165,7 @@ func (s *Service) prepareOwned(in CreateInput) (*entities.ApiKey, error) {
 	if len(prefix) > 11 {
 		prefix = prefix[:11]
 	}
-	key := &entities.ApiKey{ID: entities.NewID("key"), Name: in.Name, SecretHash: s.hashFn(plain), SecretPrefix: prefix, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM, Enabled: true, CreatedAt: time.Now().UTC(), OwnerType: entities.OwnerUser, OwnerUserID: in.OwnerUserID, Plaintext: plain}
+	key := &entities.ApiKey{ID: entities.NewID("key"), Name: in.Name, SecretHash: s.hashFn(plain), SecretPrefix: prefix, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM, Enabled: true, CreatedAt: time.Now().UTC(), OwnerType: entities.OwnerUser, OwnerUserID: in.OwnerUserID, CredentialOwnerUserID: in.CredentialOwnerUserID, Plaintext: plain}
 	if err = key.ValidateOwnerShape(); err != nil {
 		return nil, err
 	}
@@ -163,7 +198,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	}
 	if owned {
 		key := entities.ApiKey{Name: in.Name, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM,
-			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID)}
+			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID), CredentialOwnerUserID: strings.TrimSpace(in.CredentialOwnerUserID)}
+		if key.OwnerType == entities.OwnerUser && key.CredentialOwnerUserID == "" {
+			key.CredentialOwnerUserID = key.OwnerUserID
+		}
 		if err := key.ValidateOwnerShape(); err != nil {
 			return nil, err
 		}
@@ -173,6 +211,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 			return nil, errors.New("API key repository does not support principal ownership")
 		}
 		created, err := repo.CreateOwned(ctx, key)
+		if err == nil {
+			err = s.persistPlaintext(ctx, created)
+		}
 		if err == nil && s.cache != nil {
 			s.cache.put(ctx, created)
 		}
@@ -180,12 +221,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	}
 	if repo, ok := s.repo.(quotaRepository); ok {
 		key, err := repo.CreateWithQuota(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, period, in.RPM)
+		if err == nil {
+			err = s.persistPlaintext(ctx, key)
+		}
 		if err == nil && s.cache != nil {
 			s.cache.put(ctx, key)
 		}
 		return key, err
 	}
 	key, err := s.repo.Create(ctx, in.TenantID, in.Name, in.Models, in.Scopes, quota, in.RPM)
+	if err == nil {
+		err = s.persistPlaintext(ctx, key)
+	}
 	if err == nil && s.cache != nil {
 		s.cache.put(ctx, key)
 	}
@@ -198,6 +245,9 @@ func (s *Service) Rotate(ctx context.Context, id string) (*entities.ApiKey, erro
 		return nil, errors.New("API key repository does not support rotation")
 	}
 	key, err := repo.Rotate(ctx, strings.TrimSpace(id))
+	if err == nil {
+		err = s.persistPlaintext(ctx, key)
+	}
 	if err == nil && s.cache != nil {
 		s.cache.invalidate(ctx, id, "")
 		s.cache.put(ctx, key)

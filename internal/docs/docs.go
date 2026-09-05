@@ -333,6 +333,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/api-keys/{id}/reveal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Reveals an API key to master, its owner, or an administrator of its context organization.",
+                "tags": [
+                    "api-keys"
+                ],
+                "summary": "Reveal an API key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "API key ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIKeyRevealResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/api-keys/{id}/rotate": {
             "post": {
                 "security": [
@@ -1650,7 +1705,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Completes a pending OAuth flow and persists encrypted tokens. owner_user_id is accepted only from the master session and binds the credential to an active user.",
+                "description": "Completes a pending OAuth flow and persists encrypted tokens for the authenticated user.",
                 "tags": [
                     "oauth"
                 ],
@@ -5558,6 +5613,14 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_handlers.APIKeyRevealResponse": {
+            "type": "object",
+            "properties": {
+                "plaintext": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_handlers.AuditListResponse": {
             "type": "object",
             "properties": {
@@ -5672,15 +5735,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "oauth_refresh": {
-                    "type": "string"
-                },
-                "owner_organization_id": {
-                    "type": "string"
-                },
-                "owner_type": {
-                    "type": "string"
-                },
-                "owner_user_id": {
                     "type": "string"
                 },
                 "provider": {
@@ -6054,15 +6108,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "owner_organization_id": {
-                    "type": "string"
-                },
-                "owner_type": {
-                    "type": "string"
-                },
-                "owner_user_id": {
                     "type": "string"
                 }
             }

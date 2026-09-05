@@ -132,6 +132,7 @@ export const setUserStatus = (id: string, status: string): Promise<{ ok: boolean
 
 export const createAPIKey = (body: object): Promise<CreatedAPIKey> => request('/admin/api-keys', { method: 'POST', body: JSON.stringify(body) })
 export const patchAPIKey = (id: string, body: object): Promise<{ ok: boolean }> => request(`/admin/api-keys/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const revealAPIKey = (id: string): Promise<{ plaintext: string }> => request(`/admin/api-keys/${encodeURIComponent(id)}/reveal`, { cache: 'no-store' })
 export const rotateAPIKey = (id: string): Promise<CreatedAPIKey> => request(`/admin/api-keys/${encodeURIComponent(id)}/rotate`, { method: 'POST' })
 export const deleteAPIKey = (id: string): Promise<{ ok: boolean }> => request(`/admin/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' })
 

@@ -287,51 +287,16 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 // @Router /admin/credentials [get]
 // @Router /admin/credentials [post]
 func (a *Admin) Credentials(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	if sess == nil || sess.PrincipalType != entities.PrincipalUser || strings.TrimSpace(sess.UserID) == "" {
+		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
+	}
 	if c.Method() == fiber.MethodGet {
 		v, err := a.CredsSvc.List(c.Context())
 		if err != nil {
 			return responseapi.For(c).InternalError("failed to load credentials").Send()
 		}
-		if strings.TrimSpace(c.Query("view_user_id")) != "" {
-			actor, readErr := a.principalForRead(c)
-			if readErr != nil {
-				return principalReadError(c, readErr)
-			}
-			filtered := make([]entities.Credential, 0, len(v))
-			for _, credential := range v {
-				switch {
-				case credential.OwnerUserID == actor.UserID:
-					filtered = append(filtered, credential)
-				case credential.OwnerUserID != "":
-					continue
-				case credential.OwnerTenantID == nil:
-					filtered = append(filtered, credential)
-				case actor.MembershipRole == entities.MembershipAdmin && actor.OrganizationID != "" && *credential.OwnerTenantID == actor.OrganizationID:
-					filtered = append(filtered, credential)
-				}
-			}
-			v = filtered
-		} else if sess := SessionFrom(c); sess != nil {
-			requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-			if requestedOrganization != "" {
-				if !sess.IsMaster() && sess.OrganizationID != requestedOrganization {
-					membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, sess.UserID)
-					if membershipErr != nil || membership.Role != entities.MembershipAdmin {
-						return responseapi.For(c).Forbidden("organization context is not accessible").Send()
-					}
-				}
-				filtered := make([]entities.Credential, 0, len(v))
-				for _, credential := range v {
-					if credential.OwnerTenantID != nil && *credential.OwnerTenantID == requestedOrganization {
-						filtered = append(filtered, credential)
-					}
-				}
-				v = filtered
-			} else if !sess.IsMaster() {
-				v = filterCredentialsForSession(v, sess)
-			}
-		}
-		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(v).Send()
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(filterCredentialsForSession(v, sess)).Send()
 	}
 	var b CredentialCreateRequest
 	if err := c.Bind().Body(&b); err != nil {
@@ -343,77 +308,11 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if b.Provider == "" {
 		b.Provider = entities.ProviderOpenAICompatible
 	}
-	ownerTenant, ownerUserID, ownerErr := credentialOwner(c.Context(), SessionFrom(c), b.OwnerType, b.OwnerUserID, b.OwnerOrganizationID, a.IdentityRepo)
-	if ownerErr != nil {
-		if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
-			return responseapi.For(c).Forbidden(ownerErr.Error()).Send()
-		}
-		return responseapi.For(c).BadRequest(ownerErr.Error()).Send()
-	}
-	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerTenant: ownerTenant, OwnerUserID: ownerUserID})
+	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerUserID: sess.UserID})
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(v).Send()
-}
-
-func credentialOwner(ctx context.Context, session *entities.Session, ownerType, ownerUserID, ownerOrganizationID string, identities identity.Repository) (*string, string, error) {
-	if session == nil {
-		return nil, "", errors.New("authentication required")
-	}
-	ownerType = strings.TrimSpace(ownerType)
-	ownerUserID = strings.TrimSpace(ownerUserID)
-	ownerOrganizationID = strings.TrimSpace(ownerOrganizationID)
-	if session.IsMaster() {
-		switch ownerType {
-		case "":
-			return nil, "", nil
-		case entities.OwnerUser:
-			if ownerUserID == "" {
-				return nil, "", errors.New("owner_user_id is required")
-			}
-			if identities != nil {
-				user, err := identities.UserByID(ctx, ownerUserID)
-				if err != nil || user.Status != entities.StatusActive {
-					return nil, "", errors.New("active credential owner is required")
-				}
-			}
-			return nil, ownerUserID, nil
-		case entities.OwnerOrganization:
-			if ownerOrganizationID == "" {
-				return nil, "", errors.New("owner_organization_id is required")
-			}
-			if identities != nil {
-				organization, err := identities.OrganizationByID(ctx, ownerOrganizationID)
-				if err != nil || organization.Status != entities.StatusActive {
-					return nil, "", errors.New("active credential organization is required")
-				}
-			}
-			return &ownerOrganizationID, "", nil
-		default:
-			return nil, "", errors.New("owner_type must be user or organization")
-		}
-	}
-	organizationID := strings.TrimSpace(session.OrganizationID)
-	if organizationID == "" {
-		organizationID = strings.TrimSpace(session.TenantID)
-	}
-	if session.PrincipalType == entities.PrincipalOrganization || session.UserID == "" {
-		if organizationID == "" {
-			return nil, "", errors.New("organization context is required")
-		}
-		return &organizationID, "", nil
-	}
-	if ownerType == entities.OwnerOrganization {
-		if ownerOrganizationID == "" {
-			ownerOrganizationID = organizationID
-		}
-		if session.MembershipRole != entities.MembershipAdmin || organizationID == "" || ownerOrganizationID != organizationID {
-			return nil, "", errors.New("organization administration is required")
-		}
-		return &organizationID, "", nil
-	}
-	return nil, session.UserID, nil
 }
 
 // CredentialByID updates or deletes a credential.
@@ -429,7 +328,7 @@ func credentialOwner(ctx context.Context, session *entities.Session, ownerType, 
 // @Router /admin/credentials/{id} [delete]
 func (a *Admin) CredentialByID(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	if sess != nil && !sess.IsMaster() && !a.sessionOwnsCredential(c, sess, c.Params("id")) {
+	if sess == nil || !a.sessionOwnsCredential(c, sess, c.Params("id")) {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	if c.Method() == fiber.MethodPut {
@@ -594,35 +493,29 @@ func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
 	visibleCredentials := map[string]bool{}
-	if !sess.IsMaster() {
-		credentials, listErr := a.CredsSvc.List(c.Context())
-		if listErr != nil {
-			return responseapi.For(c).InternalError("failed to load model connections").Send()
-		}
-		for _, credential := range filterCredentialsForSession(credentials, sess) {
+	credentials, listErr := a.CredsSvc.List(c.Context())
+	if listErr != nil {
+		return responseapi.For(c).InternalError("failed to load model connections").Send()
+	}
+	for _, credential := range credentials {
+		if credential.Status == entities.StatusActive && credential.OwnerUserID == sess.UserID {
 			visibleCredentials[credential.ID] = true
 		}
 	}
-	allowed := make(map[string]bool, len(sess.AllowedModels))
-	for _, model := range sess.AllowedModels {
-		allowed[model] = true
-	}
 	options := make([]APIKeyModelOption, 0, len(models))
 	for _, model := range models {
-		if !model.Enabled || (!sess.IsMaster() && !allowed[model.Name]) {
+		if !model.Enabled {
 			continue
 		}
-		if !sess.IsMaster() {
-			callable := false
-			for _, route := range model.Routes {
-				if route.Enabled && visibleCredentials[route.CredentialID] {
-					callable = true
-					break
-				}
+		callable := false
+		for _, route := range model.Routes {
+			if route.Enabled && visibleCredentials[route.CredentialID] {
+				callable = true
+				break
 			}
-			if !callable {
-				continue
-			}
+		}
+		if !callable {
+			continue
 		}
 		price := entities.Price{}
 		priced := false
@@ -661,7 +554,7 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	actor := principalFromSession(sess)
 	if !sess.IsMaster() {
-		if !policy.CanGrant(actor, b.Scopes, b.Models, sess.AllowedModels) {
+		if !policy.CanGrant(actor, b.Scopes, nil, nil) {
 			return responseapi.For(c).Forbidden("cannot grant scopes or models not held by the current session").Send()
 		}
 		switch actor.Type {
@@ -725,7 +618,14 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 			return responseapi.For(c).BadRequest("selected user must be an active member of the organization").Send()
 		}
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID}
+	credentialOwnerUserID := strings.TrimSpace(sess.UserID)
+	if credentialOwnerUserID == "" {
+		return responseapi.For(c).Forbidden("a user provider owner is required to share models").Send()
+	}
+	if err := a.validateCredentialBackedModels(c.Context(), credentialOwnerUserID, b.Models); err != nil {
+		return responseapi.For(c).Forbidden("only models from your provider connections can be shared").Send()
+	}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID, CredentialOwnerUserID: credentialOwnerUserID}
 	v, err := a.KeysSvc.Create(c.Context(), in)
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
@@ -763,13 +663,17 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 		return responseapi.For(c).NotFound("API key not found").Send()
 	}
 	var err error
+	if b.Models != nil {
+		providerOwner := key.CredentialOwnerUserID
+		if providerOwner == "" {
+			providerOwner = key.OwnerUserID
+		}
+		if validateErr := a.validateCredentialBackedModels(c.Context(), providerOwner, *b.Models); validateErr != nil {
+			return responseapi.For(c).Forbidden("only models from the sharing user's provider connections can be assigned").Send()
+		}
+	}
 	if !sess.IsMaster() {
-		if b.Scopes != nil && !policy.CanGrant(actor, *b.Scopes, func() []string {
-			if b.Models != nil {
-				return *b.Models
-			}
-			return key.Models
-		}(), sess.AllowedModels) {
+		if b.Scopes != nil && !policy.CanGrant(actor, *b.Scopes, nil, nil) {
 			return responseapi.For(c).Forbidden("cannot grant scopes not held by the current session").Send()
 		}
 	}
@@ -819,6 +723,32 @@ func (a *Admin) KeysDelete(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("API key deleted but audit write failed").Send()
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(okResponse{OK: true}).Send()
+}
+
+// KeysReveal returns the encrypted-at-rest API key plaintext to an authorized viewer.
+// @Summary Reveal an API key
+// @Description Reveals an API key to master, its owner, or an administrator of its context organization.
+// @Tags api-keys
+// @Security BearerAuth
+// @Param id path string true "API key ID"
+// @Success 200 {object} APIKeyRevealResponse
+// @Failure 401,403,404,500 {object} responseapi.ErrorResponse
+// @Router /admin/api-keys/{id}/reveal [get]
+func (a *Admin) KeysReveal(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	actor := principalFromSession(SessionFrom(c))
+	key, err := a.KeysSvc.GetByID(c.Context(), c.Params("id"))
+	if err != nil || policy.ViewKeyMetadata(actor, *key) != nil {
+		return responseapi.For(c).NotFound("API key not found").Send()
+	}
+	plaintext, err := a.KeysSvc.Reveal(c.Context(), key.ID)
+	if errors.Is(err, entities.ErrNotFound) {
+		return responseapi.For(c).NotFound("API key plaintext is unavailable; rotate the key to enable reveal").Send()
+	}
+	if err != nil {
+		return responseapi.For(c).InternalError("failed to reveal API key").Send()
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(APIKeyRevealResponse{Plaintext: plaintext}).Send()
 }
 
 // KeysRotate atomically invalidates the old secret and returns a new one once.
@@ -882,62 +812,34 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
-	viewingAsUser := strings.TrimSpace(c.Query("view_user_id")) != ""
-	if sess := SessionFrom(c); sess != nil && (!sess.IsMaster() || strings.TrimSpace(c.Query("organization_id")) != "" || viewingAsUser) {
-		credentials, listErr := a.CredsSvc.List(c.Context())
-		if listErr != nil {
-			return responseapi.For(c).InternalError("failed to filter model routes").Send()
-		}
-		requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-		visibleCredentials := credentials
-		if viewingAsUser {
-			actor, readErr := a.principalForRead(c)
-			if readErr != nil {
-				return principalReadError(c, readErr)
-			}
-			visibleCredentials = credentials[:0]
-			for _, credential := range credentials {
-				if credential.OwnerUserID == actor.UserID || credential.OwnerUserID == "" && (credential.OwnerTenantID == nil || actor.MembershipRole == entities.MembershipAdmin && actor.OrganizationID != "" && *credential.OwnerTenantID == actor.OrganizationID) {
-					visibleCredentials = append(visibleCredentials, credential)
-				}
-			}
-		}
-		if requestedOrganization != "" && !sess.IsMaster() && sess.OrganizationID != requestedOrganization {
-			membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, sess.UserID)
-			if membershipErr != nil || membership.Role != entities.MembershipAdmin {
-				return responseapi.For(c).Forbidden("organization context is not accessible").Send()
-			}
-		}
-		if requestedOrganization != "" && !viewingAsUser {
-			visibleCredentials = visibleCredentials[:0]
-			for _, credential := range credentials {
-				if credential.OwnerTenantID != nil && *credential.OwnerTenantID == requestedOrganization {
-					visibleCredentials = append(visibleCredentials, credential)
-				}
-			}
-		} else if !viewingAsUser {
-			visibleCredentials = filterCredentialsForSession(credentials, sess)
-		}
-		allowed := map[string]bool{}
-		for _, cred := range visibleCredentials {
-			allowed[cred.ID] = true
-		}
-		filteredModels := v[:0]
-		for i := range v {
-			routes := v[i].Routes[:0]
-			for _, route := range v[i].Routes {
-				if allowed[route.CredentialID] {
-					routes = append(routes, route)
-				}
-			}
-			v[i].Routes = routes
-			if len(routes) > 0 {
-				filteredModels = append(filteredModels, v[i])
-			}
-		}
-		v = filteredModels
+	sess := SessionFrom(c)
+	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data([]entities.ModelDef{}).Send()
 	}
-	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(v).Send()
+	credentials, err := a.CredsSvc.List(c.Context())
+	if err != nil {
+		return responseapi.For(c).InternalError("failed to filter model routes").Send()
+	}
+	allowed := make(map[string]bool)
+	for _, credential := range credentials {
+		if credential.OwnerUserID == sess.UserID {
+			allowed[credential.ID] = true
+		}
+	}
+	filtered := make([]entities.ModelDef, 0, len(v))
+	for _, model := range v {
+		routes := make([]entities.ModelRoute, 0, len(model.Routes))
+		for _, route := range model.Routes {
+			if allowed[route.CredentialID] {
+				routes = append(routes, route)
+			}
+		}
+		if len(routes) != 0 {
+			model.Routes = routes
+			filtered = append(filtered, model)
+		}
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(filtered).Send()
 }
 
 // ModelUpsert creates or replaces a model route definition.
@@ -1326,15 +1228,42 @@ func (a *Admin) sessionOwnsCredential(c fiber.Ctx, session *entities.Session, cr
 		return false
 	}
 	for _, cred := range credentials {
-		if cred.ID != credentialID {
-			continue
+		if cred.ID == credentialID {
+			return session != nil && session.UserID != "" && cred.OwnerUserID == session.UserID
 		}
-		if cred.OwnerUserID != "" {
-			return cred.OwnerUserID == session.UserID
-		}
-		return cred.OwnerTenantID != nil && *cred.OwnerTenantID == session.TenantID
 	}
 	return false
+}
+
+func (a *Admin) validateCredentialBackedModels(ctx context.Context, ownerUserID string, names []string) error {
+	credentials, err := a.CredsSvc.List(ctx)
+	if err != nil {
+		return err
+	}
+	owned := make(map[string]bool)
+	for _, credential := range credentials {
+		if credential.Status == entities.StatusActive && credential.OwnerUserID == ownerUserID {
+			owned[credential.ID] = true
+		}
+	}
+	models, err := a.ModelsSvc.List(ctx)
+	if err != nil {
+		return err
+	}
+	callable := make(map[string]bool)
+	for _, model := range models {
+		for _, route := range model.Routes {
+			if model.Enabled && route.Enabled && owned[route.CredentialID] {
+				callable[model.Name] = true
+			}
+		}
+	}
+	for _, name := range names {
+		if !callable[name] {
+			return entities.ErrNotFound
+		}
+	}
+	return nil
 }
 
 func scopesAllowedBySession(session *entities.Session, scopes []string) bool {

@@ -12,10 +12,36 @@ import (
 type ApiKeyRepo struct{ s *Store }
 type storedAPIKey struct {
 	entities.ApiKey
-	Hash string `json:"secret_hash"`
+	Hash      string `json:"secret_hash"`
+	SecretEnc []byte `json:"secret_enc,omitempty"`
 }
 
 func NewApiKeyRepo(s *Store) *ApiKeyRepo { return &ApiKeyRepo{s} }
+
+func (r *ApiKeyRepo) StorePlaintext(ctx context.Context, keyID, plaintext string, box entities.SecretBox) error {
+	sealed, err := box.Seal([]byte(plaintext))
+	if err != nil {
+		return err
+	}
+	stored, err := get[storedAPIKey](ctx, r.s, "api_key", keyID)
+	if err != nil {
+		return err
+	}
+	stored.SecretEnc = sealed
+	return r.s.put(ctx, "api_key", keyID, *stored)
+}
+func (r *ApiKeyRepo) RevealPlaintext(ctx context.Context, keyID string, box entities.SecretBox) (string, error) {
+	stored, err := get[storedAPIKey](ctx, r.s, "api_key", keyID)
+	if err != nil || len(stored.SecretEnc) == 0 {
+		return "", entities.ErrNotFound
+	}
+	plain, err := box.Open(stored.SecretEnc)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
 func (r *ApiKeyRepo) Create(ctx context.Context, tenant, name string, models, scopes []string, quota *float64, rpm *int) (*entities.ApiKey, error) {
 	p := entities.QuotaPeriodNone
 	if quota != nil {
@@ -26,7 +52,7 @@ func (r *ApiKeyRepo) Create(ctx context.Context, tenant, name string, models, sc
 func (r *ApiKeyRepo) CreateWithQuota(ctx context.Context, tenant, name string, models, scopes []string, quota *float64, period string, rpm *int) (*entities.ApiKey, error) {
 	plain := GenerateSecret()
 	k := &entities.ApiKey{ID: id("key"), TenantID: tenant, Name: name, SecretHash: HashSecret(plain), SecretPrefix: plain[:11], Models: models, Scopes: scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: rpm, Enabled: true, CreatedAt: time.Now().UTC(), Plaintext: plain}
-	if err := r.s.put(ctx, "api_key", k.ID, storedAPIKey{*k, k.SecretHash}); err != nil {
+	if err := r.s.put(ctx, "api_key", k.ID, storedAPIKey{ApiKey: *k, Hash: k.SecretHash}); err != nil {
 		return nil, err
 	}
 	if err := r.s.put(ctx, "api_key_hash", k.SecretHash, k.ID); err != nil {
@@ -43,7 +69,7 @@ func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*e
 	input.Enabled, input.CreatedAt, input.Plaintext = true, time.Now().UTC(), plain
 	input.TenantID = input.ContextOrganizationID
 	e := r.s.mutate(ctx, "api_key_hash:"+input.SecretHash, func() error {
-		if e := r.s.put(ctx, "api_key", input.ID, storedAPIKey{input, input.SecretHash}); e != nil {
+		if e := r.s.put(ctx, "api_key", input.ID, storedAPIKey{ApiKey: input, Hash: input.SecretHash}); e != nil {
 			return e
 		}
 		return r.s.put(ctx, "api_key_hash", input.SecretHash, input.ID)
@@ -77,7 +103,7 @@ func (r *ApiKeyRepo) CreateUserWithInitialKey(ctx context.Context, user entities
 			rollback()
 			return err
 		}
-		if err := r.s.put(ctx, "api_key", key.ID, storedAPIKey{key, key.SecretHash}); err != nil {
+		if err := r.s.put(ctx, "api_key", key.ID, storedAPIKey{ApiKey: key, Hash: key.SecretHash}); err != nil {
 			rollback()
 			return err
 		}
@@ -105,7 +131,7 @@ func (r *ApiKeyRepo) Rotate(ctx context.Context, keyID string) (*entities.ApiKey
 		oldHash := key.SecretHash
 		plain := GenerateSecret()
 		key.SecretHash, key.SecretPrefix, key.Plaintext = HashSecret(plain), plain[:11], plain
-		if e = r.s.put(ctx, "api_key", keyID, storedAPIKey{*key, key.SecretHash}); e != nil {
+		if e = r.s.put(ctx, "api_key", keyID, storedAPIKey{ApiKey: *key, Hash: key.SecretHash}); e != nil {
 			return e
 		}
 		if e = r.s.put(ctx, "api_key_hash", key.SecretHash, keyID); e != nil {
@@ -127,6 +153,9 @@ func (r *ApiKeyRepo) GetByID(ctx context.Context, id string) (*entities.ApiKey, 
 	v.SecretHash = v.Hash
 	if v.OwnerType == "" {
 		v.OwnerType, v.OwnerOrganizationID, v.ContextOrganizationID = entities.OwnerOrganization, v.TenantID, v.TenantID
+	}
+	if v.CredentialOwnerUserID == "" && v.OwnerType == entities.OwnerUser {
+		v.CredentialOwnerUserID = v.OwnerUserID
 	}
 	return &v.ApiKey, nil
 }
@@ -227,7 +256,12 @@ func (r *ApiKeyRepo) patch(ctx context.Context, tenant, id string, enabled *bool
 	if rpm != nil {
 		k.RPM = *rpm
 	}
-	return r.s.put(ctx, "api_key", id, storedAPIKey{*k, k.SecretHash})
+	stored, err := get[storedAPIKey](ctx, r.s, "api_key", id)
+	if err != nil {
+		return err
+	}
+	stored.ApiKey, stored.Hash = *k, k.SecretHash
+	return r.s.put(ctx, "api_key", id, *stored)
 }
 func (r *ApiKeyRepo) Delete(ctx context.Context, id string) error {
 	k, e := r.GetByID(ctx, id)

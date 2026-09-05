@@ -4,7 +4,7 @@ import { KeysPage } from './KeysPage'
 
 const api = vi.hoisted(() => ({
   getAPIKeys: vi.fn(), getOrganizations: vi.fn(), getUsers: vi.fn(), getMembers: vi.fn(), getAPIKeyModels: vi.fn(),
-  createAPIKey: vi.fn(), patchAPIKey: vi.fn(), rotateAPIKey: vi.fn(), deleteAPIKey: vi.fn(),
+  createAPIKey: vi.fn(), patchAPIKey: vi.fn(), revealAPIKey: vi.fn(), rotateAPIKey: vi.fn(), deleteAPIKey: vi.fn(),
 }))
 vi.mock('../api/client', () => api)
 vi.mock('../context/SessionContext', () => ({ useSession: () => ({ session: { role: 'master' } }) }))
@@ -34,4 +34,15 @@ test('creates a chat-only key for a selected organization member and priced mode
   })))
   expect(api.createAPIKey.mock.calls[0][0]).not.toHaveProperty('rpm')
   expect(await screen.findByText('secret-once')).toBeInTheDocument()
+})
+
+
+test('reveals an API key in a copyable popup', async () => {
+  api.getAPIKeys.mockResolvedValue({ object: 'list', data: [{ id: 'key-1', name: 'Member key', key_prefix: 'nr-preview', models: ['cx/model'], scopes: ['chat'], quota_usd: null, quota_period: 'none', owner_type: 'user', owner_user_id: 'user-1', context_organization_id: 'org-1', enabled: true, created_at: '2026-01-01T00:00:00Z' }] })
+  api.revealAPIKey.mockResolvedValue({ plaintext: 'nr-synthetic-secret' })
+  render(<KeysPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'View Member key API key' }))
+  expect(await screen.findByText('nr-synthetic-secret')).toBeInTheDocument()
+  expect(screen.getAllByRole('button', { name: 'Copy secret' }).length).toBeGreaterThan(0)
+  expect(api.revealAPIKey).toHaveBeenCalledWith('key-1')
 })

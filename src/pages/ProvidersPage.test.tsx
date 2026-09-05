@@ -45,6 +45,7 @@ test('exposes the provider API-key connection workflow', async () => {
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password')
   expect(screen.getByLabelText('Base URL')).toBeEnabled()
+  expect(screen.queryByLabelText('Connection owner')).not.toBeInTheDocument()
   expect(screen.queryByLabelText('Owner organization')).not.toBeInTheDocument()
   await waitFor(() => expect(api.getCredentials).toHaveBeenCalledOnce())
 })

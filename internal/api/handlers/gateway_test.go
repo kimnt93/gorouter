@@ -376,14 +376,14 @@ func TestKeyModelOptionsIncludesOnlyCallableModelsWithEffectivePrice(t *testing.
 	model := entities.ModelDef{Name: "cx/gpt-5.6-luna", UpstreamModel: "gpt-5.6-luna", Enabled: true, Price: &price, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true, Weight: 1}}}
 	admin := &Admin{
 		ModelsSvc: modelroute.NewService(gatewayModelRepo{model: model}),
-		CredsSvc:  credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a"}}}, nil),
+		CredsSvc:  credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive, OwnerUserID: "admin-user"}}}, nil),
 	}
 	app := fiber.New()
 	app.Get("/admin/api-keys/models", func(c fiber.Ctx) error {
-		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes})
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "admin-user", Scopes: entities.AllScopes, AllowedModels: []string{model.Name}})
 		return admin.KeyModelOptions(c)
 	})
-	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/admin/api-keys/models?organization_id=org-1", nil))
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/admin/api-keys/models", nil))
 	if err != nil {
 		t.Fatal(err)
 	}

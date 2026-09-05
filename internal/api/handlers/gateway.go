@@ -67,6 +67,16 @@ type GatewayAccessContext struct {
 	Master    bool
 }
 
+func providerOwnerUserID(access *GatewayAccessContext) string {
+	if access == nil {
+		return ""
+	}
+	if access.CredentialOwnerUserID != "" {
+		return access.CredentialOwnerUserID
+	}
+	return access.Actor.UserID
+}
+
 type PriceResolver interface {
 	Resolve(model, upstreamModel string) (entities.Price, bool)
 	Estimates(model, upstreamModel string, promptTokens, completionTokens int64) entities.PriceEstimates
@@ -217,7 +227,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	fillFirstProvider := ""
 	fillFirst := true
 	for _, route := range routes {
-		if route.OwnerUserID != "" && !key.Master && route.OwnerUserID != key.Actor.UserID {
+		if key.CredentialOwnerUserID != "" && route.OwnerUserID == "" {
+			continue
+		}
+		if route.OwnerUserID != "" && !key.Master && route.OwnerUserID != providerOwnerUserID(key) {
 			continue
 		}
 		if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
@@ -629,7 +642,10 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	}
 	callableCredentials := make(map[string]bool, len(credentials))
 	for _, credential := range credentials {
-		if credential.Status != entities.StatusActive || credential.OwnerUserID != "" && !key.Master && credential.OwnerUserID != key.Actor.UserID || !policy.CredentialVisible(key.Master, key.TenantID, credential.OwnerTenantID) {
+		if key.CredentialOwnerUserID != "" && credential.OwnerUserID == "" {
+			continue
+		}
+		if credential.Status != entities.StatusActive || credential.OwnerUserID != "" && !key.Master && credential.OwnerUserID != providerOwnerUserID(key) || !policy.CredentialVisible(key.Master, key.TenantID, credential.OwnerTenantID) {
 			continue
 		}
 		callableCredentials[credential.ID] = true

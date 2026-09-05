@@ -33,16 +33,13 @@ type TenantCreateRequest struct {
 	Name string `json:"name"`
 }
 type CredentialCreateRequest struct {
-	Name                string `json:"name"`
-	Provider            string `json:"provider"`
-	Kind                string `json:"kind"`
-	BaseURL             string `json:"base_url"`
-	APIKey              string `json:"api_key"`
-	OAuthAccess         string `json:"oauth_access"`
-	OAuthRefresh        string `json:"oauth_refresh"`
-	OwnerType           string `json:"owner_type,omitempty"`
-	OwnerUserID         string `json:"owner_user_id,omitempty"`
-	OwnerOrganizationID string `json:"owner_organization_id,omitempty"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	Kind         string `json:"kind"`
+	BaseURL      string `json:"base_url"`
+	APIKey       string `json:"api_key"`
+	OAuthAccess  string `json:"oauth_access"`
+	OAuthRefresh string `json:"oauth_refresh"`
 }
 type CredentialUpdateRequest struct {
 	Name         string `json:"name"`
@@ -88,6 +85,9 @@ type CreatedAPIKeyResponse struct {
 	OwnerUserID           string   `json:"owner_user_id,omitempty"`
 	OwnerOrganizationID   string   `json:"owner_organization_id,omitempty"`
 	ContextOrganizationID string   `json:"context_organization_id,omitempty"`
+}
+type APIKeyRevealResponse struct {
+	Plaintext string `json:"plaintext"`
 }
 type APIKeyListResponse struct {
 	Object     string            `json:"object"`
@@ -272,12 +272,9 @@ type OAuthStartResponse struct {
 	Instructions            string `json:"instructions"`
 }
 type OAuthCompleteRequest struct {
-	FlowID              string `json:"flow_id"`
-	Callback            string `json:"callback"`
-	Name                string `json:"name"`
-	OwnerType           string `json:"owner_type,omitempty"`
-	OwnerUserID         string `json:"owner_user_id,omitempty"`
-	OwnerOrganizationID string `json:"owner_organization_id,omitempty"`
+	FlowID   string `json:"flow_id"`
+	Callback string `json:"callback"`
+	Name     string `json:"name"`
 }
 type OAuthCompleteResponse struct {
 	ID       string `json:"id"`

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createAPIKey, deleteAPIKey, getAPIKeyModels, getAPIKeys, getMembers, getOrganizations, getUsers, patchAPIKey, rotateAPIKey } from '../api/client'
+import { createAPIKey, deleteAPIKey, getAPIKeyModels, getAPIKeys, getMembers, getOrganizations, getUsers, patchAPIKey, revealAPIKey, rotateAPIKey } from '../api/client'
 import type { APIKey, APIKeyModelOption, Membership, Organization, Session, User } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field } from '../components/Management'
 import { Modal } from '../components/Modal'
@@ -19,6 +19,7 @@ export function KeysPage() {
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<APIKey | null>(null)
   const [secret, setSecret] = useState('')
+  const [secretTitle, setSecretTitle] = useState('API key')
   const { session, viewOrganizationID } = useSession()
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -33,14 +34,15 @@ export function KeysPage() {
   const userNames = useMemo(() => new Map(users.map((user) => [user.id, user.username])), [users])
   const organizationNames = useMemo(() => new Map(organizations.map((organization) => [organization.id, organization.name])), [organizations])
   const toggle = async (key: APIKey) => { try { await patchAPIKey(key.id, { enabled: !key.enabled }); await load() } catch (reason) { setError((reason as Error).message) } }
-  const rotate = async (key: APIKey) => { if (!window.confirm(`Rotate ${key.name}? The old secret will stop working immediately.`)) return; try { const response = await rotateAPIKey(key.id); setSecret(response.plaintext); await load() } catch (reason) { setError((reason as Error).message) } }
+  const reveal = async (key: APIKey) => { try { const response = await revealAPIKey(key.id); setSecretTitle(key.name); setSecret(response.plaintext) } catch (reason) { setError((reason as Error).message) } }
+  const rotate = async (key: APIKey) => { if (!window.confirm(`Rotate ${key.name}? The old secret will stop working immediately.`)) return; try { const response = await rotateAPIKey(key.id); setSecretTitle(`${key.name} · rotated`); setSecret(response.plaintext); await load() } catch (reason) { setError((reason as Error).message) } }
   const remove = async (key: APIKey) => { if (!window.confirm(`Delete ${key.name}?`)) return; try { await deleteAPIKey(key.id); await load() } catch (reason) { setError((reason as Error).message) } }
   return <>
     <header className="page-header"><div><span className="eyebrow">Manage / Access</span><h1>API keys</h1><p>Create chat-only keys for a member of an organization, with explicit model and spending limits.</p></div><button className="button" onClick={() => setCreating(true)}>Create API key</button></header>
     <ErrorBanner message={error} />
-    {loading ? <PageLoading /> : keys.length === 0 ? <Empty title="No visible API keys" detail="Create a key for an organization member." /> : <section className="panel table-panel"><div className="table-scroll"><table className="management-table"><thead><tr><th>Name</th><th>User</th><th>Organization</th><th>Allowed models</th><th>Spending limit</th><th>Status</th><th /></tr></thead><tbody>{keys.map((key) => { const keyUser = userNames.get(key.owner_user_id ?? '') ?? key.owner_user_id ?? '—'; const keyOrganization = organizationNames.get(key.context_organization_id ?? '') ?? key.context_organization_id ?? '—'; const modelList = key.models.join(', ') || 'none'; return <tr key={key.id}><td><strong><TruncatedText>{key.name}</TruncatedText></strong><small title={`${key.key_prefix} · ${formatDateTime(key.created_at)}`}>{key.key_prefix} · {formatDateTime(key.created_at)}</small></td><td title={keyUser}>{keyUser}</td><td title={keyOrganization}>{keyOrganization}</td><td className="wrap-cell" title={modelList}>{modelList}</td><td>{key.quota_usd == null ? 'Uses allocated quota' : `$${key.quota_usd}/${key.quota_period}`}</td><td><Badge tone={key.enabled ? 'good' : ''}>{key.enabled ? 'enabled' : 'disabled'}</Badge></td><td><div className="compact-actions"><button onClick={() => setEditing(key)}>Edit</button><button onClick={() => void toggle(key)}>{key.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => void rotate(key)}>Rotate</button><button className="danger-text" onClick={() => void remove(key)}>Delete</button></div></td></tr> })}</tbody></table></div></section>}
+    {loading ? <PageLoading /> : keys.length === 0 ? <Empty title="No visible API keys" detail="Create a key for an organization member." /> : <section className="panel table-panel"><div className="table-scroll"><table className="management-table"><thead><tr><th>Name</th><th>User</th><th>Organization</th><th>Allowed models</th><th>Spending limit</th><th>Status</th><th /></tr></thead><tbody>{keys.map((key) => { const keyUser = userNames.get(key.owner_user_id ?? '') ?? key.owner_user_id ?? '—'; const keyOrganization = organizationNames.get(key.context_organization_id ?? '') ?? key.context_organization_id ?? '—'; const modelList = key.models.join(', ') || 'none'; return <tr key={key.id}><td><strong><TruncatedText>{key.name}</TruncatedText></strong><small title={`${key.key_prefix} · ${formatDateTime(key.created_at)}`}>{key.key_prefix} · {formatDateTime(key.created_at)}</small></td><td title={keyUser}>{keyUser}</td><td title={keyOrganization}>{keyOrganization}</td><td className="wrap-cell" title={modelList}>{modelList}</td><td>{key.quota_usd == null ? 'Uses allocated quota' : `$${key.quota_usd}/${key.quota_period}`}</td><td><Badge tone={key.enabled ? 'good' : ''}>{key.enabled ? 'enabled' : 'disabled'}</Badge></td><td><div className="compact-actions"><button aria-label={`View ${key.name} API key`} title="View API key" onClick={() => void reveal(key)}>👁</button><button onClick={() => setEditing(key)}>Edit</button><button onClick={() => void toggle(key)}>{key.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => void rotate(key)}>Rotate</button><button className="danger-text" onClick={() => void remove(key)}>Delete</button></div></td></tr> })}</tbody></table></div></section>}
     {(creating || editing) && <KeyModal existing={editing} organizations={organizations} users={users} session={session} onClose={() => { setCreating(false); setEditing(null) }} onSaved={(plaintext) => { setCreating(false); setEditing(null); if (plaintext) setSecret(plaintext); void load() }} />}
-    {secret && <SecretModal secret={secret} title="One-time API key" onClose={() => setSecret('')} />}
+    {secret && <SecretModal secret={secret} title={secretTitle} onClose={() => setSecret('')} />}
   </>
 }
 

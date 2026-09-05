@@ -182,8 +182,8 @@ func New(d Dependencies) *fiber.App {
 	if d.Gateway != nil {
 		gatewayHealth = d.Gateway.Health
 	}
-	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models, Quotas: d.ProviderQuotas, Usage: d.Usage, Health: gatewayHealth, Identities: d.IdentityRepo}
-	oauthConnector := &handlers.OAuthConnector{Service: d.OAuth, Identities: d.IdentityRepo}
+	connectivity := &handlers.CredentialConnectivity{Credentials: d.Credentials, OpenAI: d.OpenAI, Anthropic: d.Anthropic, Codex: d.Codex, Providers: d.Providers, ModelRoutes: d.Models, Quotas: d.ProviderQuotas, Usage: d.Usage, Health: gatewayHealth}
+	oauthConnector := &handlers.OAuthConnector{Service: d.OAuth}
 	mgmt.Get("/providers", handlers.Require(d.Auth, entities.ScopeCredentialsManage), admin.Providers)
 	mgmt.Post("/oauth/:provider/start", handlers.Require(d.Auth, entities.ScopeCredentialsManage), oauthConnector.Start)
 	mgmt.Post("/oauth/:provider/complete", handlers.Require(d.Auth, entities.ScopeCredentialsManage), oauthConnector.Complete)
@@ -193,13 +193,14 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Get("/credentials/:id/reset-credits", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.CodexResetCredits)
 	mgmt.Post("/credentials/:id/reset-credits", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.CodexResetCredits)
 	mgmt.Get("/credentials/:id/models", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Models)
-	mgmt.Post("/credentials/:id/models/import", handlers.Require(d.Auth, entities.ScopeModelsManage), connectivity.ImportModels)
+	mgmt.Post("/credentials/:id/models/import", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.ImportModels)
 	mgmt.Post("/credentials/:id/models/refresh", handlers.Require(d.Auth, entities.ScopeModelsManage), connectivity.RefreshModelMetadata)
 	mgmt.Post("/credentials/:id/chat-tests", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Chat)
 	mgmt.Get("/api-keys", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.KeysList)
 	mgmt.Get("/api-keys/models", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.KeyModelOptions)
 	mgmt.Post("/api-keys", handlers.Require(d.Auth, "keys:manage"), admin.KeysCreate)
 	mgmt.Patch("/api-keys/:id", handlers.Require(d.Auth, "keys:manage"), admin.KeysPatch)
+	mgmt.Get("/api-keys/:id/reveal", handlers.Require(d.Auth, "keys:manage"), admin.KeysReveal)
 	mgmt.Post("/api-keys/:id/rotate", handlers.Require(d.Auth, "keys:manage"), admin.KeysRotate)
 	mgmt.Delete("/api-keys/:id", handlers.Require(d.Auth, "keys:manage"), admin.KeysDelete)
 	mgmt.Get("/models", handlers.Require(d.Auth, "models:manage"), admin.ModelsList)

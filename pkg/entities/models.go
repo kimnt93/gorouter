@@ -115,6 +115,7 @@ type ApiKey struct {
 	OwnerUserID           string    `json:"owner_user_id,omitempty"`
 	OwnerOrganizationID   string    `json:"owner_organization_id,omitempty"`
 	ContextOrganizationID string    `json:"context_organization_id,omitempty"`
+	CredentialOwnerUserID string    `json:"-"`
 
 	Plaintext string `json:"-"`
 }

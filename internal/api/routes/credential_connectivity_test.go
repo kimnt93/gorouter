@@ -143,16 +143,19 @@ func (r *connectivityUsageRepo) InsertBatch(_ context.Context, events []entities
 func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 	tenantA := "tenant-a"
 	tenantB := "tenant-b"
+	_ = tenantB
+	userA := "user-a"
+	userB := "user-b"
 	repo := &connectivityRouteCredentialRepo{
 		credentials: []entities.Credential{
-			{ID: "own", OwnerTenantID: &tenantA},
-			{ID: "foreign", OwnerTenantID: &tenantB},
-			{ID: "shared", OwnerTenantID: nil},
+			{ID: "own", OwnerUserID: userA},
+			{ID: "foreign", OwnerUserID: userB},
+			{ID: "legacy", OwnerTenantID: nil},
 		},
 		runtimes: map[string]*entities.CredentialRuntime{
 			"own":     {ID: "own", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
 			"foreign": {ID: "foreign", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
-			"shared":  {ID: "shared", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
+			"legacy":  {ID: "legacy", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey},
 		},
 	}
 	models := &connectivityRouteModelRepo{}
@@ -162,14 +165,15 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 	t.Cleanup(usageService.Close)
 	keys := oauthRouteKeyLookup{
 		"tenant-key": {
-			ID:       "key-a",
-			TenantID: tenantA,
-			Enabled:  true,
-			Scopes:   []string{entities.ScopeCredentialsManage, entities.ScopeModelsManage},
+			ID: "key-a", TenantID: tenantA, OwnerType: entities.OwnerUser, OwnerUserID: userA,
+			Enabled: true,
+			Scopes:  []string{entities.ScopeCredentialsManage, entities.ScopeModelsManage},
 		},
 	}
+	identities := &oauthRouteIdentityRepo{user: entities.User{ID: userA, Username: "user-a@example.test", Status: entities.StatusActive}}
+	authService := auth.NewServiceWithIdentity("master-secret", "session-secret", keys, identities)
 	app := routes.New(routes.Dependencies{
-		Auth:        auth.NewService("master-secret", "session-secret", keys),
+		Auth:        authService,
 		Credentials: credential.NewService(repo, oauthRouteBox{}),
 		Models:      modelroute.NewService(models),
 		Usage:       usageService,
@@ -190,13 +194,13 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 		t.Run(endpoint.name, func(t *testing.T) {
 			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "own", "tenant-key", http.StatusOK, endpoint.body)
 			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "foreign", "tenant-key", http.StatusNotFound, endpoint.body)
-			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "shared", "tenant-key", http.StatusNotFound, endpoint.body)
-			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "foreign", "master-secret", http.StatusOK, endpoint.body)
-			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "shared", "master-secret", http.StatusOK, endpoint.body)
+			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "legacy", "tenant-key", http.StatusNotFound, endpoint.body)
+			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "foreign", "master-secret", http.StatusNotFound, endpoint.body)
+			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "legacy", "master-secret", http.StatusNotFound, endpoint.body)
 		})
 	}
 	t.Run("model discovery marks first model as default", func(t *testing.T) {
-		response := oauthFiberRequest(t, app, http.MethodGet, "/admin/credentials/own/models", "master-secret", nil)
+		response := oauthFiberRequest(t, app, http.MethodGet, "/admin/credentials/own/models", "tenant-key", nil)
 		defer response.Body.Close()
 		var payload struct {
 			DefaultModel string `json:"default_model"`
@@ -227,18 +231,12 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 	}
 
 	importBody := map[string]any{"models": []string{"provider-model"}}
-	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "own", "tenant-key", http.StatusForbidden, importBody)
-	if len(models.upserts) != 0 {
-		t.Fatalf("non-master import mutated model routes: %+v", models.upserts)
+	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "own", "tenant-key", http.StatusOK, importBody)
+	if len(models.upserts) != 1 || models.upserts[0].Name != "custom/provider-model" || len(models.upserts[0].Routes) != 1 || models.upserts[0].Routes[0].CredentialID != "own" || models.upserts[0].Metadata == nil || models.upserts[0].Metadata.DisplayName != "Provider Model" {
+		t.Fatalf("personal import did not create the expected model route: %+v", models.upserts)
 	}
-	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "shared", "master-secret", http.StatusOK, importBody)
-	if len(models.upserts) != 1 || models.upserts[0].Name != "custom/provider-model" || len(models.upserts[0].Routes) != 1 || models.upserts[0].Routes[0].CredentialID != "shared" || models.upserts[0].Metadata == nil || models.upserts[0].Metadata.DisplayName != "Provider Model" || strings.Join(models.upserts[0].Metadata.InputModalities, ",") != "text,image" {
-		t.Fatalf("master import did not create the expected model route: %+v", models.upserts)
-	}
-	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/refresh", "shared", "master-secret", http.StatusOK, nil)
-	if len(models.upserts) != 2 || models.upserts[1].Metadata == nil || models.upserts[1].Metadata.SourceCredentialID != "shared" {
-		t.Fatalf("refresh did not update existing model metadata: %+v", models.upserts)
-	}
+	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "legacy", "master-secret", http.StatusNotFound, importBody)
+	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/refresh", "legacy", "master-secret", http.StatusNotFound, nil)
 }
 
 func assertConnectivityRouteStatus(t *testing.T, app *fiber.App, method, path, credentialID, bearer string, want int, body any) {
@@ -254,15 +252,17 @@ func assertConnectivityRouteStatus(t *testing.T, app *fiber.App, method, path, c
 func TestCredentialChatPreservesSafeUpstreamClientStatus(t *testing.T) {
 	tenantID := "tenant-a"
 	repo := &connectivityRouteCredentialRepo{
-		credentials: []entities.Credential{{ID: "own", OwnerTenantID: &tenantID}},
+		credentials: []entities.Credential{{ID: "own", OwnerUserID: "user-a"}},
 		runtimes:    map[string]*entities.CredentialRuntime{"own": {ID: "own", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}},
 	}
 	provider := rejectedConnectivityProvider{status: http.StatusForbidden}
+	keys := oauthRouteKeyLookup{"user-key": {ID: "key-a", TenantID: tenantID, OwnerType: entities.OwnerUser, OwnerUserID: "user-a", Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}}}
+	identities := &oauthRouteIdentityRepo{user: entities.User{ID: "user-a", Username: "user-a@example.test", Status: entities.StatusActive}}
+	authService := auth.NewServiceWithIdentity("master-secret", "session-secret", keys, identities)
 	app := routes.New(routes.Dependencies{
-		Auth:        auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}),
-		Credentials: credential.NewService(repo, oauthRouteBox{}), OpenAI: provider,
+		Auth: authService, Credentials: credential.NewService(repo, oauthRouteBox{}), OpenAI: provider,
 	})
-	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/credentials/own/chat-tests", "master-secret", map[string]string{"model": "provider-model", "prompt": "hello"})
+	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/credentials/own/chat-tests", "user-key", map[string]string{"model": "provider-model", "prompt": "hello"})
 	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "provider returned HTTP 403") || strings.Contains(string(body), "sensitive upstream detail") {

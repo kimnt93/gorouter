@@ -8,13 +8,11 @@ import (
 
 	responseapi "github.com/kimnt93/gorouter/internal/api"
 	"github.com/kimnt93/gorouter/pkg/entities"
-	"github.com/kimnt93/gorouter/pkg/identity"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
 )
 
 type OAuthConnector struct {
-	Service    *oauthpkg.Service
-	Identities identity.Repository
+	Service *oauthpkg.Service
 }
 
 type oauthCompleteBody = OAuthCompleteRequest
@@ -54,7 +52,7 @@ func (h *OAuthConnector) Start(c fiber.Ctx) error {
 
 // Complete exchanges an OAuth callback/device result and creates a credential.
 // @Summary Complete OAuth connection
-// @Description Completes a pending OAuth flow and persists encrypted tokens. owner_user_id is accepted only from the master session and binds the credential to an active user.
+// @Description Completes a pending OAuth flow and persists encrypted tokens for the authenticated user.
 // @Tags oauth
 // @Security BearerAuth
 // @Param provider path string true "Provider ID"
@@ -72,23 +70,12 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest("flow_id is required").Send()
 	}
 	session := SessionFrom(c)
-	if strings.TrimSpace(body.OwnerUserID) != "" && (session == nil || !session.IsMaster()) {
-		return responseapi.For(c).Forbidden("owner_user_id may be assigned only by the master session").Send()
-	}
-	ownerType := body.OwnerType
-	if strings.TrimSpace(body.OwnerUserID) != "" && strings.TrimSpace(ownerType) == "" {
-		ownerType = entities.OwnerUser
-	}
-	ownerTenant, ownerUserID, ownerErr := credentialOwner(c.Context(), session, ownerType, body.OwnerUserID, body.OwnerOrganizationID, h.Identities)
-	if ownerErr != nil {
-		if session != nil && !session.IsMaster() {
-			return responseapi.For(c).Forbidden(ownerErr.Error()).Send()
-		}
-		return responseapi.For(c).BadRequest(ownerErr.Error()).Send()
+	if session == nil || session.PrincipalType != entities.PrincipalUser || strings.TrimSpace(session.UserID) == "" {
+		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
 	created, err := h.Service.Complete(c.Context(), oauthpkg.CompleteInput{
 		Provider: strings.ToLower(c.Params("provider")), FlowID: body.FlowID,
-		Callback: body.Callback, Name: body.Name, OwnerTenant: ownerTenant, OwnerUserID: ownerUserID,
+		Callback: body.Callback, Name: body.Name, OwnerUserID: session.UserID,
 		SessionBinding: oauthSessionBinding(session),
 	})
 	if errors.Is(err, oauthpkg.ErrInvalidFlow) || errors.Is(err, oauthpkg.ErrBadCallback) {

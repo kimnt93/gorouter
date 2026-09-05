@@ -160,61 +160,37 @@ func TestOAuthRoutesRequireAuthenticationAndCredentialScope(t *testing.T) {
 	}
 }
 
-func TestOAuthCompleteBindsFlowAndCredentialOwnershipToSession(t *testing.T) {
+func TestOAuthCompleteBindsCredentialToAuthenticatedUser(t *testing.T) {
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
+		if r.Method == http.MethodPost {
 			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "oauth-access", "refresh_token": "oauth-refresh"})
-		case http.MethodGet:
-			_ = json.NewEncoder(w).Encode(map[string]any{"oauth_account": map[string]string{"account_uuid": "account-a", "organization_uuid": "org-a"}})
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
 		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"oauth_account": map[string]string{"account_uuid": "account-a"}})
 	}))
 	defer tokenServer.Close()
-
-	keys := oauthRouteKeyLookup{
-		"tenant-a-key": {ID: "key-a", TenantID: "tenant-a", Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}},
-		"tenant-b-key": {ID: "key-b", TenantID: "tenant-b", Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}},
-	}
+	user := entities.User{ID: "user-a", Username: "user-a@example.test", Status: entities.StatusActive}
+	keys := oauthRouteKeyLookup{"user-key": {ID: "key-a", OwnerType: entities.OwnerUser, OwnerUserID: user.ID, Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}}}
 	repo := &oauthRouteCredentialRepo{}
-	authService := auth.NewService("master-secret", "session-secret", keys)
-	oauthService := oauthpkg.New(tokenServer.Client(), credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{
-		ClaudeTokenURL: tokenServer.URL, ClaudeBootstrapURL: tokenServer.URL,
-	})
+	authService := auth.NewServiceWithIdentity("master-secret", "session-secret", keys, &oauthRouteIdentityRepo{user: user})
+	oauthService := oauthpkg.New(tokenServer.Client(), credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{ClaudeTokenURL: tokenServer.URL, ClaudeBootstrapURL: tokenServer.URL})
 	app := routes.New(routes.Dependencies{Auth: authService, OAuth: oauthService})
 
-	start := startOAuthRoute(t, app, "tenant-a-key")
-	response := completeOAuthRoute(t, app, "tenant-b-key", start.FlowID, "tenant-b")
-	response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest {
-		t.Fatalf("cross-session complete status = %d, want %d", response.StatusCode, http.StatusBadRequest)
-	}
-	if len(repo.created) != 0 {
-		t.Fatalf("cross-session flow created credentials: %+v", repo.created)
-	}
-
-	start = startOAuthRoute(t, app, "tenant-a-key")
-	response = completeOAuthRoute(t, app, "tenant-a-key", start.FlowID, "foreign-tenant")
+	start := startOAuthRoute(t, app, "user-key")
+	response := completeOAuthRoute(t, app, "user-key", start.FlowID, "ignored")
 	response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
-		t.Fatalf("tenant complete status = %d, want %d", response.StatusCode, http.StatusCreated)
+		t.Fatalf("user complete status=%d", response.StatusCode)
 	}
-	if len(repo.created) != 1 || repo.created[0].OwnerTenant == nil || *repo.created[0].OwnerTenant != "tenant-a" {
-		t.Fatalf("scoped credential owner = %+v, want tenant-a", repo.created)
-	}
-	if repo.created[0].OAuthMeta.AccountID != "account-a" || repo.created[0].OAuthMeta.OrganizationID != "org-a" || repo.created[0].OAuthMeta.DeviceID == "" {
-		t.Fatalf("OAuth metadata was not passed to credential persistence: %+v", repo.created[0].OAuthMeta)
+	if len(repo.created) != 1 || repo.created[0].OwnerUserID != user.ID || repo.created[0].OwnerTenant != nil {
+		t.Fatalf("created ownership=%+v", repo.created)
 	}
 
 	start = startOAuthRoute(t, app, "master-secret")
-	response = completeOAuthRoute(t, app, "master-secret", start.FlowID, "managed-tenant")
+	response = completeOAuthRoute(t, app, "master-secret", start.FlowID, "ignored")
 	response.Body.Close()
-	if response.StatusCode != http.StatusCreated {
-		t.Fatalf("master complete status = %d, want %d", response.StatusCode, http.StatusCreated)
-	}
-	if len(repo.created) != 2 || repo.created[1].OwnerTenant != nil || repo.created[1].OwnerUserID != "" {
-		t.Fatalf("master credential owner = %+v, want global server-derived ownership", repo.created)
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("master complete status=%d", response.StatusCode)
 	}
 }
 
@@ -236,12 +212,11 @@ func TestOAuthDeviceRouteReturnsUserCodeAndAcceptedWhilePending(t *testing.T) {
 	target, _ := url.Parse(upstream.URL)
 	client := &http.Client{Transport: oauthRouteRewriteTransport{target: target}}
 	service := oauthpkg.New(client, credential.NewService(&oauthRouteCredentialRepo{}, oauthRouteBox{}), oauthpkg.Config{})
-	app := routes.New(routes.Dependencies{
-		Auth:  auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}),
-		OAuth: service,
-	})
+	user := entities.User{ID: "user-a", Username: "user-a@example.test", Status: entities.StatusActive}
+	keys := oauthRouteKeyLookup{"user-key": {ID: "key-a", OwnerType: entities.OwnerUser, OwnerUserID: user.ID, Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}}}
+	app := routes.New(routes.Dependencies{Auth: auth.NewServiceWithIdentity("master-secret", "session-secret", keys, &oauthRouteIdentityRepo{user: user}), OAuth: service})
 
-	startResponse := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/kimi-code/start", "master-secret", nil)
+	startResponse := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/kimi-code/start", "user-key", nil)
 	defer startResponse.Body.Close()
 	var start struct {
 		FlowID       string `json:"flow_id"`
@@ -256,7 +231,7 @@ func TestOAuthDeviceRouteReturnsUserCodeAndAcceptedWhilePending(t *testing.T) {
 		t.Fatalf("device start status=%d payload=%+v", startResponse.StatusCode, start)
 	}
 
-	completeResponse := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/kimi-code/complete", "master-secret", map[string]any{"flow_id": start.FlowID})
+	completeResponse := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/kimi-code/complete", "user-key", map[string]any{"flow_id": start.FlowID})
 	defer completeResponse.Body.Close()
 	if completeResponse.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(completeResponse.Body)
@@ -321,49 +296,15 @@ func oauthFiberRequest(t *testing.T, app *fiber.App, method, path, bearer string
 	return response
 }
 
-func TestOAuthCompleteAllowsOnlyMasterToBindAnActivePersonalOwner(t *testing.T) {
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "oauth-access", "refresh_token": "oauth-refresh"})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"oauth_account": map[string]string{"account_uuid": "account-a"}})
-	}))
-	defer tokenServer.Close()
-
+func TestOAuthCompleteRejectsClientSuppliedOwnerAndMasterCreation(t *testing.T) {
 	repo := &oauthRouteCredentialRepo{}
-	identities := &oauthRouteIdentityRepo{user: entities.User{ID: "user-control", Username: "control@example.test", Status: entities.StatusActive}}
-	service := oauthpkg.New(tokenServer.Client(), credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{ClaudeTokenURL: tokenServer.URL, ClaudeBootstrapURL: tokenServer.URL})
-	app := routes.New(routes.Dependencies{
-		Auth: auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{
-			"control-key": {ID: "control", TenantID: "tenant-control", Enabled: true, Scopes: []string{entities.ScopeCredentialsManage}},
-		}),
-		OAuth: service, IdentityRepo: identities,
-	})
-
-	start := startOAuthRoute(t, app, "control-key")
-	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "control-key", map[string]any{"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID, "owner_user_id": "user-control"})
+	service := oauthpkg.New(nil, credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{})
+	app := routes.New(routes.Dependencies{Auth: auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}), OAuth: service})
+	start := startOAuthRoute(t, app, "master-secret")
+	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{"flow_id": start.FlowID, "owner_user_id": "user-control"})
 	response.Body.Close()
-	if response.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-master owner binding status=%d", response.StatusCode)
-	}
-
-	start = startOAuthRoute(t, app, "master-secret")
-	response = oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID, "owner_user_id": "user-control"})
-	response.Body.Close()
-	if response.StatusCode != http.StatusCreated {
-		t.Fatalf("master owner binding status=%d", response.StatusCode)
-	}
-	if len(repo.created) != 1 || repo.created[0].OwnerUserID != "user-control" || repo.created[0].OwnerTenant != nil {
-		t.Fatalf("created ownership=%+v", repo.created)
-	}
-
-	identities.user.Status = entities.StatusDisabled
-	start = startOAuthRoute(t, app, "master-secret")
-	response = oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID, "owner_user_id": "user-control"})
-	response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest {
-		t.Fatalf("inactive owner status=%d", response.StatusCode)
+	if response.StatusCode != http.StatusForbidden || len(repo.created) != 0 {
+		t.Fatalf("status=%d created=%+v", response.StatusCode, repo.created)
 	}
 }
 

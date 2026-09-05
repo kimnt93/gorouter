@@ -1001,6 +1001,11 @@ definitions:
           type: string
         type: array
     type: object
+  internal_api_handlers.APIKeyRevealResponse:
+    properties:
+      plaintext:
+        type: string
+    type: object
   internal_api_handlers.AuditListResponse:
     properties:
       data:
@@ -1076,12 +1081,6 @@ definitions:
       oauth_access:
         type: string
       oauth_refresh:
-        type: string
-      owner_organization_id:
-        type: string
-      owner_type:
-        type: string
-      owner_user_id:
         type: string
       provider:
         type: string
@@ -1324,12 +1323,6 @@ definitions:
       flow_id:
         type: string
       name:
-        type: string
-      owner_organization_id:
-        type: string
-      owner_type:
-        type: string
-      owner_user_id:
         type: string
     type: object
   internal_api_handlers.OAuthCompleteResponse:
@@ -1959,6 +1952,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Update an API key
+      tags:
+      - api-keys
+  /admin/api-keys/{id}/reveal:
+    get:
+      description: Reveals an API key to master, its owner, or an administrator of
+        its context organization.
+      parameters:
+      - description: API key ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIKeyRevealResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reveal an API key
       tags:
       - api-keys
   /admin/api-keys/{id}/rotate:
@@ -2852,9 +2881,8 @@ paths:
       - models
   /admin/oauth/{provider}/complete:
     post:
-      description: Completes a pending OAuth flow and persists encrypted tokens. owner_user_id
-        is accepted only from the master session and binds the credential to an active
-        user.
+      description: Completes a pending OAuth flow and persists encrypted tokens for
+        the authenticated user.
       parameters:
       - description: Provider ID
         in: path

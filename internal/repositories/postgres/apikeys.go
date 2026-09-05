@@ -340,12 +340,12 @@ func GenerateSecret() string {
 	return "nr-" + hex.EncodeToString(b)
 }
 
-const keyColumns = `k.id,coalesce(k.tenant_id,''),k.name,k.key_hash,k.key_prefix,k.models,k.scopes,k.quota_usd,k.quota_period,k.rpm,k.enabled,k.created_at,k.owner_type,coalesce(k.owner_user_id,''),coalesce(k.owner_organization_id,''),coalesce(k.context_organization_id,'')`
+const keyColumns = `k.id,coalesce(k.tenant_id,''),k.name,k.key_hash,k.key_prefix,k.models,k.scopes,k.quota_usd,k.quota_period,k.rpm,k.enabled,k.created_at,k.owner_type,coalesce(k.owner_user_id,''),coalesce(k.owner_organization_id,''),coalesce(k.context_organization_id,''),coalesce(k.credential_owner_user_id,'')`
 
 func scanApiKey(row pgx.Row) (*entities.ApiKey, error) {
 	var k entities.ApiKey
 	var modelsJSON, scopesJSON []byte
-	err := row.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.OwnerType, &k.OwnerUserID, &k.OwnerOrganizationID, &k.ContextOrganizationID)
+	err := row.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.OwnerType, &k.OwnerUserID, &k.OwnerOrganizationID, &k.ContextOrganizationID, &k.CredentialOwnerUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, entities.ErrNotFound
 	}
@@ -363,6 +363,34 @@ func decodeJSONStrings(b []byte) []string {
 		return out
 	}
 	return []string{}
+}
+
+func (r *ApiKeyRepo) StorePlaintext(ctx context.Context, id, plaintext string, box entities.SecretBox) error {
+	sealed, err := box.Seal([]byte(plaintext))
+	if err != nil {
+		return err
+	}
+	tag, err := r.db.Pool.Exec(ctx, `UPDATE api_keys SET key_enc=$1 WHERE id=$2`, sealed, id)
+	if err == nil && tag.RowsAffected() == 0 {
+		return entities.ErrNotFound
+	}
+	return err
+}
+
+func (r *ApiKeyRepo) RevealPlaintext(ctx context.Context, id string, box entities.SecretBox) (string, error) {
+	var sealed []byte
+	err := r.db.Pool.QueryRow(ctx, `SELECT coalesce(key_enc,''::bytea) FROM api_keys WHERE id=$1`, id).Scan(&sealed)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && len(sealed) == 0 {
+		return "", entities.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	plain, err := box.Open(sealed)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 func (r *ApiKeyRepo) Create(ctx context.Context, tenantID, name string, models, scopes []string, quota *float64, rpm *int) (*entities.ApiKey, error) {
@@ -404,9 +432,9 @@ func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*e
 	input.TenantID = input.ContextOrganizationID
 	modelsJSON, _ := json.Marshal(orEmpty(input.Models))
 	scopesJSON, _ := json.Marshal(orEmpty(input.Scopes))
-	_, err := r.db.Pool.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id)
-		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),NULLIF($15,''),NULLIF($16,''))`,
-		input.ID, input.TenantID, input.Name, input.SecretHash, input.SecretPrefix, modelsJSON, scopesJSON, input.QuotaUSD, input.QuotaPeriod, input.RPM, input.Enabled, input.CreatedAt, input.OwnerType, input.OwnerUserID, input.OwnerOrganizationID, input.ContextOrganizationID)
+	_, err := r.db.Pool.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id,credential_owner_user_id)
+		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),$17)`,
+		input.ID, input.TenantID, input.Name, input.SecretHash, input.SecretPrefix, modelsJSON, scopesJSON, input.QuotaUSD, input.QuotaPeriod, input.RPM, input.Enabled, input.CreatedAt, input.OwnerType, input.OwnerUserID, input.OwnerOrganizationID, input.ContextOrganizationID, input.CredentialOwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -427,8 +455,8 @@ func (r *ApiKeyRepo) CreateUserWithInitialKey(ctx context.Context, user entities
 	if _, err = tx.Exec(ctx, `INSERT INTO users (id,username,normalized_username,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6)`, user.ID, user.Username, user.NormalizedUsername, user.Status, user.CreatedAt, user.UpdatedAt); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id)
-		VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,NULL)`, key.ID, key.Name, key.SecretHash, key.SecretPrefix, modelsJSON, scopesJSON, key.QuotaUSD, key.QuotaPeriod, key.RPM, key.Enabled, key.CreatedAt, key.OwnerType, key.OwnerUserID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id,credential_owner_user_id)
+		VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,NULL,$13)`, key.ID, key.Name, key.SecretHash, key.SecretPrefix, modelsJSON, scopesJSON, key.QuotaUSD, key.QuotaPeriod, key.RPM, key.Enabled, key.CreatedAt, key.OwnerType, key.OwnerUserID); err != nil {
 		return err
 	}
 	for _, event := range audits {
@@ -502,7 +530,7 @@ func (r *ApiKeyRepo) list(ctx context.Context, tenantID string, scoped bool) ([]
 	for rows.Next() {
 		var k entities.ApiKey
 		var modelsJSON, scopesJSON []byte
-		if err := rows.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.OwnerType, &k.OwnerUserID, &k.OwnerOrganizationID, &k.ContextOrganizationID, &k.TenantName); err != nil {
+		if err := rows.Scan(&k.ID, &k.TenantID, &k.Name, &k.SecretHash, &k.SecretPrefix, &modelsJSON, &scopesJSON, &k.QuotaUSD, &k.QuotaPeriod, &k.RPM, &k.Enabled, &k.CreatedAt, &k.OwnerType, &k.OwnerUserID, &k.OwnerOrganizationID, &k.ContextOrganizationID, &k.CredentialOwnerUserID, &k.TenantName); err != nil {
 			return nil, err
 		}
 		k.Models = decodeJSONStrings(modelsJSON)
