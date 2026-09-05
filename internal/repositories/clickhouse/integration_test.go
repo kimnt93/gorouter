@@ -54,7 +54,7 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	credRepo := NewCredentialRepo(s)
-	cred, err := credRepo.Create(ctx, entities.CredentialInput{Name: "credential", Provider: "openai-compatible", Kind: entities.KindAPIKey, BaseURL: "https://example.invalid/v1", APIKey: "encrypted-secret", OwnerTenant: &tenant.ID}, box)
+	cred, err := credRepo.Create(ctx, entities.CredentialInput{Name: "global credential", Provider: "openai-compatible", Kind: entities.KindAPIKey, BaseURL: "https://example.invalid/v1", APIKey: "encrypted-secret"}, box)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +62,20 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 	runtime, err := credRepo.Runtime(ctx, box, cred.ID)
 	if err != nil || runtime.APIKey != "encrypted-secret" {
 		t.Fatalf("credential runtime=%+v err=%v", runtime, err)
+	}
+	credentials, err := credRepo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored *entities.Credential
+	for index := range credentials {
+		if credentials[index].ID == cred.ID {
+			stored = &credentials[index]
+			break
+		}
+	}
+	if stored == nil || stored.OwnerUserID != "" || stored.OwnerTenantID != nil {
+		t.Fatalf("global credential ownership=%+v", stored)
 	}
 	modelName := "model-" + suffix
 	models := NewModelRouteRepo(s)

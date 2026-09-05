@@ -3957,12 +3957,7 @@ const docTemplate = `{
         },
         "/v1/models": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Lists the public models available to the authenticated principal and API key.",
+                "description": "Without credentials, lists the current callable catalog. With a bearer API key, lists only models allowed by that key and backed by its sharing connection owner.",
                 "tags": [
                     "gateway"
                 ],

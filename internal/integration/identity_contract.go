@@ -118,6 +118,14 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	globalSharedKey, err := backend.Keys.CreateOwned(ctx, entities.ApiKey{Name: "master shared", OwnerType: entities.OwnerOrganization, OwnerOrganizationID: organization1.ID, ContextOrganizationID: organization1.ID, Models: []string{"m"}, Scopes: []string{entities.ScopeChat}, QuotaPeriod: entities.QuotaPeriodNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedGlobalSharedKey, err := backend.Keys.GetBySecret(ctx, globalSharedKey.SecretHash)
+	if err != nil || loadedGlobalSharedKey.CredentialOwnerUserID != "" {
+		t.Fatalf("global sharing owner=%q err=%v", loadedGlobalSharedKey.CredentialOwnerUserID, err)
+	}
 	if personal.ContextOrganizationID != "" || scoped.ContextOrganizationID != organization1.ID || organizationKey.OwnerOrganizationID != organization1.ID {
 		t.Fatal("key ownership/context was not preserved")
 	}

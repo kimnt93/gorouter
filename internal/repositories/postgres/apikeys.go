@@ -433,7 +433,7 @@ func (r *ApiKeyRepo) CreateOwned(ctx context.Context, input entities.ApiKey) (*e
 	modelsJSON, _ := json.Marshal(orEmpty(input.Models))
 	scopesJSON, _ := json.Marshal(orEmpty(input.Scopes))
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,owner_organization_id,context_organization_id,credential_owner_user_id)
-		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),$17)`,
+		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),NULLIF($15,''),NULLIF($16,''),NULLIF($17,''))`,
 		input.ID, input.TenantID, input.Name, input.SecretHash, input.SecretPrefix, modelsJSON, scopesJSON, input.QuotaUSD, input.QuotaPeriod, input.RPM, input.Enabled, input.CreatedAt, input.OwnerType, input.OwnerUserID, input.OwnerOrganizationID, input.ContextOrganizationID, input.CredentialOwnerUserID)
 	if err != nil {
 		return nil, err

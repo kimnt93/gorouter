@@ -12,9 +12,20 @@ import (
 
 type repositoryStub struct {
 	created      CreateInput
+	createdOwned entities.ApiKey
 	listedTenant string
 	patched      struct{ tenant, id string }
 	deleted      struct{ tenant, id string }
+}
+
+func (r *repositoryStub) CreateOwned(_ context.Context, key entities.ApiKey) (*entities.ApiKey, error) {
+	r.createdOwned = key
+	key.ID = "key_owned"
+	return &key, nil
+}
+
+func (*repositoryStub) Rotate(context.Context, string) (*entities.ApiKey, error) {
+	return nil, entities.ErrNotFound
 }
 
 func (r *repositoryStub) CreateWithQuota(_ context.Context, tenantID, name string, models, scopes []string, quota *float64, period string, rpm *int) (*entities.ApiKey, error) {
@@ -89,6 +100,33 @@ func TestCreateAllowsEmptyModelAllowlist(t *testing.T) {
 	_, err := newTestService(&repositoryStub{}).Create(context.Background(), CreateInput{TenantID: "tenant_1", Name: "denied", Scopes: []string{}})
 	if err != nil {
 		t.Fatalf("empty allowlist should be valid and deny all models: %v", err)
+	}
+}
+
+func TestCreatePreservesExplicitGlobalCredentialOwner(t *testing.T) {
+	repo := &repositoryStub{}
+	_, err := newTestService(repo).Create(context.Background(), CreateInput{
+		Name: "master shared", OwnerType: entities.OwnerUser, OwnerUserID: "user-1",
+		ContextOrganizationID: "org-1", Scopes: []string{entities.ScopeChat}, CredentialOwnerGlobal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.createdOwned.CredentialOwnerUserID != "" {
+		t.Fatalf("credential owner=%q, want global", repo.createdOwned.CredentialOwnerUserID)
+	}
+}
+
+func TestCreateDefaultsPersonalCredentialOwnerToKeyOwner(t *testing.T) {
+	repo := &repositoryStub{}
+	_, err := newTestService(repo).Create(context.Background(), CreateInput{
+		Name: "personal", OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Scopes: []string{entities.ScopeChat},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.createdOwned.CredentialOwnerUserID != "user-1" {
+		t.Fatalf("credential owner=%q, want user-1", repo.createdOwned.CredentialOwnerUserID)
 	}
 }
 

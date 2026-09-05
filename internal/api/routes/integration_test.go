@@ -316,6 +316,15 @@ func TestFiberApplicationEndToEnd(t *testing.T) {
 	if models.StatusCode != http.StatusOK || !strings.Contains(readBody(t, models), "integration-model") {
 		t.Fatal("authorized model was not listed")
 	}
+	anonymousModels := h.request(t, http.MethodGet, "/v1/models", "", nil)
+	if anonymousModels.StatusCode != http.StatusOK || !strings.Contains(readBody(t, anonymousModels), "integration-model") {
+		t.Fatal("anonymous current model catalog was not listed")
+	}
+	invalidModels := h.request(t, http.MethodGet, "/v1/models", "invalid-api-key", nil)
+	if invalidModels.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("invalid model-catalog bearer status=%d, want 401", invalidModels.StatusCode)
+	}
+	invalidModels.Body.Close()
 
 	callsBeforeChat := calls.Load()
 	first := h.request(t, http.MethodPost, "/v1/chat/completions", key.Plaintext, chatBody("integration-model", false, "cache me"))

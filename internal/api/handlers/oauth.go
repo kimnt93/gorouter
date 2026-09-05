@@ -70,12 +70,13 @@ func (h *OAuthConnector) Complete(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest("flow_id is required").Send()
 	}
 	session := SessionFrom(c)
-	if session == nil || session.PrincipalType != entities.PrincipalUser || strings.TrimSpace(session.UserID) == "" {
+	ownerUserID, allowed := credentialOwnerForSession(session)
+	if !allowed {
 		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
 	created, err := h.Service.Complete(c.Context(), oauthpkg.CompleteInput{
 		Provider: strings.ToLower(c.Params("provider")), FlowID: body.FlowID,
-		Callback: body.Callback, Name: body.Name, OwnerUserID: session.UserID,
+		Callback: body.Callback, Name: body.Name, OwnerUserID: ownerUserID,
 		SessionBinding: oauthSessionBinding(session),
 	})
 	if errors.Is(err, oauthpkg.ErrInvalidFlow) || errors.Is(err, oauthpkg.ErrBadCallback) {

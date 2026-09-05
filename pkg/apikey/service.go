@@ -106,6 +106,7 @@ type CreateInput struct {
 	OwnerOrganizationID   string
 	ContextOrganizationID string
 	CredentialOwnerUserID string
+	CredentialOwnerGlobal bool
 }
 
 // CreateUserWithInitialKey persists a prepared user, its first personal key,
@@ -199,7 +200,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	if owned {
 		key := entities.ApiKey{Name: in.Name, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM,
 			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID), CredentialOwnerUserID: strings.TrimSpace(in.CredentialOwnerUserID)}
-		if key.OwnerType == entities.OwnerUser && key.CredentialOwnerUserID == "" {
+		if key.OwnerType == entities.OwnerUser && key.CredentialOwnerUserID == "" && !in.CredentialOwnerGlobal {
 			key.CredentialOwnerUserID = key.OwnerUserID
 		}
 		if err := key.ValidateOwnerShape(); err != nil {

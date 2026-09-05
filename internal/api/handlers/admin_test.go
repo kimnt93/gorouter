@@ -100,6 +100,33 @@ func TestCredentialListReturnsOnlyAuthenticatedUsersConnections(t *testing.T) {
 	}
 }
 
+func TestCredentialListReturnsOnlyGlobalConnectionsToMaster(t *testing.T) {
+	organizationID := "org_1"
+	repo := &credentialListRepo{items: []entities.Credential{
+		{ID: "personal", OwnerUserID: "user_1"},
+		{ID: "organization", OwnerTenantID: &organizationID},
+		{ID: "global"},
+	}}
+	admin := &Admin{CredsSvc: credential.NewService(repo, nil)}
+	app := fiber.New()
+	app.Get("/credentials", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster})
+		return admin.Credentials(c)
+	})
+	response, err := app.Test(httptest.NewRequest("GET", "/credentials", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var credentials []entities.Credential
+	if err := json.NewDecoder(response.Body).Decode(&credentials); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != fiber.StatusOK || len(credentials) != 1 || credentials[0].ID != "global" {
+		t.Fatalf("status=%d credentials=%+v", response.StatusCode, credentials)
+	}
+}
+
 type credentialListRepo struct{ items []entities.Credential }
 
 func (r *credentialListRepo) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
@@ -214,24 +241,42 @@ func TestKeysRevealAllowsMasterAndOrganizationAdminButConcealsForeignAdmin(t *te
 	}
 }
 
-func TestCredentialCreateRejectsMasterAndOrganizationPrincipals(t *testing.T) {
-	for _, session := range []*entities.Session{
-		{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster},
-		{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalOrganization, OrganizationID: "org_1"},
-	} {
-		repo := &credentialOwnerRepo{}
-		admin := &Admin{CredsSvc: credential.NewService(repo, nil)}
-		app := fiber.New()
-		app.Post("/credentials", func(c fiber.Ctx) error { c.Locals(localSession, session); return admin.Credentials(c) })
-		request := httptest.NewRequest("POST", "/credentials", strings.NewReader(`{"name":"shared","api_key":"secret"}`))
-		request.Header.Set("Content-Type", fiber.MIMEApplicationJSON)
-		response, err := app.Test(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response.Body.Close()
-		if response.StatusCode != fiber.StatusForbidden {
-			t.Fatalf("principal=%s status=%d", session.PrincipalType, response.StatusCode)
-		}
+func TestCredentialCreateAllowsMasterGlobalConnection(t *testing.T) {
+	repo := &credentialOwnerRepo{}
+	admin := &Admin{CredsSvc: credential.NewService(repo, nil)}
+	app := fiber.New()
+	app.Post("/credentials", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster})
+		return admin.Credentials(c)
+	})
+	request := httptest.NewRequest("POST", "/credentials", strings.NewReader(`{"name":"shared","provider":"openai","api_key":"secret"}`))
+	request.Header.Set("Content-Type", fiber.MIMEApplicationJSON)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != fiber.StatusCreated || repo.created.OwnerUserID != "" || repo.created.OwnerTenant != nil {
+		t.Fatalf("status=%d owner_user=%q owner_tenant=%v", response.StatusCode, repo.created.OwnerUserID, repo.created.OwnerTenant)
+	}
+}
+
+func TestCredentialCreateRejectsOrganizationPrincipal(t *testing.T) {
+	repo := &credentialOwnerRepo{}
+	admin := &Admin{CredsSvc: credential.NewService(repo, nil)}
+	app := fiber.New()
+	app.Post("/credentials", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalOrganization, OrganizationID: "org_1"})
+		return admin.Credentials(c)
+	})
+	request := httptest.NewRequest("POST", "/credentials", strings.NewReader(`{"name":"shared","api_key":"secret"}`))
+	request.Header.Set("Content-Type", fiber.MIMEApplicationJSON)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("status=%d", response.StatusCode)
 	}
 }

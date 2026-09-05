@@ -189,8 +189,11 @@ func TestOAuthCompleteBindsCredentialToAuthenticatedUser(t *testing.T) {
 	start = startOAuthRoute(t, app, "master-secret")
 	response = completeOAuthRoute(t, app, "master-secret", start.FlowID, "ignored")
 	response.Body.Close()
-	if response.StatusCode != http.StatusForbidden {
+	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("master complete status=%d", response.StatusCode)
+	}
+	if len(repo.created) != 2 || repo.created[1].OwnerUserID != "" || repo.created[1].OwnerTenant != nil {
+		t.Fatalf("master created ownership=%+v", repo.created)
 	}
 }
 
@@ -296,14 +299,25 @@ func oauthFiberRequest(t *testing.T, app *fiber.App, method, path, bearer string
 	return response
 }
 
-func TestOAuthCompleteRejectsClientSuppliedOwnerAndMasterCreation(t *testing.T) {
+func TestOAuthCompleteIgnoresClientSuppliedOwnerForMasterGlobalConnection(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "oauth-access", "refresh_token": "oauth-refresh"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"oauth_account": map[string]string{"account_uuid": "account-a"}})
+	}))
+	defer tokenServer.Close()
 	repo := &oauthRouteCredentialRepo{}
-	service := oauthpkg.New(nil, credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{})
+	service := oauthpkg.New(tokenServer.Client(), credential.NewService(repo, oauthRouteBox{}), oauthpkg.Config{ClaudeTokenURL: tokenServer.URL, ClaudeBootstrapURL: tokenServer.URL})
 	app := routes.New(routes.Dependencies{Auth: auth.NewService("master-secret", "session-secret", oauthRouteKeyLookup{}), OAuth: service})
 	start := startOAuthRoute(t, app, "master-secret")
-	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{"flow_id": start.FlowID, "owner_user_id": "user-control"})
+	response := oauthFiberRequest(t, app, http.MethodPost, "/admin/oauth/claude/complete", "master-secret", map[string]any{
+		"flow_id": start.FlowID, "callback": "returned-code#" + start.FlowID,
+		"owner_user_id": "user-control", "owner_organization_id": "org-control",
+	})
 	response.Body.Close()
-	if response.StatusCode != http.StatusForbidden || len(repo.created) != 0 {
+	if response.StatusCode != http.StatusCreated || len(repo.created) != 1 || repo.created[0].OwnerUserID != "" || repo.created[0].OwnerTenant != nil {
 		t.Fatalf("status=%d created=%+v", response.StatusCode, repo.created)
 	}
 }

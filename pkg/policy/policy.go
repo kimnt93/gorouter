@@ -59,6 +59,10 @@ func ManageKey(actor entities.Principal, key entities.ApiKey) error {
 		if actor.Type == entities.PrincipalUser && actor.UserID == key.OwnerUserID {
 			return nil
 		}
+		if actor.Type == entities.PrincipalUser && actor.MembershipRole == entities.MembershipAdmin &&
+			actor.OrganizationID != "" && actor.OrganizationID == key.ContextOrganizationID {
+			return nil
+		}
 	case entities.OwnerOrganization:
 		if actor.OrganizationID == key.OwnerOrganizationID &&
 			(actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin) {

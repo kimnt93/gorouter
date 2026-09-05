@@ -620,17 +620,20 @@ func drainAndClose(body io.ReadCloser) {
 
 // ListModels returns enabled models allowed by the access context.
 // @Summary List available models
-// @Description Lists the public models available to the authenticated principal and API key.
+// @Description Without credentials, lists the current callable catalog. With a bearer API key, lists only models allowed by that key and backed by its sharing connection owner.
 // @Tags gateway
-// @Security BearerAuth
 // @Success 200 {object} llm.ModelList
 // @Failure 401,403,500 {object} responseapi.ErrorResponse
 // @Router /v1/models [get]
 func (g *Gateway) ListModels(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	key, err := g.accessForSession(c, sess)
-	if err != nil {
-		return responseapi.For(c).Unauthorized("API key required").Send()
+	key := &GatewayAccessContext{ApiKey: &entities.ApiKey{}, Master: true, Actor: entities.UsageActor{Type: entities.ActorMaster}}
+	if sess != nil {
+		var err error
+		key, err = g.accessForSession(c, sess)
+		if err != nil {
+			return responseapi.For(c).Unauthorized("API key required").Send()
+		}
 	}
 	models, err := g.Models.List(c.Context())
 	if err != nil {

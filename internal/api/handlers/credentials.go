@@ -235,7 +235,7 @@ func (h *CredentialConnectivity) credential(c fiber.Ctx, id string) (*entities.C
 
 func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
 	sess := SessionFrom(c)
-	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+	if _, allowed := credentialOwnerForSession(sess); !allowed {
 		return false
 	}
 	credentials, err := h.Credentials.List(c.Context())
@@ -244,7 +244,7 @@ func (h *CredentialConnectivity) authorize(c fiber.Ctx) bool {
 	}
 	for _, candidate := range credentials {
 		if candidate.ID == c.Params("id") {
-			return candidate.OwnerUserID == sess.UserID
+			return credentialOwnedBySession(candidate, sess)
 		}
 	}
 	return false

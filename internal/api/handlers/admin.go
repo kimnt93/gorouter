@@ -288,7 +288,8 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 // @Router /admin/credentials [post]
 func (a *Admin) Credentials(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	if sess == nil || sess.PrincipalType != entities.PrincipalUser || strings.TrimSpace(sess.UserID) == "" {
+	ownerUserID, allowed := credentialOwnerForSession(sess)
+	if !allowed {
 		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
 	if c.Method() == fiber.MethodGet {
@@ -308,7 +309,7 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if b.Provider == "" {
 		b.Provider = entities.ProviderOpenAICompatible
 	}
-	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerUserID: sess.UserID})
+	v, err := a.CredsSvc.Create(c.Context(), entities.CredentialInput{Name: b.Name, Provider: b.Provider, Kind: b.Kind, BaseURL: b.BaseURL, APIKey: b.APIKey, OAuthAccess: b.OAuthAccess, OAuthRefresh: b.OAuthRefresh, OwnerUserID: ownerUserID})
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
@@ -480,13 +481,14 @@ func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	organizationID := strings.TrimSpace(c.Query("organization_id"))
 	if !sess.IsMaster() {
-		if sess.OrganizationID != "" {
-			organizationID = sess.OrganizationID
-		} else if organizationID != "" {
-			if a.IdentitySvc == nil || a.IdentitySvc.ValidateUserKeyContext(c.Context(), sess.UserID, organizationID) != nil {
-				return responseapi.For(c).Forbidden("active organization membership is required").Send()
-			}
+		if sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" ||
+			sess.MembershipRole != entities.MembershipAdmin || sess.OrganizationID == "" {
+			return responseapi.For(c).Forbidden("organization administration is required").Send()
 		}
+		if organizationID != "" && organizationID != sess.OrganizationID {
+			return responseapi.For(c).Forbidden("organization administration is required").Send()
+		}
+		organizationID = sess.OrganizationID
 	}
 	models, err := a.ModelsSvc.List(c.Context())
 	if err != nil {
@@ -498,7 +500,11 @@ func (a *Admin) KeyModelOptions(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load model connections").Send()
 	}
 	for _, credential := range credentials {
-		if credential.Status == entities.StatusActive && credential.OwnerUserID == sess.UserID {
+		ownedBySharer := credential.OwnerUserID == sess.UserID
+		if sess.IsMaster() {
+			ownedBySharer = credential.OwnerUserID == "" && credential.OwnerTenantID == nil
+		}
+		if credential.Status == entities.StatusActive && ownedBySharer {
 			visibleCredentials[credential.ID] = true
 		}
 	}
@@ -618,14 +624,19 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 			return responseapi.For(c).BadRequest("selected user must be an active member of the organization").Send()
 		}
 	}
+	if !sess.IsMaster() && (actor.Type != entities.PrincipalUser || actor.MembershipRole != entities.MembershipAdmin ||
+		actor.OrganizationID == "" || actor.OrganizationID != strings.TrimSpace(b.ContextOrganizationID)) {
+		return responseapi.For(c).Forbidden("organization administration is required to assign models").Send()
+	}
 	credentialOwnerUserID := strings.TrimSpace(sess.UserID)
-	if credentialOwnerUserID == "" {
+	globalCredentialOwner := sess.IsMaster()
+	if credentialOwnerUserID == "" && !globalCredentialOwner {
 		return responseapi.For(c).Forbidden("a user provider owner is required to share models").Send()
 	}
-	if err := a.validateCredentialBackedModels(c.Context(), credentialOwnerUserID, b.Models); err != nil {
+	if err := a.validateCredentialBackedModels(c.Context(), credentialOwnerUserID, globalCredentialOwner, b.Models); err != nil {
 		return responseapi.For(c).Forbidden("only models from your provider connections can be shared").Send()
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID, CredentialOwnerUserID: credentialOwnerUserID}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID, CredentialOwnerUserID: credentialOwnerUserID, CredentialOwnerGlobal: globalCredentialOwner}
 	v, err := a.KeysSvc.Create(c.Context(), in)
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
@@ -665,10 +676,11 @@ func (a *Admin) KeysPatch(c fiber.Ctx) error {
 	var err error
 	if b.Models != nil {
 		providerOwner := key.CredentialOwnerUserID
-		if providerOwner == "" {
-			providerOwner = key.OwnerUserID
+		globalCredentialOwner := providerOwner == "" && sess.IsMaster()
+		if providerOwner == "" && !globalCredentialOwner {
+			return responseapi.For(c).Forbidden("only the sharing principal can change assigned models").Send()
 		}
-		if validateErr := a.validateCredentialBackedModels(c.Context(), providerOwner, *b.Models); validateErr != nil {
+		if validateErr := a.validateCredentialBackedModels(c.Context(), providerOwner, globalCredentialOwner, *b.Models); validateErr != nil {
 			return responseapi.For(c).Forbidden("only models from the sharing user's provider connections can be assigned").Send()
 		}
 	}
@@ -1229,20 +1241,24 @@ func (a *Admin) sessionOwnsCredential(c fiber.Ctx, session *entities.Session, cr
 	}
 	for _, cred := range credentials {
 		if cred.ID == credentialID {
-			return session != nil && session.UserID != "" && cred.OwnerUserID == session.UserID
+			return credentialOwnedBySession(cred, session)
 		}
 	}
 	return false
 }
 
-func (a *Admin) validateCredentialBackedModels(ctx context.Context, ownerUserID string, names []string) error {
+func (a *Admin) validateCredentialBackedModels(ctx context.Context, ownerUserID string, globalOwner bool, names []string) error {
 	credentials, err := a.CredsSvc.List(ctx)
 	if err != nil {
 		return err
 	}
 	owned := make(map[string]bool)
 	for _, credential := range credentials {
-		if credential.Status == entities.StatusActive && credential.OwnerUserID == ownerUserID {
+		ownedBySharer := credential.OwnerUserID == ownerUserID
+		if globalOwner {
+			ownedBySharer = credential.OwnerUserID == "" && credential.OwnerTenantID == nil
+		}
+		if credential.Status == entities.StatusActive && ownedBySharer {
 			owned[credential.ID] = true
 		}
 	}

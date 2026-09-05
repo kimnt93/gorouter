@@ -64,6 +64,27 @@ func Require(authSvc *auth.Service, scope string) fiber.Handler {
 	}
 }
 
+// Optional authenticates a presented bearer token or session cookie while
+// allowing callers that present no credentials to continue anonymously.
+// Invalid credentials still fail closed instead of being treated as absent.
+func Optional(authSvc *auth.Service, scope string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		hasCredentials := strings.TrimSpace(c.Get(fiber.HeaderAuthorization)) != "" || c.Cookies(sessionCookie) != ""
+		sess := authenticate(c, authSvc)
+		if sess == nil {
+			if hasCredentials {
+				return responseapi.For(c).Unauthorized("authentication required").Send()
+			}
+			return c.Next()
+		}
+		if scope != "" && !sess.Has(scope) {
+			return responseapi.For(c).Error(fiber.StatusForbidden, "missing required access: "+scope, "permission_error", "scope_denied").Send()
+		}
+		c.Locals(localSession, sess)
+		return c.Next()
+	}
+}
+
 func SessionFrom(c fiber.Ctx) *entities.Session {
 	sess, _ := c.Locals(localSession).(*entities.Session)
 	return sess

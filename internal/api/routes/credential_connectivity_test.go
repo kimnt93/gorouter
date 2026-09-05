@@ -196,7 +196,7 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "foreign", "tenant-key", http.StatusNotFound, endpoint.body)
 			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "legacy", "tenant-key", http.StatusNotFound, endpoint.body)
 			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "foreign", "master-secret", http.StatusNotFound, endpoint.body)
-			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "legacy", "master-secret", http.StatusNotFound, endpoint.body)
+			assertConnectivityRouteStatus(t, app, endpoint.method, endpoint.path, "legacy", "master-secret", http.StatusOK, endpoint.body)
 		})
 	}
 	t.Run("model discovery marks first model as default", func(t *testing.T) {
@@ -235,8 +235,8 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 	if len(models.upserts) != 1 || models.upserts[0].Name != "custom/provider-model" || len(models.upserts[0].Routes) != 1 || models.upserts[0].Routes[0].CredentialID != "own" || models.upserts[0].Metadata == nil || models.upserts[0].Metadata.DisplayName != "Provider Model" {
 		t.Fatalf("personal import did not create the expected model route: %+v", models.upserts)
 	}
-	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "legacy", "master-secret", http.StatusNotFound, importBody)
-	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/refresh", "legacy", "master-secret", http.StatusNotFound, nil)
+	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/import", "legacy", "master-secret", http.StatusOK, importBody)
+	assertConnectivityRouteStatus(t, app, http.MethodPost, "/admin/credentials/%s/models/refresh", "legacy", "master-secret", http.StatusOK, nil)
 }
 
 func assertConnectivityRouteStatus(t *testing.T, app *fiber.App, method, path, credentialID, bearer string, want int, body any) {

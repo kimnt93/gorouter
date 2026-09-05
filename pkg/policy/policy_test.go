@@ -24,6 +24,9 @@ func TestAuthorizationMatrix(t *testing.T) {
 	if ManageKey(admin, userKey) != nil || ManageKey(admin, orgKey) != nil || ManageKey(org, orgKey) != nil {
 		t.Fatal("expected owners/admin to manage their keys")
 	}
+	if ManageKey(admin, entities.ApiKey{OwnerType: entities.OwnerUser, OwnerUserID: "u2", ContextOrganizationID: "o1"}) != nil {
+		t.Fatal("organization admin should manage a member key scoped to the same organization")
+	}
 	if !errors.Is(ManageKey(member, orgKey), ErrConcealed) || !errors.Is(ManageKey(admin, entities.ApiKey{OwnerType: entities.OwnerUser, OwnerUserID: "u2"}), ErrConcealed) {
 		t.Fatal("horizontal key access was not concealed")
 	}

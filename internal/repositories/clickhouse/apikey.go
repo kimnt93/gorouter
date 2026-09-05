@@ -154,9 +154,6 @@ func (r *ApiKeyRepo) GetByID(ctx context.Context, id string) (*entities.ApiKey, 
 	if v.OwnerType == "" {
 		v.OwnerType, v.OwnerOrganizationID, v.ContextOrganizationID = entities.OwnerOrganization, v.TenantID, v.TenantID
 	}
-	if v.CredentialOwnerUserID == "" && v.OwnerType == entities.OwnerUser {
-		v.CredentialOwnerUserID = v.OwnerUserID
-	}
 	return &v.ApiKey, nil
 }
 func (r *ApiKeyRepo) GetByIDForTenant(ctx context.Context, tenant, id string) (*entities.ApiKey, error) {

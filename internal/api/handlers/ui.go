@@ -851,7 +851,8 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest("unknown API-key provider").Send()
 	}
 	sess := SessionFrom(c)
-	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+	ownerUserID, allowed := credentialOwnerForSession(sess)
+	if !allowed {
 		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
 	name := strings.TrimSpace(c.FormValue("name"))
@@ -860,7 +861,7 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 	}
 	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{
 		Name: name, Provider: definition.ID, Kind: entities.KindAPIKey,
-		BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OwnerUserID: sess.UserID,
+		BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OwnerUserID: ownerUserID,
 	})
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
@@ -870,10 +871,11 @@ func (u *UI) ProviderConnect(c fiber.Ctx) error {
 
 func (u *UI) CredentialsCreate(c fiber.Ctx) error {
 	sess := SessionFrom(c)
-	if sess == nil || sess.PrincipalType != entities.PrincipalUser || sess.UserID == "" {
+	ownerUserID, allowed := credentialOwnerForSession(sess)
+	if !allowed {
 		return responseapi.For(c).Forbidden("provider connections are personal to users").Send()
 	}
-	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{Name: c.FormValue("name"), Provider: c.FormValue("provider"), Kind: c.FormValue("kind"), BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OAuthAccess: c.FormValue("oauth_access"), OAuthRefresh: c.FormValue("oauth_refresh"), OwnerUserID: sess.UserID})
+	_, err := u.Credentials.Create(c.Context(), entities.CredentialInput{Name: c.FormValue("name"), Provider: c.FormValue("provider"), Kind: c.FormValue("kind"), BaseURL: c.FormValue("base_url"), APIKey: c.FormValue("api_key"), OAuthAccess: c.FormValue("oauth_access"), OAuthRefresh: c.FormValue("oauth_refresh"), OwnerUserID: ownerUserID})
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
@@ -907,7 +909,7 @@ func (u *UI) CredentialToggle(c fiber.Ctx) error {
 			break
 		}
 	}
-	if selected == nil || (sess != nil && !sess.IsMaster() && !credentialOwnedBySession(*selected, sess)) {
+	if selected == nil || !credentialOwnedBySession(*selected, sess) {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	status := "active"
@@ -930,9 +932,7 @@ func (u *UI) loadCredentials(c fiber.Ctx) (pageData, error) {
 		return data, err
 	}
 	sess := SessionFrom(c)
-	if sess != nil && !sess.IsMaster() {
-		data.Credentials = filterCredentialsForSession(data.Credentials, sess)
-	}
+	data.Credentials = filterCredentialsForSession(data.Credentials, sess)
 	data.Tenants, err = u.Tenants.List(c.Context())
 	if sess != nil && !sess.IsMaster() {
 		data.Tenants = filterTenants(data.Tenants, sess.TenantID)
@@ -951,7 +951,7 @@ func (u *UI) ModelsPage(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load credentials").Send()
 	}
-	if sess := SessionFrom(c); sess != nil && !sess.IsMaster() {
+	if sess := SessionFrom(c); sess != nil {
 		data.Credentials = filterCredentialsForSession(data.Credentials, sess)
 		allowed := make(map[string]bool, len(data.Credentials))
 		for _, cred := range data.Credentials {
@@ -1138,7 +1138,26 @@ func (u *UI) sessionOwnsCredential(c fiber.Ctx, session *entities.Session, crede
 }
 
 func credentialOwnedBySession(credential entities.Credential, session *entities.Session) bool {
-	return session != nil && session.UserID != "" && credential.OwnerUserID == session.UserID
+	if session == nil || credential.OwnerTenantID != nil {
+		return false
+	}
+	if session.IsMaster() {
+		return credential.OwnerUserID == ""
+	}
+	return session.PrincipalType == entities.PrincipalUser && session.UserID != "" && credential.OwnerUserID == session.UserID
+}
+
+func credentialOwnerForSession(session *entities.Session) (string, bool) {
+	if session == nil {
+		return "", false
+	}
+	if session.IsMaster() {
+		return "", true
+	}
+	if session.PrincipalType == entities.PrincipalUser && strings.TrimSpace(session.UserID) != "" {
+		return session.UserID, true
+	}
+	return "", false
 }
 
 func filterTenants(in []entities.Tenant, tenantID string) []entities.Tenant {
@@ -1154,7 +1173,7 @@ func filterTenants(in []entities.Tenant, tenantID string) []entities.Tenant {
 func filterCredentialsForSession(in []entities.Credential, session *entities.Session) []entities.Credential {
 	out := make([]entities.Credential, 0, len(in))
 	for _, item := range in {
-		if session != nil && session.UserID != "" && item.OwnerUserID == session.UserID {
+		if credentialOwnedBySession(item, session) {
 			out = append(out, item)
 		}
 	}

@@ -106,6 +106,19 @@ func (r gatewayModelRepo) ListPrices(context.Context) (map[string]entities.Price
 	return map[string]entities.Price{}, nil
 }
 
+type gatewayModelsRepo struct{ models []entities.ModelDef }
+
+func (r gatewayModelsRepo) Upsert(context.Context, entities.ModelDef) error { return nil }
+func (r gatewayModelsRepo) Delete(context.Context, string) error            { return nil }
+func (r gatewayModelsRepo) List(context.Context) ([]entities.ModelDef, error) {
+	return append([]entities.ModelDef(nil), r.models...), nil
+}
+func (r gatewayModelsRepo) SetPrice(context.Context, string, entities.Price) error { return nil }
+func (r gatewayModelsRepo) DeletePrice(context.Context, string) error              { return nil }
+func (r gatewayModelsRepo) ListPrices(context.Context) (map[string]entities.Price, error) {
+	return map[string]entities.Price{}, nil
+}
+
 type gatewayUpstream struct {
 	statuses map[string]int
 	calls    []string
@@ -247,6 +260,58 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	}
 }
 
+func TestListModelsWithoutCredentialsReturnsCurrentCatalog(t *testing.T) {
+	gateway := &Gateway{
+		Creds: credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive}}}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{
+			Name: "model-a", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}},
+		}}),
+	}
+	app := fiber.New()
+	app.Get("/v1/models", gateway.ListModels)
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body llm.ModelList
+	if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != "model-a" {
+		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+	}
+}
+
+func TestListModelsWithAPIKeyReturnsOnlyItsAllowlist(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-a", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	gateway := &Gateway{
+		Keys:  apikey.NewService(gatewayKeyRepo{key: key}, func(string) string { return "" }, func() string { return "" }),
+		Creds: credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive}}}, nil),
+		Models: modelroute.NewService(gatewayModelsRepo{models: []entities.ModelDef{
+			{Name: "model-a", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}}},
+			{Name: "model-b", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}}},
+		}}),
+	}
+	app := fiber.New()
+	app.Get("/v1/models", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, Scopes: key.Scopes})
+		return gateway.ListModels(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body llm.ModelList
+	if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != "model-a" {
+		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+	}
+}
+
 func TestListModelsHidesModelsWithoutActiveCredentialRoutes(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -380,7 +445,7 @@ func TestKeyModelOptionsIncludesOnlyCallableModelsWithEffectivePrice(t *testing.
 	}
 	app := fiber.New()
 	app.Get("/admin/api-keys/models", func(c fiber.Ctx) error {
-		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "admin-user", Scopes: entities.AllScopes, AllowedModels: []string{model.Name}})
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "admin-user", OrganizationID: "org-a", MembershipRole: entities.MembershipAdmin, Scopes: entities.AllScopes, AllowedModels: []string{model.Name}})
 		return admin.KeyModelOptions(c)
 	})
 	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/admin/api-keys/models", nil))
@@ -394,6 +459,54 @@ func TestKeyModelOptionsIncludesOnlyCallableModelsWithEffectivePrice(t *testing.
 	}
 	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != model.Name || body.Data[0].Price.InputPerM != 0.2 || body.Data[0].Free {
 		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+	}
+}
+
+func TestKeyModelOptionsUsesOnlySharingPrincipalsCredentials(t *testing.T) {
+	organizationID := "org-a"
+	models := []entities.ModelDef{
+		{Name: "global-model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "global", Enabled: true}}},
+		{Name: "admin-model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "admin", Enabled: true}}},
+		{Name: "member-model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "member", Enabled: true}}},
+		{Name: "organization-model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "organization", Enabled: true}}},
+	}
+	admin := &Admin{
+		ModelsSvc: modelroute.NewService(gatewayModelsRepo{models: models}),
+		CredsSvc: credential.NewService(gatewayCredRepo{items: []entities.Credential{
+			{ID: "global", Status: entities.StatusActive},
+			{ID: "admin", Status: entities.StatusActive, OwnerUserID: "admin-user"},
+			{ID: "member", Status: entities.StatusActive, OwnerUserID: "member-user"},
+			{ID: "organization", Status: entities.StatusActive, OwnerTenantID: &organizationID},
+		}}, nil),
+	}
+
+	for _, test := range []struct {
+		name    string
+		session entities.Session
+		want    string
+	}{
+		{name: "master uses global connections", session: entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster, Scopes: entities.AllScopes}, want: "global-model"},
+		{name: "organization admin uses own connections", session: entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "admin-user", OrganizationID: organizationID, MembershipRole: entities.MembershipAdmin, Scopes: entities.AllScopes}, want: "admin-model"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := fiber.New()
+			app.Get("/models", func(c fiber.Ctx) error {
+				c.Locals(localSession, &test.session)
+				return admin.KeyModelOptions(c)
+			})
+			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/models?organization_id="+organizationID, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var body APIKeyModelOptionsResponse
+			if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != test.want {
+				t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+			}
+		})
 	}
 }
 
