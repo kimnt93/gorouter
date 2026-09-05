@@ -261,7 +261,7 @@ func (a *Admin) Organizations(c fiber.Ctx) error {
 	}
 	if c.Method() == fiber.MethodPost {
 		if err := policy.ManageOrganizations(actor); err != nil {
-			return responseapi.For(c).Forbidden("only master may create organizations").Send()
+			return responseapi.For(c).Forbidden("only authenticated users may create organizations").Send()
 		}
 		var body OrganizationCreateRequest
 		if err := c.Bind().Body(&body); err != nil {

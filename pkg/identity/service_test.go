@@ -189,3 +189,17 @@ func TestDisabledUserCannotBecomeMember(t *testing.T) {
 		t.Fatalf("disabled user add=%v", err)
 	}
 }
+
+func TestUserCreatesOrganizationAsInitialAdmin(t *testing.T) {
+	repo := newMemoryRepo()
+	service := NewService(repo, nil)
+	actor := entities.Principal{Type: entities.PrincipalUser, UserID: "user-1", Username: "owner@example.test"}
+	organization, err := service.CreateOrganization(context.Background(), actor, "My Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	membership, err := repo.Membership(context.Background(), organization.ID, actor.UserID)
+	if err != nil || membership.Role != entities.MembershipAdmin {
+		t.Fatalf("membership=%+v err=%v", membership, err)
+	}
+}

@@ -7,7 +7,7 @@ const api = vi.hoisted(() => ({
   createOrganization: vi.fn(), deleteMember: vi.fn(), updateMember: vi.fn(), updateOrganization: vi.fn(),
 }))
 vi.mock('../api/client', () => api)
-vi.mock('../context/SessionContext', () => ({ useSession: () => ({ isMasterView: true, viewOrganizationID: '', viewUserID: '', has: () => true }) }))
+vi.mock('../context/SessionContext', () => ({ useSession: () => ({ session: { principal_type: 'master' }, isMasterView: true, viewOrganizationID: '', viewUserID: '', has: () => true }) }))
 
 beforeEach(() => {
   api.getOrganizations.mockResolvedValue({ object: 'list', data: [

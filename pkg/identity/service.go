@@ -117,7 +117,7 @@ func (s *Service) SetUserStatus(ctx context.Context, actor entities.Principal, i
 }
 
 func (s *Service) CreateOrganization(ctx context.Context, actor entities.Principal, name string) (*entities.Organization, error) {
-	if actor.Type != entities.PrincipalMaster {
+	if actor.Type != entities.PrincipalMaster && (actor.Type != entities.PrincipalUser || actor.UserID == "") {
 		return nil, errors.New("forbidden")
 	}
 	name, normalized, err := entities.NormalizeOrganizationName(name)
@@ -128,6 +128,12 @@ func (s *Service) CreateOrganization(ctx context.Context, actor entities.Princip
 	organization := &entities.Organization{ID: entities.NewID("org"), Name: name, NormalizedName: normalized, Status: entities.StatusActive, CreatedAt: now, UpdatedAt: now}
 	if err := s.repo.CreateOrganization(ctx, *organization); err != nil {
 		return nil, err
+	}
+	if actor.Type == entities.PrincipalUser {
+		membership := entities.Membership{OrganizationID: organization.ID, UserID: actor.UserID, Role: entities.MembershipAdmin, CreatedAt: now, CreatedByActorType: actor.Type, CreatedByActorID: actor.UserID}
+		if err := s.repo.PutMembership(ctx, membership); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.appendAudit(ctx, actor, "organization.create", "organization", organization.ID, organization.ID, map[string]string{"name": name}); err != nil {
 		return nil, err

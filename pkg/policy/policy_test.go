@@ -70,3 +70,12 @@ func TestCredentialVisibility(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticatedUserCanCreateOrganization(t *testing.T) {
+	if err := ManageOrganizations(entities.Principal{Type: entities.PrincipalUser, UserID: "user-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ManageOrganizations(entities.Principal{Type: entities.PrincipalOrganization, OrganizationID: "org-1"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("error=%v", err)
+	}
+}

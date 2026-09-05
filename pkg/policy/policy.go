@@ -20,7 +20,12 @@ func ManageUsers(actor entities.Principal) error {
 	return nil
 }
 
-func ManageOrganizations(actor entities.Principal) error { return ManageUsers(actor) }
+func ManageOrganizations(actor entities.Principal) error {
+	if actor.Type == entities.PrincipalMaster || actor.Type == entities.PrincipalUser && actor.UserID != "" {
+		return nil
+	}
+	return ErrForbidden
+}
 
 func ViewOrganization(actor entities.Principal, organizationID string) error {
 	if actor.Type == entities.PrincipalMaster || actor.OrganizationID == organizationID {
