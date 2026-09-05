@@ -42,16 +42,29 @@ export function ProvidersPage() {
 
 interface SectionProps { title: string; detail: string; providers: ProviderDefinition[]; credentials: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }
 function ProviderSection({ title, detail, providers, credentials, onConnect, onModels, onChat, onChatAll, onRefresh }: SectionProps) {
-  return <section className="provider-section-react"><div className="section-heading"><div><h2>{title}</h2><p>{detail}</p></div><Badge>{providers.length}</Badge></div><div className="provider-grid-react">{providers.map((provider) => {
-    const accounts = credentials.filter((credential) => credential.provider === provider.id)
-    return <article className={`provider-card-react ${accounts.length ? 'has-accounts' : ''}`} key={provider.id}><div className="provider-card-head"><span className="provider-monogram">{provider.name.slice(0, 2)}</span><div><h3><TruncatedText>{provider.name}</TruncatedText></h3><p title={provider.description}>{provider.description}</p></div><Badge tone={accounts.length ? 'good' : ''}>{accounts.length ? `${accounts.length} connected` : provider.auth}</Badge></div>
-      {accounts.length > 0 && <><div className="provider-bulk-actions"><button className="button secondary" disabled={!accounts.some((account) => account.status === 'active')} onClick={() => onChatAll(provider, accounts.filter((account) => account.status === 'active'))}>Chat all accounts</button><small>One bounded test per active connection</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
-      <button className="button connect-button" onClick={() => onConnect(provider)}>Connect {provider.name}</button>
-    </article>
-  })}</div></section>
+  return <section className="provider-section-react"><div className="section-heading"><div><h2>{title}</h2><p>{detail}</p></div><Badge>{providers.length}</Badge></div><div className="provider-grid-react">{providers.map((provider) => <ProviderCard provider={provider} accounts={credentials.filter((credential) => credential.provider === provider.id)} onConnect={onConnect} onModels={onModels} onChat={onChat} onChatAll={onChatAll} onRefresh={onRefresh} key={provider.id} />)}</div></section>
 }
 
-function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh }: { credential: Credential; quotaSupported: boolean; onModels: () => void; onChat: () => void; onRefresh: () => Promise<void> }) {
+function ProviderCard({ provider, accounts, onConnect, onModels, onChat, onChatAll, onRefresh }: { provider: ProviderDefinition; accounts: Credential[]; onConnect: (provider: ProviderDefinition) => void; onModels: (credential: Credential) => void; onChat: (credential: Credential) => void; onChatAll: (provider: ProviderDefinition, accounts: Credential[]) => void; onRefresh: () => Promise<void> }) {
+  const [quotaReloadVersion, setQuotaReloadVersion] = useState(0)
+  const [reloadingAll, setReloadingAll] = useState(false)
+  const [reloadResult, setReloadResult] = useState('')
+  const activeAccounts = accounts.filter((account) => account.status === 'active')
+  const reloadAll = async () => {
+    setReloadingAll(true); setReloadResult('')
+    const results = await Promise.allSettled(activeAccounts.map((account) => refreshCredentialQuota(account.id)))
+    const passed = results.filter((result) => result.status === 'fulfilled').length
+    setQuotaReloadVersion((value) => value + 1)
+    setReloadResult(`${passed}/${activeAccounts.length} accounts reloaded`)
+    setReloadingAll(false)
+  }
+  return <article className={`provider-card-react ${accounts.length ? 'has-accounts' : ''}`}><div className="provider-card-head"><span className="provider-monogram">{provider.name.slice(0, 2)}</span><div><h3><TruncatedText>{provider.name}</TruncatedText></h3><p title={provider.description}>{provider.description}</p></div><Badge tone={accounts.length ? 'good' : ''}>{accounts.length ? `${accounts.length} connected` : provider.auth}</Badge></div>
+    {accounts.length > 0 && <><div className="provider-bulk-actions"><div><button className="button secondary" disabled={!activeAccounts.length} onClick={() => onChatAll(provider, activeAccounts)}>Chat all accounts</button>{provider.quota_supported && <button className="button secondary" disabled={reloadingAll || !activeAccounts.length} onClick={() => void reloadAll()}>{reloadingAll ? 'Reloading all…' : 'Reload all accounts'}</button>}</div><small>{reloadResult || 'One bounded action per active connection'}</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} quotaReloadVersion={quotaReloadVersion} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
+    <button className="button connect-button" onClick={() => onConnect(provider)}>Connect {provider.name}</button>
+  </article>
+}
+
+function ConnectionRow({ credential, quotaSupported, quotaReloadVersion, onModels, onChat, onRefresh }: { credential: Credential; quotaSupported: boolean; quotaReloadVersion: number; onModels: () => void; onChat: () => void; onRefresh: () => Promise<void> }) {
   const [result, setResult] = useState('')
   const [busy, setBusy] = useState(false)
   const [quota, setQuota] = useState<ProviderQuotaSnapshot | null>(null)
@@ -63,7 +76,7 @@ function ConnectionRow({ credential, quotaSupported, onModels, onChat, onRefresh
     let active = true
     void getCredentialQuota(credential.id).then((value) => { if (active) setQuota(value) }).catch((reason: Error) => { if (active) setResult(reason.message) })
     return () => { active = false }
-  }, [credential.id, quotaSupported])
+  }, [credential.id, quotaSupported, quotaReloadVersion])
   const run = async (action: () => Promise<void>) => { setBusy(true); setResult(''); try { await action() } catch (reason) { setResult((reason as Error).message) } finally { setBusy(false) } }
   const reloadQuota = async () => { setQuotaBusy(true); setResult(''); try { setQuota(await refreshCredentialQuota(credential.id)) } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) } }
   const loadResetCredits = async () => { setQuotaBusy(true); setResult(''); try { setResetCredits((await getCodexResetCredits(credential.id)).credits) } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) } }

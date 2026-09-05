@@ -173,6 +173,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Post("/users", admin.Users)
 	mgmt.Get("/users/:id", admin.UserByID)
 	mgmt.Patch("/users/:id", admin.UserByID)
+	mgmt.Delete("/users/:id", admin.UserByID)
 	mgmt.Get("/audit/events", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.AuditEvents)
 	mgmt.Get("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)
 	mgmt.Post("/credentials", handlers.Require(d.Auth, "credentials:manage"), admin.Credentials)

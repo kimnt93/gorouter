@@ -123,6 +123,26 @@ func (s *Service) SetUserStatus(ctx context.Context, actor entities.Principal, i
 	return s.appendAudit(ctx, actor, "user.status", "user", id, "", map[string]string{"status": status})
 }
 
+func (s *Service) DeleteUser(ctx context.Context, actor entities.Principal, id string) error {
+	if actor.Type != entities.PrincipalMaster {
+		return errors.New("forbidden")
+	}
+	id = strings.TrimSpace(id)
+	user, err := s.repo.UserByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s.cache != nil {
+		if err = s.cache.InvalidateUser(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err = s.repo.DeleteUserCascade(ctx, id); err != nil {
+		return err
+	}
+	return s.appendAudit(ctx, actor, "user.delete", "user", id, "", map[string]string{"username": user.NormalizedUsername})
+}
+
 func (s *Service) CreateOrganization(ctx context.Context, actor entities.Principal, name string) (*entities.Organization, error) {
 	if actor.Type != entities.PrincipalMaster && (actor.Type != entities.PrincipalUser || actor.UserID == "" || actor.UserRole != entities.UserRoleOrgManager) {
 		return nil, errors.New("forbidden")

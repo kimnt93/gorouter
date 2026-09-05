@@ -36,6 +36,7 @@ func (*viewIdentityRepository) ListUsers(context.Context, entities.PageQuery) ([
 func (*viewIdentityRepository) UpdateUserStatus(context.Context, string, string, time.Time) error {
 	return nil
 }
+func (*viewIdentityRepository) DeleteUserCascade(context.Context, string) error { return nil }
 func (*viewIdentityRepository) CreateOrganization(context.Context, entities.Organization) error {
 	return nil
 }

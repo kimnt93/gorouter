@@ -230,4 +230,14 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 			t.Fatal("audit event contains API key secret material")
 		}
 	}
+	if err := service.DeleteUser(ctx, master, provisionedUser.ID); err != nil {
+		t.Fatalf("delete user cascade: %v", err)
+	}
+	if _, err := backend.Identity.UserByID(ctx, provisionedUser.ID); err == nil {
+		t.Fatal("deleted user remains")
+	}
+	if _, err := backend.Keys.GetBySecret(ctx, provisionedKey.SecretHash); err == nil {
+		t.Fatal("deleted user's key remains valid")
+	}
+
 }

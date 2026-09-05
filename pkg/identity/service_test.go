@@ -50,6 +50,20 @@ func (r *memoryRepo) UpdateUserStatus(_ context.Context, id, status string, at t
 	r.users[id] = v
 	return nil
 }
+func (r *memoryRepo) DeleteUserCascade(_ context.Context, id string) error {
+	u, ok := r.users[id]
+	if !ok {
+		return entities.ErrNotFound
+	}
+	delete(r.users, id)
+	delete(r.names, u.NormalizedUsername)
+	for key, membership := range r.memberships {
+		if membership.UserID == id {
+			delete(r.memberships, key)
+		}
+	}
+	return nil
+}
 func (r *memoryRepo) CreateOrganization(_ context.Context, o entities.Organization) error {
 	if _, ok := r.organizationNames[o.NormalizedName]; ok {
 		return entities.ErrConflict
@@ -210,5 +224,26 @@ func TestOrdinaryUserCannotCreateOrganization(t *testing.T) {
 	actor := entities.Principal{Type: entities.PrincipalUser, UserID: "ordinary", UserRole: entities.UserRoleUser}
 	if _, err := service.CreateOrganization(context.Background(), actor, "Denied"); err == nil {
 		t.Fatal("ordinary user created an organization")
+	}
+}
+
+func TestDeleteUserRequiresMasterAndCascadesMemberships(t *testing.T) {
+	repo := newMemoryRepo()
+	service := NewService(repo, nil)
+	master := entities.Principal{Type: entities.PrincipalMaster}
+	user, _ := service.CreateUser(context.Background(), master, "delete@example.com")
+	organization, _ := service.CreateOrganization(context.Background(), master, "Delete Org")
+	_, _ = service.AddMembership(context.Background(), master, organization.ID, user.ID, entities.MembershipMember)
+	if err := service.DeleteUser(context.Background(), entities.Principal{Type: entities.PrincipalUser}, user.ID); err == nil {
+		t.Fatal("ordinary user deleted user")
+	}
+	if err := service.DeleteUser(context.Background(), master, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UserByID(context.Background(), user.ID); !errors.Is(err, entities.ErrNotFound) {
+		t.Fatalf("user remains: %v", err)
+	}
+	if memberships, _ := repo.ListMembershipsForUser(context.Background(), user.ID); len(memberships) != 0 {
+		t.Fatalf("memberships remain: %+v", memberships)
 	}
 }

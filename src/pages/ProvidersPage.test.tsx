@@ -115,3 +115,22 @@ test('runs one bounded chat test for every active account in a provider', async 
   expect(screen.getByText('2/2 passed')).toBeInTheDocument()
   expect(api.requestStream.mock.calls.some((call: unknown[]) => String(call[0]).includes('cred-off'))).toBe(false)
 })
+
+test('reloads quota for every active account from the provider card', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'codex', name: 'OpenAI Codex', description: 'Codex subscription', auth: 'oauth', protocol: 'codex', default_base_url: '', model_prefix: 'cx', custom_base_url: false, oauth_supported: true, oauth_refresh_required: true, quota_supported: true }] })
+  api.getCredentials.mockResolvedValue([
+    { id: 'cred-1', name: 'Account 1', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', owner_tenant_id: null, created_at: '' },
+    { id: 'cred-2', name: 'Account 2', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', owner_tenant_id: null, created_at: '' },
+    { id: 'cred-off', name: 'Disabled', provider: 'codex', kind: 'oauth', base_url: '', status: 'disabled', owner_tenant_id: null, created_at: '' },
+  ])
+  api.getCredentialQuota.mockImplementation((id: string) => Promise.resolve({ credential_id: id, provider: 'codex', account: id, available: true, windows: [] }))
+  api.refreshCredentialQuota.mockImplementation((id: string) => id === 'cred-2' ? Promise.reject(new Error('quota failed')) : Promise.resolve({ credential_id: id, provider: 'codex', account: id, available: true, windows: [] }))
+
+  render(<ProvidersPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Reload all accounts' }))
+  await waitFor(() => expect(api.refreshCredentialQuota).toHaveBeenCalledTimes(2))
+  expect(api.refreshCredentialQuota).toHaveBeenCalledWith('cred-1')
+  expect(api.refreshCredentialQuota).toHaveBeenCalledWith('cred-2')
+  expect(api.refreshCredentialQuota).not.toHaveBeenCalledWith('cred-off')
+  expect(await screen.findByText('1/2 accounts reloaded')).toBeInTheDocument()
+})

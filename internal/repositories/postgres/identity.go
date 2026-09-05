@@ -78,6 +78,34 @@ func (r *IdentityRepo) UpdateUserStatus(ctx context.Context, id, status string, 
 	return err
 }
 
+func (r *IdentityRepo) DeleteUserCascade(ctx context.Context, id string) error {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var exists bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return entities.ErrNotFound
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE owner_user_id=$1 OR credential_owner_user_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM credentials WHERE owner_user_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM organization_memberships WHERE user_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM users WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (r *IdentityRepo) CreateOrganization(ctx context.Context, organization entities.Organization) error {
 	_, err := r.db.Pool.Exec(ctx, `INSERT INTO organizations (id,name,normalized_name,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6)`, organization.ID, organization.Name, organization.NormalizedName, organization.Status, organization.CreatedAt, organization.UpdatedAt)
 	return err

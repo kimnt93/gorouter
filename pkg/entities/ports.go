@@ -104,6 +104,7 @@ type UserRepository interface {
 	UserByNormalizedUsername(ctx context.Context, normalized string) (*User, error)
 	ListUsers(ctx context.Context, query PageQuery) ([]User, string, error)
 	UpdateUserStatus(ctx context.Context, id, status string, updatedAt time.Time) error
+	DeleteUserCascade(ctx context.Context, id string) error
 }
 
 type OrganizationRepository interface {

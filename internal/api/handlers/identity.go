@@ -188,6 +188,7 @@ func (a *Admin) Users(c fiber.Ctx) error {
 // @Failure 400,401,403,404,500 {object} responseapi.ErrorResponse
 // @Router /admin/users/{id} [get]
 // @Router /admin/users/{id} [patch]
+// @Router /admin/users/{id} [delete]
 func (a *Admin) UserByID(c fiber.Ctx) error {
 	actor := principalFromSession(SessionFrom(c))
 	if err := policy.ManageUsers(actor); err != nil {
@@ -223,6 +224,12 @@ func (a *Admin) UserByID(c fiber.Ctx) error {
 			return responseapi.For(c).InternalError("failed to load recent user activity").Send()
 		}
 		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(UserDetailResponse{User: user, Memberships: memberships, Keys: ownedKeys, Usage: summary, Recent: recent.Data}).Send()
+	}
+	if c.Method() == fiber.MethodDelete {
+		if err = a.IdentitySvc.DeleteUser(c.Context(), actor, user.ID); err != nil {
+			return identityError(c, err)
+		}
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(okResponse{OK: true}).Send()
 	}
 	var body UserStatusRequest
 	if err = c.Bind().Body(&body); err != nil {

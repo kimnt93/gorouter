@@ -67,6 +67,7 @@ type oauthRouteIdentityRepo struct {
 }
 
 func (*oauthRouteIdentityRepo) CreateUser(context.Context, entities.User) error { return nil }
+func (*oauthRouteIdentityRepo) DeleteUserCascade(context.Context, string) error { return nil }
 func (r *oauthRouteIdentityRepo) UserByID(_ context.Context, id string) (*entities.User, error) {
 	if id != r.user.ID {
 		return nil, entities.ErrNotFound
