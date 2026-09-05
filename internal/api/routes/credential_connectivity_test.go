@@ -213,7 +213,7 @@ func TestCredentialConnectivityRoutesEnforceTenantOwnership(t *testing.T) {
 		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		if response.StatusCode != http.StatusOK || payload.DefaultModel != "provider-model" || len(payload.Data) != 1 || payload.Data[0].Object != "model" || !payload.Data[0].Default {
+		if response.StatusCode != http.StatusOK || payload.DefaultModel != "provider-model" || len(payload.Data) != 2 || payload.Data[0].ID != "auto" || payload.Data[1].Object != "model" || !payload.Data[1].Default {
 			t.Fatalf("model default payload = %+v status=%d", payload, response.StatusCode)
 		}
 	})

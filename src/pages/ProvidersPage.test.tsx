@@ -134,3 +134,16 @@ test('reloads quota for every active account from the provider card', async () =
   expect(api.refreshCredentialQuota).not.toHaveBeenCalledWith('cred-off')
   expect(await screen.findByText('1/2 accounts reloaded')).toBeInTheDocument()
 })
+
+
+test('tests every active provider account from the bulk shortcut', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'codex', name: 'OpenAI Codex', description: '', auth: 'oauth', protocol: 'codex', default_base_url: '', model_prefix: 'cx', custom_base_url: false, oauth_supported: true, oauth_refresh_required: true, quota_supported: true }] })
+  api.getCredentials.mockResolvedValue([{ id: 'cred-1', name: 'One', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', owner_tenant_id: null, created_at: '' }, { id: 'cred-2', name: 'Two', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', owner_tenant_id: null, created_at: '' }, { id: 'off', name: 'Off', provider: 'codex', kind: 'oauth', base_url: '', status: 'disabled', owner_tenant_id: null, created_at: '' }])
+  api.getCredentialQuota.mockResolvedValue({ credential_id: 'cred-1', provider: 'codex', available: true, windows: [] })
+  api.testCredential.mockResolvedValue({ ok: true, status: 200, latency_ms: 10 })
+  render(<ProvidersPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Test all accounts' }))
+  await waitFor(() => expect(api.testCredential).toHaveBeenCalledTimes(2))
+  expect(api.testCredential).not.toHaveBeenCalledWith('off')
+  expect(await screen.findByText('2/2 accounts healthy')).toBeInTheDocument()
+})

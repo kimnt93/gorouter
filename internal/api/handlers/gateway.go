@@ -337,6 +337,13 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	candidates = g.Selector.OrderWithAffinity(c.Context(), strategy, candidates, routeAffinity)
 	if autoRequested {
 		shuffleCandidates(candidates)
+		limit := g.AutoMaxTries
+		if limit <= 0 {
+			limit = 3
+		}
+		if len(candidates) > limit {
+			candidates = candidates[:limit]
+		}
 	}
 	available := candidates[:0]
 	quotaBlocked := 0

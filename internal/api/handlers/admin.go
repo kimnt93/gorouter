@@ -873,6 +873,9 @@ func (a *Admin) ModelUpsert(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest("invalid body").Send()
 	}
 	m.Name = decodedPathParam(c, "name")
+	if err := modelroute.ValidateBlendName(m.Name); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
 	if err := a.ModelsSvc.Upsert(c.Context(), m); err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}

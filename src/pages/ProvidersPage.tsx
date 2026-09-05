@@ -49,7 +49,14 @@ function ProviderCard({ provider, accounts, onConnect, onModels, onChat, onChatA
   const [quotaReloadVersion, setQuotaReloadVersion] = useState(0)
   const [reloadingAll, setReloadingAll] = useState(false)
   const [reloadResult, setReloadResult] = useState('')
+  const [testingAll, setTestingAll] = useState(false)
   const activeAccounts = accounts.filter((account) => account.status === 'active')
+  const testAll = async () => {
+    setTestingAll(true); setReloadResult('')
+    const results = await Promise.allSettled(activeAccounts.map((account) => testCredential(account.id)))
+    const passed = results.filter((result) => result.status === 'fulfilled' && result.value.ok).length
+    setReloadResult(`${passed}/${activeAccounts.length} accounts healthy`); setTestingAll(false)
+  }
   const reloadAll = async () => {
     setReloadingAll(true); setReloadResult('')
     const results = await Promise.allSettled(activeAccounts.map((account) => refreshCredentialQuota(account.id)))
@@ -59,7 +66,7 @@ function ProviderCard({ provider, accounts, onConnect, onModels, onChat, onChatA
     setReloadingAll(false)
   }
   return <article className={`provider-card-react ${accounts.length ? 'has-accounts' : ''}`}><div className="provider-card-head"><span className="provider-monogram">{provider.name.slice(0, 2)}</span><div><h3><TruncatedText>{provider.name}</TruncatedText></h3><p title={provider.description}>{provider.description}</p></div><Badge tone={accounts.length ? 'good' : ''}>{accounts.length ? `${accounts.length} connected` : provider.auth}</Badge></div>
-    {accounts.length > 0 && <><div className="provider-bulk-actions"><div><button className="button secondary" disabled={!activeAccounts.length} onClick={() => onChatAll(provider, activeAccounts)}>Chat all accounts</button>{provider.quota_supported && <button className="button secondary" disabled={reloadingAll || !activeAccounts.length} onClick={() => void reloadAll()}>{reloadingAll ? 'Reloading all…' : 'Reload all accounts'}</button>}</div><small>{reloadResult || 'One bounded action per active connection'}</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} quotaReloadVersion={quotaReloadVersion} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
+    {accounts.length > 0 && <><div className="provider-bulk-actions"><div><button className="button secondary" disabled={!activeAccounts.length} onClick={() => onChatAll(provider, activeAccounts)}>Chat all accounts</button><button className="button secondary" disabled={testingAll || !activeAccounts.length} onClick={() => void testAll()}>{testingAll ? 'Testing all…' : 'Test all accounts'}</button>{provider.quota_supported && <button className="button secondary" disabled={reloadingAll || !activeAccounts.length} onClick={() => void reloadAll()}>{reloadingAll ? 'Reloading all…' : 'Reload all accounts'}</button>}</div><small>{reloadResult || 'One bounded action per active connection'}</small></div><div className="connection-grid">{accounts.map((credential) => <ConnectionRow credential={credential} quotaSupported={provider.quota_supported} quotaReloadVersion={quotaReloadVersion} onModels={() => onModels(credential)} onChat={() => onChat(credential)} onRefresh={onRefresh} key={credential.id} />)}</div></>}
     <button className="button connect-button" onClick={() => onConnect(provider)}>Connect {provider.name}</button>
   </article>
 }

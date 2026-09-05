@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/kimnt93/gorouter/pkg/chat"
@@ -11,7 +12,7 @@ import (
 )
 
 var (
-	ErrModelName       = errors.New("model name is required")
+	ErrModelName       = errors.New("model name must contain only letters, numbers, underscores, and hyphens")
 	ErrModelStrategy   = errors.New("model strategy must be priority, round_robin, or cache_affinity")
 	ErrCredentialRoute = errors.New("model routes require unique credential IDs and positive weights")
 	ErrInvalidPrice    = errors.New("model prices must be finite and non-negative")
@@ -35,6 +36,8 @@ type Service struct {
 	repo       Repository
 	priceCache PriceCache
 }
+
+var blendNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
 
@@ -118,4 +121,24 @@ func (s *Service) DeletePrice(ctx context.Context, model string) error {
 
 func (s *Service) Prices(ctx context.Context) (map[string]entities.Price, error) {
 	return s.repo.ListPrices(ctx)
+}
+
+func ValidateBlendName(name string) error {
+	if !blendNamePattern.MatchString(strings.TrimSpace(name)) {
+		return ErrModelName
+	}
+	return nil
+}
+
+func isNamespacedModelName(name string) bool {
+	parts := strings.Split(name, "/")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts {
+		if !blendNamePattern.MatchString(part) {
+			return false
+		}
+	}
+	return true
 }

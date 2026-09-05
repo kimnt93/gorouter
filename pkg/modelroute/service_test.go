@@ -113,3 +113,16 @@ func (r *recordingModelRepository) Upsert(_ context.Context, model entities.Mode
 	r.models = append(r.models, model)
 	return nil
 }
+
+func TestValidateBlendNameAllowsOnlySafeCharacters(t *testing.T) {
+	for _, name := range []string{"blend", "my_blend-2", "ABC123"} {
+		if err := ValidateBlendName(name); err != nil {
+			t.Fatalf("%q: %v", name, err)
+		}
+	}
+	for _, name := range []string{"", "my blend", "provider/model", "../blend", "blend.auto"} {
+		if err := ValidateBlendName(name); !errors.Is(err, ErrModelName) {
+			t.Fatalf("%q error=%v", name, err)
+		}
+	}
+}

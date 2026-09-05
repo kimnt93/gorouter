@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"bufio"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"strings"
 	"time"
 
@@ -125,6 +127,23 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 			continue
 		}
 		seen[upstream] = true
+		if upstream == "auto" {
+			name := providerpkg.PublicModelID(runtime.Provider, "auto")
+			routes := make([]entities.ModelRoute, 0, len(discovered))
+			for _, item := range discovered {
+				if strings.TrimSpace(item.ID) != "" {
+					routes = append(routes, entities.ModelRoute{CredentialID: runtime.ID, UpstreamModel: item.ID, Priority: 0, Weight: 1, Enabled: true})
+				}
+			}
+			if len(routes) == 0 {
+				return responseapi.For(c).BadRequest("no provider models are available for auto").Send()
+			}
+			if err := h.ModelRoutes.Upsert(c.Context(), entities.ModelDef{Name: name, Strategy: chat.StrategyRoundRobin, UpstreamModel: "auto", Enabled: true, Routes: routes, Metadata: &entities.ModelMetadata{Provider: runtime.Provider}}); err != nil {
+				return responseapi.For(c).BadRequest(fmt.Sprintf("import auto: %v", err)).Send()
+			}
+			imported = append(imported, name)
+			continue
+		}
 		discoveredModel, exists := byUpstream[upstream]
 		if !exists {
 			return responseapi.For(c).BadRequest(fmt.Sprintf("model %s was not reported by the provider", upstream)).Send()
@@ -349,7 +368,10 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 		// other discovered model explicitly.
 		defaultModel = models[0].ID
 	}
-	out := ProviderModelsResponse{Object: "list", Provider: runtime.Provider, DefaultModel: defaultModel, Data: make([]ProviderModelResponse, 0, len(models))}
+	out := ProviderModelsResponse{Object: "list", Provider: runtime.Provider, DefaultModel: defaultModel, Data: make([]ProviderModelResponse, 0, len(models)+1)}
+	if len(models) > 0 {
+		out.Data = append(out.Data, ProviderModelResponse{ID: "auto", Object: "model", PublicID: providerpkg.PublicModelID(runtime.Provider, "auto"), Name: "Auto", Description: "Randomly selects a provider model"})
+	}
 	for _, model := range models {
 		object := model.Object
 		if object == "" {
@@ -410,6 +432,18 @@ func (h *CredentialConnectivity) Chat(c fiber.Ctx) error {
 	runtime, err := h.Credentials.Runtime(c.Context(), c.Params("id"))
 	if err != nil {
 		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	if input.Model == "auto" {
+		_, discoverer, _ := h.adapter(runtime.Provider)
+		models, discoverErr := h.Credentials.DiscoverModels(c.Context(), runtime.ID, discoverer)
+		if discoverErr != nil || len(models) == 0 {
+			return responseapi.For(c).BadRequest("no provider model is available for auto").Send()
+		}
+		n, randomErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(models))))
+		if randomErr != nil {
+			return responseapi.For(c).InternalError("failed to select an automatic model").Send()
+		}
+		input.Model = models[int(n.Int64())].ID
 	}
 	credentialRecord, err := h.credential(c, runtime.ID)
 	if err != nil {
