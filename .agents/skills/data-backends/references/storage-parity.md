@@ -40,13 +40,19 @@ Redis is coordination/cache state, not a durable identity backend.
 Keep both modes aligned for:
 
 - normalization and uniqueness;
-- user, organization, and membership status and last-admin rules;
+- user, organization, and membership status and last-admin rules; users have no
+  persisted application role—organization authority comes from membership role;
 - API-key owner/context validation and visibility;
 - personal versus organization credential visibility;
 - model routes, prices, and Free/zero resolution;
 - usage actor snapshots, four token/cost components, activity aggregation,
   filters, cursor order, and details;
-- audit ordering, visibility, and secret-safe metadata.
+- audit ordering, visibility, and secret-safe metadata;
+- cascading user deletion: invalidate authorization, remove user-owned/dependent
+  API keys, personal credentials, their model routes and provider-quota
+  snapshots, memberships, username lookup, and user record while retaining
+  immutable usage/audit snapshots. PostgreSQL performs the mutation
+  transactionally; local/ClickHouse must expose equivalent behavior.
 
 PostgreSQL may use constraints, joins, and transactions. ClickHouse uses
 append/replacing patterns and denormalized records; uniqueness-sensitive config

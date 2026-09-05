@@ -5,8 +5,7 @@
 | Principal | Base visibility | Organization context |
 |---|---|---|
 | Master | Global | May View As one organization admin; can always return to master |
-| User, ordinary member | Own private data and own usage | May use a stored organization-scoped key for an active membership; cannot become master/admin by selecting context |
-| User, organization admin | Own private data plus administered organization data | May View As administered organizations only |
+| User | Own private data, own usage, and organizations where they are an active member | May create organizations; the creator becomes that organization’s initial membership admin. May View As only organizations they administer; selecting context never grants membership or an admin role. |
 | Organization key | Its organization and stored scopes | Fixed to its owner organization |
 
 Authentication resolves current status every time it matters: enabled key,
@@ -39,8 +38,9 @@ an organization's admin lens:
   model keys for organization members according to policy.
 - A member's personal credentials/OAuth and personal usage remain private from
   the organization admin.
-- Plaintext key material appears once. Credentials are encrypted and exposed
-  only as safe preview/metadata.
+- New API-key plaintext is returned once and may be retained only encrypted at
+  rest for the authorized reveal flow. Lists expose only safe metadata. Legacy
+  keys without encrypted reveal material require rotation before reveal.
 
 ## Model and routing context
 
@@ -54,7 +54,16 @@ organization-owned:   <organization-slug>/<provider-prefix>/<upstream-model>
   attribution.
 - Organization-context calls can use routes legal for that organization.
 - A blend is a stack of routes behind one public model; route selection retains
-  the original credential/upstream model for pricing and usage.
+  the original credential/upstream model for pricing and usage. User-entered
+  blend names accept only letters, digits, `_`, and `-`; provider/system
+  namespaces are generated server-side.
+- `auto`, `<provider-prefix>/auto`, and `<blend>/auto` are real callable aliases.
+  They randomize only eligible routes, obey `AUTO_MAX_TRIES`, preserve route
+  ownership/quota/health, and record the selected upstream model. Provider
+  discovery/list selectors include `auto`.
+- Auto price presentation is the arithmetic average of available routed prices,
+  rounded to four decimals; actual usage cost uses the selected route’s original
+  model price.
 - Model allowlists fail closed. `/v1/models` returns exactly enabled models the
   key may call, including safe price information where the contract provides
   it.

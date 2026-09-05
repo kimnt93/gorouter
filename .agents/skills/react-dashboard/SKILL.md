@@ -26,7 +26,8 @@ formatting, and interaction rules.
 5. Keep operational tables readable on desktop. Truncate long values in the
    layout and expose the complete safe value with native title/tooltip or an
    accessible detail view. Never put secrets, prompts, completions, hashes, or
-   cookies into browser state.
+   cookies into persistent browser storage. One-time secret display may use
+   transient component state that is cleared when its modal closes.
 6. Style every select/dropdown consistently, make long lists searchable, and
    number list/table rows where order matters. Keep charts compact, fill the
    available width from the right, and make labels and hover details legible.

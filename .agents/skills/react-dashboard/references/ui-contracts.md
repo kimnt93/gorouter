@@ -51,6 +51,10 @@
   rates to at most four decimal places.
 - Missing price is labeled Free and displayed as zero cost.
 - Model route editors support a stack of routes behind one public model.
+  User-entered blend names permit only letters, digits, `_`, and `-`.
+- Model catalogs and provider chat/model selectors include `auto`. Show provider
+  and blend auto aliases explicitly; auto rates are arithmetic averages rounded
+  to four decimals, while settled cost follows the selected upstream route.
 - Model/key usage help includes a copyable curl example that uses the current
   login/API-key context without serializing secrets into persisted browser
   state.
@@ -63,3 +67,10 @@
 - Provider connection screens support API-key/OAuth connection, health,
   discovery/import, bounded chat test, quota reload, enable/disable, and delete.
   Personal connections remain invisible to organization admins.
+- Provider cards with accounts expose bulk Chat, Test, and (when supported)
+  Reload. Chat/Test open result modals with per-account
+  pending/running/success/failure details, aggregate progress, bounded
+  concurrency, rerun, and disabled-account exclusion.
+- The Users page has no stored role picker or role column. Master manages users;
+  every authenticated user may create an organization and sees only
+  organizations where they have membership.

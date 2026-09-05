@@ -36,14 +36,19 @@ Always include the relevant negative paths:
 
 - missing scope, inactive owner/membership, foreign ID, and forged
   organization context;
-- empty/unknown model allowlist;
+- empty/unknown model allowlist; provider/blend `auto` listing, authorization,
+  bounded attempts, random failover, and selected-route pricing;
 - cross-user, cross-key, and cross-organization cache/query isolation;
 - Redis strict outage and contention;
 - provider timeout, retryable versus non-retryable status, malformed stream,
   client cancellation, and omitted usage;
 - Free/zero price and four token/cost components;
-- one-time secret exclusion from list responses, audit, logs, UI state, and
-  generated fixtures.
+- one-time/encrypted-reveal secret exclusion from list responses, audit, logs, UI
+  persistence, and generated fixtures;
+- user deletion removes live authentication references but retains immutable
+  historical usage/audit snapshots;
+- provider bulk actions skip disabled accounts and show partial-success details
+  without aborting remaining work.
 
 ## Generated artifacts
 

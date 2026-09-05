@@ -37,9 +37,7 @@ URL, and quota flags; this table is an orientation aid.
 6. **Registration:** wire the adapter/prober/upstream/OAuth config in
    `cmd/gorouter/main.go`. Add the right entry to the `providerProbes` and
    derived upstream maps.
-7. **HTTP and UI:** ensure `/admin/providers`, connection create, health,
-   discovery/import, direct chat test, quota, enable/disable, and delete
-   contracts represent the feature. The React UI renders catalog metadata; it
+7. **HTTP and UI:** ensure `/admin/providers`, connection create, health, discovery/import, direct chat test, quota, enable/disable, and delete contracts represent the feature. Provider cards expose bulk **Chat all**, **Test all**, and quota-supported **Reload all** actions. Bulk actions skip disabled accounts, use bounded concurrency, and show per-account results in a modal rather than only a summary. The React UI renders catalog metadata; it
    must never receive stored secrets.
 8. **Tests:** use `httptest.Server` to assert URL, headers, typed body,
    refresh-on-401, response parsing, discovery, stream fragments, safe errors,
@@ -63,9 +61,9 @@ URL, and quota flags; this table is an orientation aid.
 - `provider.OrganizationModelID(orgName, providerID, upstream)` creates the
   organization route ID using a normalized slug.
 - The credential's server-derived ownership selects which helper is legal.
-- A model blend/route stack retains one public model with multiple ordered
-  routes. Priority/weight and provider account health decide the selected
-  original route.
+- A model blend/route stack retains one public model with multiple ordered routes. Priority/weight and provider account health decide the selected original route.
+- Successful provider discovery maintains a static `<provider-prefix>/auto` route across discovered upstream models. Multi-route user blends maintain `<blend>/auto`. Direct credential model/chat lists prepend `auto`; importing it creates the provider auto route. Never send literal `auto` upstream—resolve an eligible upstream model first.
+- Automatic routing randomizes eligible routes, caps distinct attempts with `AUTO_MAX_TRIES`, skips disabled/unowned/unhealthy routes, and does not use deterministic response caching.
 - Price resolution may check the public model and upstream model, but recorded
   cost uses the resolved original model rates. Do not invent a price for an
   alias; missing pricing is explicit Free/zero.
