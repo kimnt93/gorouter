@@ -43,8 +43,8 @@ func NewService(repo Repository, audit entities.AuditRepository) *Service {
 }
 func (s *Service) SetAuthorizationCache(cache AuthorizationCache) { s.cache = cache }
 
-func (s *Service) CreateUser(ctx context.Context, actor entities.Principal, username string, roles ...string) (*entities.User, error) {
-	user, err := s.prepareUser(actor, username, roles...)
+func (s *Service) CreateUser(ctx context.Context, actor entities.Principal, username string) (*entities.User, error) {
+	user, err := s.prepareUser(actor, username)
 	if err != nil {
 		return nil, err
 	}
@@ -57,8 +57,8 @@ func (s *Service) CreateUser(ctx context.Context, actor entities.Principal, user
 	return user, nil
 }
 
-func (s *Service) CreateUserWithInitialKey(ctx context.Context, actor entities.Principal, username string, keys *apikey.Service, input apikey.CreateInput, roles ...string) (*entities.User, *entities.ApiKey, error) {
-	user, err := s.prepareUser(actor, username, roles...)
+func (s *Service) CreateUserWithInitialKey(ctx context.Context, actor entities.Principal, username string, keys *apikey.Service, input apikey.CreateInput) (*entities.User, *entities.ApiKey, error) {
+	user, err := s.prepareUser(actor, username)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -84,7 +84,7 @@ func (s *Service) CreateUserWithInitialKey(ctx context.Context, actor entities.P
 	return user, key, nil
 }
 
-func (s *Service) prepareUser(actor entities.Principal, username string, roles ...string) (*entities.User, error) {
+func (s *Service) prepareUser(actor entities.Principal, username string) (*entities.User, error) {
 	if actor.Type != entities.PrincipalMaster {
 		return nil, errors.New("forbidden")
 	}
@@ -92,15 +92,8 @@ func (s *Service) prepareUser(actor entities.Principal, username string, roles .
 	if err != nil {
 		return nil, err
 	}
-	role := entities.UserRoleUser
-	if len(roles) > 0 && strings.TrimSpace(roles[0]) != "" {
-		role = strings.ToLower(strings.TrimSpace(roles[0]))
-	}
-	if !entities.ValidUserRole(role) {
-		return nil, entities.ErrInvalidRole
-	}
 	now := s.now()
-	user := &entities.User{ID: entities.NewID("usr"), Username: normalized, NormalizedUsername: normalized, Status: entities.StatusActive, Role: role, CreatedAt: now, UpdatedAt: now}
+	user := &entities.User{ID: entities.NewID("usr"), Username: normalized, NormalizedUsername: normalized, Status: entities.StatusActive, CreatedAt: now, UpdatedAt: now}
 	return user, nil
 }
 
@@ -144,7 +137,7 @@ func (s *Service) DeleteUser(ctx context.Context, actor entities.Principal, id s
 }
 
 func (s *Service) CreateOrganization(ctx context.Context, actor entities.Principal, name string) (*entities.Organization, error) {
-	if actor.Type != entities.PrincipalMaster && (actor.Type != entities.PrincipalUser || actor.UserID == "" || actor.UserRole != entities.UserRoleOrgManager) {
+	if actor.Type != entities.PrincipalMaster && (actor.Type != entities.PrincipalUser || actor.UserID == "") {
 		return nil, errors.New("forbidden")
 	}
 	name, normalized, err := entities.NormalizeOrganizationName(name)

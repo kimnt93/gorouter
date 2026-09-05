@@ -3368,7 +3368,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists users visible to the current principal or creates a role-based user with one generated initial API key and the virtual auto model.",
+                "description": "Lists users visible to the current principal or creates a user with one generated initial API key and the virtual auto model.",
                 "tags": [
                     "users"
                 ],
@@ -3466,7 +3466,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists users visible to the current principal or creates a role-based user with one generated initial API key and the virtual auto model.",
+                "description": "Lists users visible to the current principal or creates a user with one generated initial API key and the virtual auto model.",
                 "tags": [
                     "users"
                 ],
@@ -5416,9 +5416,6 @@
                 "normalized_username": {
                     "type": "string"
                 },
-                "role": {
-                    "type": "string"
-                },
                 "status": {
                     "type": "string"
                 },
@@ -5913,9 +5910,6 @@
                     }
                 },
                 "user_id": {
-                    "type": "string"
-                },
-                "user_role": {
                     "type": "string"
                 },
                 "username": {
@@ -6761,9 +6755,6 @@
                 "initial_key": {
                     "$ref": "#/definitions/internal_api_handlers.InitialKeyRequest"
                 },
-                "role": {
-                    "type": "string"
-                },
                 "username": {
                     "type": "string"
                 }
@@ -6825,9 +6816,6 @@
                     }
                 },
                 "normalized_username": {
-                    "type": "string"
-                },
-                "role": {
                     "type": "string"
                 },
                 "status": {

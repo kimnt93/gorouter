@@ -40,7 +40,6 @@ type Session struct {
 	Username              string   `json:"username,omitempty"`
 	OrganizationID        string   `json:"organization_id,omitempty"`
 	MembershipRole        string   `json:"membership_role,omitempty"`
-	UserRole              string   `json:"user_role,omitempty"`
 	AllowedModels         []string `json:"-"`
 	CredentialOwnerUserID string   `json:"-"`
 }

@@ -3371,7 +3371,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists users visible to the current principal or creates a role-based user with one generated initial API key and the virtual auto model.",
+                "description": "Lists users visible to the current principal or creates a user with one generated initial API key and the virtual auto model.",
                 "tags": [
                     "users"
                 ],
@@ -3469,7 +3469,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists users visible to the current principal or creates a role-based user with one generated initial API key and the virtual auto model.",
+                "description": "Lists users visible to the current principal or creates a user with one generated initial API key and the virtual auto model.",
                 "tags": [
                     "users"
                 ],
@@ -5419,9 +5419,6 @@ const docTemplate = `{
                 "normalized_username": {
                     "type": "string"
                 },
-                "role": {
-                    "type": "string"
-                },
                 "status": {
                     "type": "string"
                 },
@@ -5916,9 +5913,6 @@ const docTemplate = `{
                     }
                 },
                 "user_id": {
-                    "type": "string"
-                },
-                "user_role": {
                     "type": "string"
                 },
                 "username": {
@@ -6764,9 +6758,6 @@ const docTemplate = `{
                 "initial_key": {
                     "$ref": "#/definitions/internal_api_handlers.InitialKeyRequest"
                 },
-                "role": {
-                    "type": "string"
-                },
                 "username": {
                     "type": "string"
                 }
@@ -6828,9 +6819,6 @@ const docTemplate = `{
                     }
                 },
                 "normalized_username": {
-                    "type": "string"
-                },
-                "role": {
                     "type": "string"
                 },
                 "status": {

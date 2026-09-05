@@ -90,7 +90,6 @@ export interface User {
   id: string
   username: string
   status: string
-  role?: 'org_manager' | 'user'
   created_at: string
   updated_at: string
 	 memberships?: Membership[]
@@ -124,7 +123,6 @@ export interface Session {
   username?: string
   organization_id?: string
   membership_role?: string
-  user_role?: 'org_manager' | 'user'
   scopes: string[]
 }
 

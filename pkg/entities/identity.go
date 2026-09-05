@@ -14,9 +14,6 @@ const (
 	MembershipMember = "member"
 	MembershipAdmin  = "admin"
 
-	UserRoleOrgManager = "org_manager"
-	UserRoleUser       = "user"
-
 	PrincipalMaster       = "master"
 	PrincipalUser         = "user"
 	PrincipalOrganization = "organization"
@@ -43,7 +40,6 @@ type User struct {
 	Username           string    `json:"username"`
 	NormalizedUsername string    `json:"normalized_username"`
 	Status             string    `json:"status"`
-	Role               string    `json:"role"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -76,7 +72,6 @@ type Principal struct {
 	OrganizationID   string   `json:"organization_id,omitempty"`
 	OrganizationName string   `json:"organization_name,omitempty"`
 	MembershipRole   string   `json:"membership_role,omitempty"`
-	UserRole         string   `json:"user_role,omitempty"`
 	Scopes           []string `json:"scopes"`
 }
 
@@ -122,20 +117,6 @@ func ValidStatus(value string) bool { return value == StatusActive || value == S
 func ValidMembershipRole(value string) bool {
 	return value == MembershipMember || value == MembershipAdmin
 }
-
-func NormalizeUserRole(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return UserRoleUser
-	}
-	return value
-}
-
-func ValidUserRole(value string) bool {
-	return value == UserRoleOrgManager || value == UserRoleUser
-}
-
-func (p Principal) IsManager() bool { return p.Type == PrincipalMaster }
 
 // ValidateOwnerShape validates structural ownership. Membership and current
 // owner state are intentionally checked by the identity use case.

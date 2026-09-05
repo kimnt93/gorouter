@@ -56,7 +56,7 @@ func RunIdentityBackendContract(t *testing.T, backend IdentityBackend) {
 		t.Fatal(err)
 	}
 	provisionedAt := time.Now().UTC()
-	provisionedUser := entities.User{ID: entities.NewID("usr"), Username: "provisioned-" + suffix + "@example.com", NormalizedUsername: "provisioned-" + suffix + "@example.com", Status: entities.StatusActive, Role: entities.UserRoleUser, CreatedAt: provisionedAt, UpdatedAt: provisionedAt}
+	provisionedUser := entities.User{ID: entities.NewID("usr"), Username: "provisioned-" + suffix + "@example.com", NormalizedUsername: "provisioned-" + suffix + "@example.com", Status: entities.StatusActive, CreatedAt: provisionedAt, UpdatedAt: provisionedAt}
 	provisionedKey := entities.ApiKey{ID: entities.NewID("key"), Name: "initial", SecretHash: "hash-" + suffix, SecretPrefix: "nr-preview", Models: []string{"m"}, Scopes: []string{entities.ScopeChat}, QuotaPeriod: entities.QuotaPeriodNone, Enabled: true, CreatedAt: provisionedAt, OwnerType: entities.OwnerUser, OwnerUserID: provisionedUser.ID}
 	provisionAudit := []entities.AuditEvent{{ID: entities.NewID("audit"), TS: provisionedAt, ActorType: entities.ActorMaster, ActorID: "master", ActorLabel: "master", Action: "user.create", TargetType: "user", TargetID: provisionedUser.ID, SafeMetadata: map[string]string{"username": provisionedUser.Username}}}
 	if err := backend.Keys.CreateUserWithInitialKey(ctx, provisionedUser, provisionedKey, provisionAudit); err != nil {

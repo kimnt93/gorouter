@@ -35,9 +35,6 @@ func (r *IdentityRepo) CreateUser(ctx context.Context, user entities.User) error
 
 func (r *IdentityRepo) UserByID(ctx context.Context, id string) (*entities.User, error) {
 	user, err := get[entities.User](ctx, r.s, "user", id)
-	if user != nil {
-		user.Role = entities.NormalizeUserRole(user.Role)
-	}
 	return user, err
 }
 
@@ -51,9 +48,6 @@ func (r *IdentityRepo) UserByNormalizedUsername(ctx context.Context, normalized 
 
 func (r *IdentityRepo) ListUsers(ctx context.Context, query entities.PageQuery) ([]entities.User, string, error) {
 	users, err := list[entities.User](ctx, r.s, "user")
-	for i := range users {
-		users[i].Role = entities.NormalizeUserRole(users[i].Role)
-	}
 	if err != nil {
 		return nil, "", err
 	}

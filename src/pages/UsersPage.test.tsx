@@ -5,7 +5,7 @@ import { UsersPage } from './UsersPage'
 const api = vi.hoisted(() => ({ createUser: vi.fn(), deleteUser: vi.fn(), getUsers: vi.fn(), setUserStatus: vi.fn() }))
 vi.mock('../api/client', () => api)
 afterEach(cleanup)
-beforeEach(() => { vi.clearAllMocks(); api.getUsers.mockResolvedValue({ object: 'list', data: [{ id: 'user-1', username: 'person@example.test', role: 'user', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }] }); api.deleteUser.mockResolvedValue({ ok: true }); vi.spyOn(window, 'confirm').mockReturnValue(true) })
+beforeEach(() => { vi.clearAllMocks(); api.getUsers.mockResolvedValue({ object: 'list', data: [{ id: 'user-1', username: 'person@example.test', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }] }); api.deleteUser.mockResolvedValue({ ok: true }); vi.spyOn(window, 'confirm').mockReturnValue(true) })
 
 test('confirms and deletes a user with cascading access warning', async () => {
   render(<UsersPage />)

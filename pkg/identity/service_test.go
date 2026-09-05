@@ -207,7 +207,7 @@ func TestDisabledUserCannotBecomeMember(t *testing.T) {
 func TestUserCreatesOrganizationAsInitialAdmin(t *testing.T) {
 	repo := newMemoryRepo()
 	service := NewService(repo, nil)
-	actor := entities.Principal{Type: entities.PrincipalUser, UserID: "user-1", Username: "owner@example.test", UserRole: entities.UserRoleOrgManager}
+	actor := entities.Principal{Type: entities.PrincipalUser, UserID: "user-1", Username: "owner@example.test"}
 	organization, err := service.CreateOrganization(context.Background(), actor, "My Team")
 	if err != nil {
 		t.Fatal(err)
@@ -218,12 +218,16 @@ func TestUserCreatesOrganizationAsInitialAdmin(t *testing.T) {
 	}
 }
 
-func TestOrdinaryUserCannotCreateOrganization(t *testing.T) {
+func TestUserCanCreateOrganization(t *testing.T) {
 	repo := newMemoryRepo()
 	service := NewService(repo, nil)
-	actor := entities.Principal{Type: entities.PrincipalUser, UserID: "ordinary", UserRole: entities.UserRoleUser}
-	if _, err := service.CreateOrganization(context.Background(), actor, "Denied"); err == nil {
-		t.Fatal("ordinary user created an organization")
+	actor := entities.Principal{Type: entities.PrincipalUser, UserID: "ordinary"}
+	organization, err := service.CreateOrganization(context.Background(), actor, "Allowed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if membership, err := repo.Membership(context.Background(), organization.ID, actor.UserID); err != nil || membership.Role != entities.MembershipAdmin {
+		t.Fatalf("membership=%+v err=%v", membership, err)
 	}
 }
 
