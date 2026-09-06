@@ -416,10 +416,11 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			upstreamModel = model.Name
 		}
 		var (
-			result       *entities.UpstreamResult
-			transportErr bool
-			exhausted    bool
-			accountLocal bool
+			result          *entities.UpstreamResult
+			transportErr    bool
+			exhausted       bool
+			accountLocal    bool
+			transientStatus int
 		)
 		attempts := g.routeAttempts(runtime.Provider)
 		for attempt := 0; attempt < attempts; attempt++ {
@@ -459,6 +460,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			}
 			if sent.StatusCode < 200 || sent.StatusCode >= 300 {
 				lastStatus = sent.StatusCode
+				if retryableStatus(sent.StatusCode) {
+					transientStatus = sent.StatusCode
+				}
 			}
 			if accountLocalStatus(runtime.Provider, sent.StatusCode) {
 				drainAndClose(sent.Body)
@@ -500,7 +504,12 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			} else if exhausted && g.ProviderQuotas != nil {
 				g.ProviderQuotas.MarkExhausted(credentialID)
 			}
-			if !accountLocal && (!exhausted || transportErr) {
+			// A quota-aware account must be advanced after a transient upstream
+			// 5xx, but a provider-wide overload response is not proof that this
+			// credential is unhealthy. Do not ban the account after three busy
+			// responses; otherwise a burst of 502s makes the whole ring disappear
+			// for a minute and later requests stop before trying the ring again.
+			if !accountLocal && (!exhausted || transportErr) && !transientQuotaProviderFailure(runtime.Provider, transientStatus) {
 				g.Health.Report(credentialID, false)
 			}
 			continue
@@ -598,6 +607,14 @@ func cloneModelMetadata(metadata *entities.ModelMetadata) *entities.ModelMetadat
 // A Codex OAuth account can reject a model or lose authorization independently
 // of the other accounts in the same ordered route. Those statuses fail over to
 // the next account; request-shape 4xx responses remain terminal.
+func transientQuotaProviderFailure(provider string, status int) bool {
+	if status == 0 || !retryableStatus(status) {
+		return false
+	}
+	definition, ok := providerpkg.Lookup(provider)
+	return ok && definition.QuotaSupported && status >= fiber.StatusInternalServerError
+}
+
 func accountLocalStatus(provider string, status int) bool {
 	if provider != "codex" {
 		return false

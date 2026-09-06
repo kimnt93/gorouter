@@ -1008,6 +1008,28 @@ func TestGatewayQuotaAwareProviderTriesEachAccountOnceOnTransientFailure(t *test
 	}
 }
 
+func TestGatewayQuotaAwareProvider502MovesImmediatelyToNextAccount(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-502", TenantID: "tenant-502", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
+	runtimes := map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth}, "cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth}}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusBadGateway, "cred-b": http.StatusOK}}
+	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}}
+	gateway := &Gateway{Keys: apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }), Creds: credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil), Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}), Codex: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 5}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || strings.Join(upstream.calls, ",") != "cred-a,cred-b" {
+		t.Fatalf("status=%d calls=%v", response.StatusCode, upstream.calls)
+	}
+}
+
 func TestGatewayCodexQuotaLimitMovesImmediatelyToNextAccount(t *testing.T) {
 	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
@@ -1259,5 +1281,28 @@ func TestListModelsIncludesAutoOnlyWhenKeyWasAssignedAuto(t *testing.T) {
 	}
 	if len(body.Data) != 2 || body.Data[0].ID != "auto" || body.Data[1].ID != "model-a" {
 		t.Fatalf("models=%+v", body.Data)
+	}
+}
+
+func TestGatewayQuotaAwareTransient502DoesNotBanRingAccounts(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-busy", TenantID: "tenant-busy", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
+	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
+	runtimes := map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth}, "cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth}}
+	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusBadGateway, "cred-b": http.StatusBadGateway}}
+	gateway := &Gateway{Keys: apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }), Creds: credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil), Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}), Codex: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}}, RouteRetries: 1}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
+		return gateway.Chat(c)
+	})
+	for i := 0; i < 2; i++ {
+		response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+	}
+	if len(upstream.calls) != 4 {
+		t.Fatalf("calls=%v, want every busy account attempted on both requests", upstream.calls)
 	}
 }
