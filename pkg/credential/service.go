@@ -261,6 +261,13 @@ func (s *Service) TestConnectivity(ctx context.Context, id string, probes map[st
 	return result, nil
 }
 
+func (s *Service) RefreshDiscoveredModels(ctx context.Context, id string, discoverer ModelDiscoverer) ([]ProviderModel, error) {
+	if s.discoveryCache != nil {
+		_ = s.discoveryCache.Delete(ctx, id)
+	}
+	return s.DiscoverModels(ctx, id, discoverer)
+}
+
 func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer ModelDiscoverer) ([]ProviderModel, error) {
 	if discoverer == nil {
 		return nil, ErrUnsupportedProvider

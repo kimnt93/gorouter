@@ -19,7 +19,7 @@ import (
 
 // Keep the backend fingerprint aligned with the current Codex CLI protocol.
 // OpenAI's model catalog can return an empty list for stale client versions.
-const codexClientVersion = "0.149.0"
+const codexClientVersion = "0.153.4"
 const codexChatInstructions = "You are a ChatGPT agent."
 
 type CodexAdapter struct {

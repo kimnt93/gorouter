@@ -103,7 +103,7 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	_, discoverer, _ := h.adapter(runtime.Provider)
-	discovered, err := h.Credentials.DiscoverModels(c.Context(), runtime.ID, discoverer)
+	discovered, err := h.Credentials.RefreshDiscoveredModels(c.Context(), runtime.ID, discoverer)
 	if err != nil {
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
 	}
@@ -354,7 +354,7 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load credential").Send()
 	}
 	_, discoverer, _ := h.adapter(runtime.Provider)
-	models, err := h.Credentials.DiscoverModels(c.Context(), c.Params("id"), discoverer)
+	models, err := h.Credentials.RefreshDiscoveredModels(c.Context(), c.Params("id"), discoverer)
 	if err != nil {
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
 	}

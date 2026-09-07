@@ -634,7 +634,10 @@ const (
 
 func (g *Gateway) routeAttempts(providerID string) int {
 	if definition, ok := providerpkg.Lookup(providerID); ok && definition.QuotaSupported {
-		return 1
+		// Retry one transient transport/5xx failure on the same connection,
+		// then advance through the account ring. Quota responses still break
+		// immediately without retrying the exhausted account.
+		return 2
 	}
 	if g.RouteRetries < 0 {
 		return 1

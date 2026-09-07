@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, expect, test, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { LogsPage } from './LogsPage'
 
 const api = vi.hoisted(() => ({
@@ -7,7 +7,10 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('../api/client', () => api)
 
+afterEach(cleanup)
+
 beforeEach(() => {
+  vi.clearAllMocks()
   api.getUsers.mockResolvedValue({ object: 'list', data: [] })
   api.getAPIKeys.mockResolvedValue({ object: 'list', data: [] })
   api.getOrganizations.mockResolvedValue({ object: 'list', data: [] })
@@ -33,4 +36,16 @@ test('opens request details from a clicked log row and closes the popup', async 
   expect(screen.getByText('cred-1')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Close details' }))
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+
+test('reloads the newest log page and replaces stale rows', async () => {
+  const event = (id: string, model: string) => ({ id, ts: '2026-09-01T00:00:00Z', tenant_id: '', api_key_id: '', credential_id: '', provider: 'codex', model, upstream_model: model, prompt_tokens: 0, completion_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: 0, priced: true, cache_hit: false, status_code: 200, duration_ms: 1, actor_type: 'master', user_id: '', username: 'master', organization_id: '' })
+  api.getRecent.mockResolvedValueOnce({ object: 'list', data: [event('usage-old', 'cx/old')] }).mockResolvedValueOnce({ object: 'list', data: [event('usage-new', 'cx/new')] })
+  render(<LogsPage />)
+  expect((await screen.findAllByText('cx/old')).length).toBeGreaterThan(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Reload logs' }))
+  expect((await screen.findAllByText('cx/new')).length).toBeGreaterThan(0)
+  await waitFor(() => expect(api.getRecent).toHaveBeenCalledTimes(2))
+  expect(screen.queryAllByText('cx/old')).toHaveLength(0)
 })

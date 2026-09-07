@@ -202,3 +202,16 @@ func TestDiscoverModelsCoalescesConcurrentCacheMisses(t *testing.T) {
 		t.Fatalf("discovery calls=%d want 1", calls.Load())
 	}
 }
+
+func TestRefreshDiscoveredModelsBypassesCachedCatalog(t *testing.T) {
+	repo := &credentialRepoStub{runtime: &entities.CredentialRuntime{ID: "cred"}}
+	cache := &discoveryCacheStub{models: []ProviderModel{{ID: "old-model"}}, present: true}
+	service := NewService(repo, nil)
+	service.SetModelDiscoveryCache(cache, time.Hour)
+	calls := &atomic.Int64{}
+	discoverer := modelDiscovererProbeStub{model: "gpt-astra", calls: calls}
+	models, err := service.RefreshDiscoveredModels(context.Background(), "cred", discoverer)
+	if err != nil || len(models) != 1 || models[0].ID != "gpt-astra" || calls.Load() != 1 || cache.deleted != 1 {
+		t.Fatalf("models=%+v calls=%d deletes=%d err=%v", models, calls.Load(), cache.deleted, err)
+	}
+}
