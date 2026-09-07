@@ -988,14 +988,14 @@ func TestGatewayQuotaAwareProviderRetriesTransientFailureBeforeNextAccount(t *te
 		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
 		Creds:  credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil),
 		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}),
-		Codex:  upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 5,
+		Codex:  upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 2,
 	}
 	app := fiber.New()
 	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
 		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
 		return gateway.Chat(c)
 	})
-	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`)))
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"temperature":0.7}`)), fiber.TestConfig{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1003,7 +1003,7 @@ func TestGatewayQuotaAwareProviderRetriesTransientFailureBeforeNextAccount(t *te
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d calls=%v", response.StatusCode, upstream.calls)
 	}
-	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-a,cred-b,cred-b,cred-c"; got != want {
+	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-a,cred-a,cred-b,cred-b,cred-b,cred-c"; got != want {
 		t.Fatalf("calls=%s want=%s", got, want)
 	}
 }
@@ -1014,18 +1014,18 @@ func TestGatewayQuotaAwareProvider502MovesImmediatelyToNextAccount(t *testing.T)
 	runtimes := map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth}, "cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth}}
 	upstream := &gatewayUpstream{statuses: map[string]int{"cred-a": http.StatusBadGateway, "cred-b": http.StatusOK}}
 	quotaState := &gatewayProviderQuota{available: map[string]bool{"cred-a": true, "cred-b": true}}
-	gateway := &Gateway{Keys: apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }), Creds: credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil), Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}), Codex: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 5}
+	gateway := &Gateway{Keys: apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }), Creds: credential.NewService(gatewayCredRepo{routes: routes, runtimes: runtimes}, nil), Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream-a", Strategy: chat.StrategyPriority, Enabled: true}}), Codex: upstream, Selector: &chat.Selector{}, Health: chat.NewHealth(), ProviderQuotas: quotaState, RouteRetries: 2}
 	app := fiber.New()
 	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
 		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
 		return gateway.Chat(c)
 	})
-	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)))
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)), fiber.TestConfig{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK || strings.Join(upstream.calls, ",") != "cred-a,cred-a,cred-b" {
+	if response.StatusCode != http.StatusOK || strings.Join(upstream.calls, ",") != "cred-a,cred-a,cred-a,cred-b" {
 		t.Fatalf("status=%d calls=%v", response.StatusCode, upstream.calls)
 	}
 }
@@ -1296,7 +1296,7 @@ func TestGatewayQuotaAwareTransient502DoesNotBanRingAccounts(t *testing.T) {
 		return gateway.Chat(c)
 	})
 	for i := 0; i < 2; i++ {
-		response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)))
+		response, err := app.Test(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`)), fiber.TestConfig{Timeout: 5 * time.Second})
 		if err != nil {
 			t.Fatal(err)
 		}

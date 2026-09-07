@@ -632,16 +632,13 @@ const (
 	maxRetryBackoff = 2 * time.Second
 )
 
-func (g *Gateway) routeAttempts(providerID string) int {
-	if definition, ok := providerpkg.Lookup(providerID); ok && definition.QuotaSupported {
-		// Retry one transient transport/5xx failure on the same connection,
-		// then advance through the account ring. Quota responses still break
-		// immediately without retrying the exhausted account.
-		return 2
-	}
+func (g *Gateway) routeAttempts(_ string) int {
 	if g.RouteRetries < 0 {
 		return 1
 	}
+	// ROUTE_RETRIES is the per-connection retry budget for transient transport
+	// and upstream failures. Quota responses still break immediately and move
+	// to the next account without consuming this budget.
 	return g.RouteRetries + 1
 }
 
