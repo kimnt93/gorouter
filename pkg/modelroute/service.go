@@ -9,6 +9,7 @@ import (
 
 	"github.com/kimnt93/gorouter/pkg/chat"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	"github.com/kimnt93/gorouter/pkg/provider"
 )
 
 var (
@@ -77,18 +78,41 @@ func (s *Service) Upsert(ctx context.Context, m entities.ModelDef) error {
 	if err := s.repo.Upsert(ctx, m); err != nil {
 		return err
 	}
-	if !strings.HasSuffix(m.Name, "/auto") && len(m.Routes) > 1 {
-		auto := entities.ModelDef{Name: m.Name + "/auto", Strategy: chat.StrategyRoundRobin, UpstreamModel: "auto", Enabled: m.Enabled, Routes: append([]entities.ModelRoute(nil), m.Routes...)}
-		if err := s.repo.Upsert(ctx, auto); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 
 func (s *Service) Delete(ctx context.Context, name string) error { return s.repo.Delete(ctx, name) }
 
-func (s *Service) List(ctx context.Context) ([]entities.ModelDef, error) { return s.repo.List(ctx) }
+// List excludes legacy per-model auto aliases on every backend. Provider auto
+// routes are generated once per provider by catalog reconciliation.
+func (s *Service) List(ctx context.Context) ([]entities.ModelDef, error) {
+	models, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entities.ModelDef, 0, len(models))
+	for _, model := range models {
+		if model.UpstreamModel == "auto" && strings.HasSuffix(model.Name, "/auto") && !providerAutoName(model.Name) {
+			continue
+		}
+		out = append(out, model)
+	}
+	return out, nil
+}
+
+func providerAutoName(name string) bool {
+	for _, definition := range provider.Catalog() {
+		canonical := provider.PublicModelID(definition.ID, "auto")
+		if name == canonical {
+			return true
+		}
+		if organization, rest, ok := strings.Cut(name, "/"); ok && organization != "" && rest == canonical {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *Service) SetPrice(ctx context.Context, model string, p entities.Price) error {
 	model = strings.TrimSpace(model)

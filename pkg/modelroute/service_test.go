@@ -88,20 +88,17 @@ func TestPriceWritesUpdateConfiguredCache(t *testing.T) {
 	}
 }
 
-func TestUpsertBlendCreatesStaticAutoAlias(t *testing.T) {
+func TestUpsertBlendDoesNotCreateAutoAlias(t *testing.T) {
 	repo := &recordingModelRepository{}
 	service := NewService(repo)
 	blend := entities.ModelDef{Name: "my-blend", Strategy: chat.StrategyPriority, Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", UpstreamModel: "model-a", Weight: 1, Enabled: true}, {CredentialID: "cred-b", UpstreamModel: "model-b", Weight: 1, Enabled: true}}}
 	if err := service.Upsert(context.Background(), blend); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.models) != 2 {
+	if len(repo.models) != 1 {
 		t.Fatalf("upserts=%+v", repo.models)
 	}
-	auto := repo.models[1]
-	if auto.Name != "my-blend/auto" || auto.UpstreamModel != "auto" || auto.Strategy != chat.StrategyRoundRobin || len(auto.Routes) != 2 {
-		t.Fatalf("auto=%+v", auto)
-	}
+
 }
 
 type recordingModelRepository struct {
@@ -124,5 +121,39 @@ func TestValidateBlendNameAllowsOnlySafeCharacters(t *testing.T) {
 		if err := ValidateBlendName(name); !errors.Is(err, ErrModelName) {
 			t.Fatalf("%q error=%v", name, err)
 		}
+	}
+}
+
+func TestProviderAutoNames(t *testing.T) {
+	for _, name := range []string{"cx/auto", "cc/auto", "acme/cx/auto"} {
+		if !providerAutoName(name) {
+			t.Errorf("missing provider auto: %s", name)
+		}
+	}
+	for _, name := range []string{"cx/gpt-5.4-mini/auto", "blend/auto", "acme/cx/gpt/auto"} {
+		if providerAutoName(name) {
+			t.Errorf("unexpected auto: %s", name)
+		}
+	}
+}
+
+func (r *recordingModelRepository) List(context.Context) ([]entities.ModelDef, error) {
+	return r.models, nil
+}
+
+func TestListHidesPersistedPerModelAutoAliases(t *testing.T) {
+	repo := &recordingModelRepository{models: []entities.ModelDef{
+		{Name: "cx/gpt-5.4-mini", UpstreamModel: "gpt-5.4-mini"},
+		{Name: "cx/gpt-5.4-mini/auto", UpstreamModel: "auto"},
+		{Name: "cx/auto", UpstreamModel: "auto"},
+		{Name: "cc/auto", UpstreamModel: "auto"},
+		{Name: "blend/auto", UpstreamModel: "auto"},
+	}}
+	models, err := NewService(repo).List(context.Background())
+	if err != nil || len(models) != 3 {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	if len(repo.models) != 5 {
+		t.Fatal("listing modified persisted data")
 	}
 }

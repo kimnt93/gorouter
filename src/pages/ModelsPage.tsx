@@ -75,7 +75,7 @@ export function ModelsPage() {
       const failures: string[] = []
       discoveries.forEach((result, index) => {
         if (result.status === 'rejected') failures.push(`${active[index].name}: ${(result.reason as Error).message}`)
-        else result.value.response.data.forEach((model) => available.push({ credential: result.value.credential, model, price: findCatalogPrice(catalogData, model.public_id, model.id) }))
+        else result.value.response.data.filter((model) => model.id !== 'auto').forEach((model) => available.push({ credential: result.value.credential, model, price: findCatalogPrice(catalogData, model.public_id, model.id) }))
       })
       const byProvider = new Map<string, ConnectedModel[]>()
       available.forEach((item) => byProvider.set(item.credential.provider, [...(byProvider.get(item.credential.provider) ?? []), item]))
@@ -84,7 +84,7 @@ export function ModelsPage() {
         available.push({ credential: items[0].credential, model: { id: 'auto', public_id: `${prefix}/auto`, name: `Auto · ${items.length} models` }, price: { model: `${prefix}/auto`, name: 'Auto', provider: providerID, cache_supported: false, source: 'average', updated_at: '', price: averagePrice(items.map((item) => item.price?.price).filter((price): price is Price => Boolean(price))) } })
       })
       available.sort((a, b) => a.model.public_id.localeCompare(b.model.public_id) || a.credential.name.localeCompare(b.credential.name))
-      setConnected(available); setDiscoveryErrors(failures)
+      setConnected(Array.from(new Map(available.map((item) => [item.model.public_id, item])).values())); setDiscoveryErrors(failures)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load])
