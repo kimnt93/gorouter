@@ -546,7 +546,12 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 					}
 					return
 				}
-				g.Health.Report(credentialID, false)
+				// An interrupted accepted stream is not evidence of invalid
+				// credentials. Quota-aware accounts advance without accumulating
+				// a provider-wide ban (the same rule as explicit transient 5xx).
+				if !transientQuotaProviderFailure(runtime.Provider, fiber.StatusBadGateway) {
+					g.Health.Report(credentialID, false)
+				}
 				if fillFirstProvider != "" && g.ProviderQuotas != nil {
 					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
 				}

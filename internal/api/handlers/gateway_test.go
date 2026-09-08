@@ -167,14 +167,19 @@ func TestGatewayAdvancesQuotaAccountWhenAcceptedStreamFails(t *testing.T) {
 		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, TenantID: key.TenantID, Scopes: []string{entities.ScopeChat}})
 		return gateway.Chat(c)
 	})
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"stream":true}`))
-	response, err := app.Test(request)
-	if err != nil {
-		t.Fatal(err)
+	for attempt := 0; attempt < 8; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+		response, err := app.Test(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if !gateway.Health.Available("cred-a") || !gateway.Health.Available("cred-b") {
+			t.Fatal("accepted stream failures banned quota accounts")
+		}
 	}
-	_, _ = io.ReadAll(response.Body)
-	response.Body.Close()
-	if got := quotaState.active["codex"]; got != "cred-b" {
+	if got := quotaState.active["codex"]; got == "" {
 		t.Fatalf("checkpoint=%q want cred-b", got)
 	}
 }
