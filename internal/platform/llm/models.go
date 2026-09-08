@@ -145,6 +145,9 @@ func decodeProviderModels(body io.Reader) ([]credential.ProviderModel, error) {
 		if len(reasoningLevels) == 0 {
 			reasoningLevels = model.ReasoningLevelsCamel
 		}
+		if len(reasoningLevels) == 0 {
+			reasoningLevels = capabilityEffortLevels(model.Capabilities)
+		}
 		contextLength := model.ContextLength
 		if contextLength == 0 {
 			contextLength = model.ContextLengthCamel
@@ -270,3 +273,25 @@ func (a *AnthropicAdapter) DiscoverModels(ctx context.Context, cr *entities.Cred
 
 var _ credential.ModelDiscoverer = (*OpenAIAdapter)(nil)
 var _ credential.ModelDiscoverer = (*AnthropicAdapter)(nil)
+
+// capabilityEffortLevels accepts Anthropic's advertised capability flags.
+// The keys are provider data, not a hardcoded model or effort allowlist.
+func capabilityEffortLevels(capabilities map[string]any) []entities.ModelReasoningLevel {
+	effort, ok := capabilities["effort"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if supported, ok := effort["supported"].(bool); ok && !supported {
+		return nil
+	}
+	var levels []entities.ModelReasoningLevel
+	for name, value := range effort {
+		flag, ok := value.(map[string]any)
+		if !ok || flag["supported"] != true {
+			continue
+		}
+		levels = append(levels, entities.ModelReasoningLevel{Effort: name})
+	}
+	sort.Slice(levels, func(i, j int) bool { return levels[i].Effort < levels[j].Effort })
+	return levels
+}

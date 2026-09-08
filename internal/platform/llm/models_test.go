@@ -136,3 +136,19 @@ func TestAnthropicModelDiscoveryUsesNativeHeaders(t *testing.T) {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }
+
+func TestDiscoveryReadsAnthropicEffortCapabilitiesWithoutModelAllowlist(t *testing.T) {
+	models, err := decodeProviderModels(strings.NewReader(`{"data":[{"id":"future-model","capabilities":{"effort":{"supported":true,"low":{"supported":true},"future-effort":{"supported":true},"max":{"supported":false}}}},{"id":"disabled","capabilities":{"effort":{"supported":false,"low":{"supported":true}}}},{"id":"unknown"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range models {
+		if model.ID == "future-model" {
+			if len(model.SupportedReasoningLevels) != 2 || model.SupportedReasoningLevels[0].Effort != "future-effort" || model.SupportedReasoningLevels[1].Effort != "low" {
+				t.Fatalf("levels=%+v", model.SupportedReasoningLevels)
+			}
+		} else if len(model.SupportedReasoningLevels) != 0 {
+			t.Fatal("invented support")
+		}
+	}
+}
