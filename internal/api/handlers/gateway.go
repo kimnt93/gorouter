@@ -760,7 +760,14 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 		if resolved, ok, resolveErr := g.resolvePrice(c.Context(), &model); resolveErr == nil && ok {
 			price = &resolved
 		}
-		out.Data = append(out.Data, llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price})
+		info := llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price}
+		// Only advertise provider-reported capabilities. Codex client fallback
+		// defaults are not evidence that another provider accepts an effort.
+		if model.Metadata != nil && model.UpstreamModel != "auto" {
+			info.DefaultReasoningLevel = model.Metadata.DefaultReasoningLevel
+			info.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), model.Metadata.SupportedReasoningLevels...)
+		}
+		out.Data = append(out.Data, info)
 		out.Models = append(out.Models, codexModelInfo(model))
 	}
 	if sess != nil && !key.Master && contains(key.Models, "auto") && len(out.Data) > 0 {

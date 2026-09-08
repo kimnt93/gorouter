@@ -4449,6 +4449,9 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_internal_platform_llm.ModelInfo": {
             "type": "object",
             "properties": {
+                "default_reasoning_level": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -4460,6 +4463,12 @@ const docTemplate = `{
                 },
                 "pricing": {
                     "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price"
+                },
+                "supported_reasoning_levels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel"
+                    }
                 },
                 "upstream_model": {
                     "type": "string"

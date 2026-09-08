@@ -306,11 +306,13 @@ type ChunkChoice struct {
 }
 
 type ModelInfo struct {
-	ID            string          `json:"id"`
-	Object        string          `json:"object"`
-	OwnedBy       string          `json:"owned_by"`
-	UpstreamModel string          `json:"upstream_model,omitempty"`
-	Pricing       *entities.Price `json:"pricing,omitempty"`
+	DefaultReasoningLevel    string                         `json:"default_reasoning_level,omitempty"`
+	SupportedReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels,omitempty"`
+	ID                       string                         `json:"id"`
+	Object                   string                         `json:"object"`
+	OwnedBy                  string                         `json:"owned_by"`
+	UpstreamModel            string                         `json:"upstream_model,omitempty"`
+	Pricing                  *entities.Price                `json:"pricing,omitempty"`
 }
 
 type ModelList struct {

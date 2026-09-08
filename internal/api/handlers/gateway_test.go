@@ -1345,3 +1345,36 @@ func TestGatewayCodexAcceptedStreamRetriesCurrentAccountBeforeAdvancing(t *testi
 		t.Fatalf("status=%d calls=%v", response.StatusCode, calls)
 	}
 }
+
+func TestListModelsReportsOnlyUpstreamReasoningCapabilities(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		model := entities.ModelDef{Name: "provider/future-model", UpstreamModel: "future-model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}}}
+		if known {
+			model.Metadata = &entities.ModelMetadata{DefaultReasoningLevel: "high", SupportedReasoningLevels: []entities.ModelReasoningLevel{{Effort: "low", Description: "Fast"}, {Effort: "high", Description: "Deep"}}}
+		}
+		gateway := &Gateway{Creds: credential.NewService(gatewayCredRepo{items: []entities.Credential{{ID: "cred-a", Status: entities.StatusActive}}}, nil), Models: modelroute.NewService(gatewayModelRepo{model: model})}
+		app := fiber.New()
+		app.Get("/v1/models", gateway.ListModels)
+		response, err := app.Test(httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body llm.ModelList
+		err = json.NewDecoder(response.Body).Decode(&body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Data) != 1 {
+			t.Fatal("model missing")
+		}
+		item := body.Data[0]
+		if known {
+			if item.DefaultReasoningLevel != "high" || len(item.SupportedReasoningLevels) != 2 || item.SupportedReasoningLevels[1].Description != "Deep" {
+				t.Fatalf("capabilities=%+v", item)
+			}
+		} else if item.DefaultReasoningLevel != "" || len(item.SupportedReasoningLevels) != 0 {
+			t.Fatal("invented reasoning support")
+		}
+	}
+}

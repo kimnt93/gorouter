@@ -199,6 +199,8 @@ definitions:
     type: object
   github_com_kimnt93_gorouter_internal_platform_llm.ModelInfo:
     properties:
+      default_reasoning_level:
+        type: string
       id:
         type: string
       object:
@@ -207,6 +209,10 @@ definitions:
         type: string
       pricing:
         $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price'
+      supported_reasoning_levels:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.ModelReasoningLevel'
+        type: array
       upstream_model:
         type: string
     type: object
