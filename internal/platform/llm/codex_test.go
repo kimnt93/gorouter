@@ -435,3 +435,37 @@ func TestCodexProbeRefreshesOAuthAfter401(t *testing.T) {
 		t.Fatalf("status=%d calls=%d err=%v", status, calls, err)
 	}
 }
+
+func TestCodexSendRejectsAcceptedStreamFailureBeforeOutput(t *testing.T) {
+	for _, events := range []string{
+		`data: {"type":"response.created","response":{"id":"test"}}` + "\n\n" + `data: {"type":"response.failed"}` + "\n\n",
+		"",
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			io.WriteString(w, events)
+		}))
+		adapter := &CodexAdapter{HTTP: server.Client()}
+		result, err := adapter.Send(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL}, "test", []byte(`{"messages":[{"role":"user","content":"test"}],"stream":true}`))
+		server.Close()
+		if err == nil || result != nil {
+			t.Fatal("accepted failed stream escaped the retry boundary")
+		}
+	}
+}
+
+func TestCodexSendDoesNotReplayAfterPartialOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\"}\n\n")
+	}))
+	defer server.Close()
+	result, err := (&CodexAdapter{HTTP: server.Client()}).Send(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL}, "test", []byte(`{"messages":[{"role":"user","content":"test"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Body.Close()
+	body, err := io.ReadAll(result.Body)
+	if err == nil || strings.Count(string(body), `"content":"partial"`) != 1 {
+		t.Fatal("partial output/error not preserved")
+	}
+}

@@ -329,7 +329,16 @@ func (a *CodexAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime,
 			err := transformCodexStream(upstream, writer, upstreamModel)
 			_ = writer.CloseWithError(err)
 		}()
-		result.Body = reader
+		// Do not commit HTTP 200 before the translated stream produces output.
+		// An accepted request can fail during response.created/in_progress;
+		// returning that failure from Send keeps it inside the gateway's
+		// per-account retry loop. Never replay after output has been exposed.
+		buffered := bufio.NewReader(reader)
+		if _, err := buffered.Peek(1); err != nil {
+			_ = reader.Close()
+			return nil, fmt.Errorf("Codex stream failed before output: %w", err)
+		}
+		result.Body = &codexBufferedBody{Reader: buffered, Closer: reader}
 		result.Header = http.Header{"Content-Type": []string{"text/event-stream"}}
 		return result, nil
 	}
@@ -976,3 +985,9 @@ func enrichCodexModel(model *credential.ProviderModel) {
 var _ entities.Upstream = (*CodexAdapter)(nil)
 var _ credential.ConnectivityProber = (*CodexAdapter)(nil)
 var _ credential.ModelDiscoverer = (*CodexAdapter)(nil)
+
+// Retain pipe cancellation while replaying the buffered first byte exactly once.
+type codexBufferedBody struct {
+	io.Reader
+	io.Closer
+}
