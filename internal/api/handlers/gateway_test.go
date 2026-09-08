@@ -255,7 +255,7 @@ func TestMasterAccessContextHasNoStoredKeyAndListsAllModels(t *testing.T) {
 	if response.StatusCode != http.StatusOK || len(body.Data) != 1 || body.Data[0].ID != "model-a" || body.Data[0].UpstreamModel != "openai/model-a" || body.Data[0].Pricing == nil || body.Data[0].Pricing.InputPerM != 0.2 {
 		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
 	}
-	if len(body.Models) != 1 || body.Models[0].Slug != "model-a" || body.Models[0].DisplayName == "" || body.Models[0].Description == "" || len(body.Models[0].SupportedReasoningLevels) != 1 || body.Models[0].SupportedReasoningLevels[0].Effort != "medium" || body.Models[0].SupportedReasoningLevels[0].Description == "" {
+	if len(body.Models) != 1 || body.Models[0].Slug != "model-a" || body.Models[0].DisplayName == "" || body.Models[0].Description == "" || len(body.Models[0].SupportedReasoningLevels) != 3 || body.Models[0].SupportedReasoningLevels[1].Effort != "medium" || body.Models[0].SupportedReasoningLevels[0].Description == "" {
 		t.Fatalf("Codex models = %+v", body.Models)
 	}
 }
@@ -404,7 +404,7 @@ func TestCodexModelInfoUsesPersistedProviderMetadata(t *testing.T) {
 
 func TestCodexModelInfoFailsClosedWithoutMetadata(t *testing.T) {
 	info := codexModelInfo(entities.ModelDef{Name: "custom/model", UpstreamModel: "unknown-model"})
-	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || info.DefaultVerbosity != "medium" || len(info.SupportedReasoningLevels) != 1 || info.SupportedReasoningLevels[0].Effort != "medium" || info.SupportedReasoningLevels[0].Description == "" {
+	if strings.Join(info.InputModalities, ",") != "text" || info.SupportVerbosity || info.DefaultVerbosity != "medium" || len(info.SupportedReasoningLevels) != 3 || info.SupportedReasoningLevels[1].Effort != "medium" || info.SupportedReasoningLevels[0].Description == "" {
 		t.Fatalf("fallback info = %+v", info)
 	}
 }
@@ -1346,7 +1346,7 @@ func TestGatewayCodexAcceptedStreamRetriesCurrentAccountBeforeAdvancing(t *testi
 	}
 }
 
-func TestListModelsReportsOnlyUpstreamReasoningCapabilities(t *testing.T) {
+func TestListModelsReportsReasoningCapabilitiesWithFallbackSource(t *testing.T) {
 	for _, known := range []bool{false, true} {
 		model := entities.ModelDef{Name: "provider/future-model", UpstreamModel: "future-model", Enabled: true, Routes: []entities.ModelRoute{{CredentialID: "cred-a", Enabled: true}}}
 		if known {
@@ -1373,7 +1373,7 @@ func TestListModelsReportsOnlyUpstreamReasoningCapabilities(t *testing.T) {
 			if item.DefaultReasoningLevel != "high" || len(item.SupportedReasoningLevels) != 2 || item.SupportedReasoningLevels[1].Description != "Deep" {
 				t.Fatalf("capabilities=%+v", item)
 			}
-		} else if item.DefaultReasoningLevel != "" || len(item.SupportedReasoningLevels) != 0 {
+		} else if item.DefaultReasoningLevel != "medium" || len(item.SupportedReasoningLevels) != 3 || item.ReasoningLevelsSource != "static_fallback" {
 			t.Fatal("invented reasoning support")
 		}
 	}

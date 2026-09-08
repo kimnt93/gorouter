@@ -4342,6 +4342,9 @@ const docTemplate = `{
                 "priority": {
                     "type": "integer"
                 },
+                "reasoning_levels_source": {
+                    "type": "string"
+                },
                 "shell_type": {
                     "type": "string"
                 },
@@ -4463,6 +4466,9 @@ const docTemplate = `{
                 },
                 "pricing": {
                     "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Price"
+                },
+                "reasoning_levels_source": {
+                    "type": "string"
                 },
                 "supported_reasoning_levels": {
                     "type": "array",

@@ -306,6 +306,7 @@ type ChunkChoice struct {
 }
 
 type ModelInfo struct {
+	ReasoningLevelsSource    string                         `json:"reasoning_levels_source,omitempty"`
 	DefaultReasoningLevel    string                         `json:"default_reasoning_level,omitempty"`
 	SupportedReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels,omitempty"`
 	ID                       string                         `json:"id"`
@@ -325,6 +326,7 @@ type ModelList struct {
 // custom providers. It intentionally coexists with the OpenAI-compatible data
 // list because the two clients require different identifiers and metadata.
 type CodexModelInfo struct {
+	ReasoningLevelsSource    string             `json:"reasoning_levels_source,omitempty"`
 	Slug                     string             `json:"slug"`
 	DisplayName              string             `json:"display_name"`
 	Description              string             `json:"description"`

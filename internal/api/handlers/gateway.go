@@ -761,18 +761,15 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 			price = &resolved
 		}
 		info := llm.ModelInfo{ID: model.Name, Object: "model", OwnedBy: "gorouter", UpstreamModel: model.UpstreamModel, Pricing: price}
-		// Only advertise provider-reported capabilities. Codex client fallback
-		// defaults are not evidence that another provider accepts an effort.
-		if model.Metadata != nil && model.UpstreamModel != "auto" {
-			info.DefaultReasoningLevel = model.Metadata.DefaultReasoningLevel
-			info.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), model.Metadata.SupportedReasoningLevels...)
-		}
+		info.DefaultReasoningLevel, info.SupportedReasoningLevels, info.ReasoningLevelsSource = providerpkg.ReasoningOptions(model.Metadata)
 		out.Data = append(out.Data, info)
 		out.Models = append(out.Models, codexModelInfo(model))
 	}
 	if sess != nil && !key.Master && contains(key.Models, "auto") && len(out.Data) > 0 {
-		out.Data = append([]llm.ModelInfo{{ID: "auto", Object: "model", OwnedBy: "gorouter"}}, out.Data...)
-		out.Models = append([]llm.CodexModelInfo{{Slug: "auto", DisplayName: "Auto", Description: "Randomly selects an eligible model and fails over within the configured routing budget", Visibility: "list", SupportedInAPI: true, ContextWindow: 128000, MaxContextWindow: 128000, InputModalities: []string{"text"}}}, out.Models...)
+		defaultEffort, efforts, source := providerpkg.ReasoningOptions(nil)
+		out.Data = append([]llm.ModelInfo{{ID: "auto", Object: "model", OwnedBy: "gorouter", DefaultReasoningLevel: defaultEffort, SupportedReasoningLevels: efforts, ReasoningLevelsSource: source}}, out.Data...)
+		autoInfo := codexModelInfo(entities.ModelDef{Name: "auto", UpstreamModel: "auto"})
+		out.Models = append([]llm.CodexModelInfo{autoInfo}, out.Models...)
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(out).Send()
 }
@@ -852,8 +849,11 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 	description := "Model routed through GoRouter"
 	contextWindow := int64(128000)
 	maxContextWindow := int64(128000)
-	defaultReasoning := "medium"
-	reasoning := []llm.ReasoningLevel{{Effort: "medium", Description: codexReasoningDescription("medium")}}
+	defaultReasoning, options, reasoningSource := providerpkg.ReasoningOptions(model.Metadata)
+	reasoning := make([]llm.ReasoningLevel, 0, len(options))
+	for _, option := range options {
+		reasoning = append(reasoning, llm.ReasoningLevel{Effort: option.Effort, Description: option.Description})
+	}
 	inputModalities := []string{"text"}
 	supportsOriginalImage := false
 	supportsReasoningSummary := false
@@ -908,7 +908,7 @@ func codexModelInfo(model entities.ModelDef) llm.CodexModelInfo {
 		}
 	}
 	return llm.CodexModelInfo{
-		Slug: model.Name, DisplayName: displayName, Description: description,
+		ReasoningLevelsSource: reasoningSource, Slug: model.Name, DisplayName: displayName, Description: description,
 		ModelMessages:         llm.CodexModelMessages{InstructionsTemplate: agentHarnessInstructions},
 		DefaultReasoningLevel: defaultReasoning, SupportedReasoningLevels: reasoning,
 		ShellType: "unified_exec", Visibility: "list", SupportedInAPI: true,
