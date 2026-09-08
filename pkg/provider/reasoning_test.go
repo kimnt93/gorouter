@@ -1,8 +1,9 @@
 package provider
 
 import (
-	"github.com/kimnt93/gorouter/pkg/entities"
 	"testing"
+
+	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
 func TestReasoningFallbackAndUpstreamPrecedence(t *testing.T) {
@@ -20,5 +21,19 @@ func TestReasoningFallbackAndUpstreamPrecedence(t *testing.T) {
 	levels[0].Effort = "changed"
 	if metadata.SupportedReasoningLevels[0].Effort != "custom" {
 		t.Fatal("mutated snapshot")
+	}
+}
+
+func TestReasoningOptionsSelectsSupportedDefaultWhenProviderOmitsIt(t *testing.T) {
+	metadata := &entities.ModelMetadata{SupportedReasoningLevels: []entities.ModelReasoningLevel{{Effort: "high"}, {Effort: "medium"}, {Effort: "low"}}}
+	def, levels, source := ReasoningOptions(metadata)
+	if def != "medium" || len(levels) != 3 || source != "upstream" {
+		t.Fatalf("default=%q levels=%+v source=%q", def, levels, source)
+	}
+
+	metadata.SupportedReasoningLevels = []entities.ModelReasoningLevel{{Effort: "custom"}, {Effort: "low"}}
+	def, _, _ = ReasoningOptions(metadata)
+	if def != "custom" {
+		t.Fatalf("default=%q, want first supported effort", def)
 	}
 }

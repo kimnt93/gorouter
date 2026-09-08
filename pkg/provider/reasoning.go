@@ -7,7 +7,18 @@ import "github.com/kimnt93/gorouter/pkg/entities"
 // to inject an effort into a request or override reported provider capabilities.
 func ReasoningOptions(metadata *entities.ModelMetadata) (string, []entities.ModelReasoningLevel, string) {
 	if metadata != nil && len(metadata.SupportedReasoningLevels) > 0 {
-		return metadata.DefaultReasoningLevel, append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...), "upstream"
+		levels := append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...)
+		defaultLevel := metadata.DefaultReasoningLevel
+		if defaultLevel == "" {
+			defaultLevel = levels[0].Effort
+			for _, level := range levels {
+				if level.Effort == "medium" {
+					defaultLevel = level.Effort
+					break
+				}
+			}
+		}
+		return defaultLevel, levels, "upstream"
 	}
 	defaultLevel := "medium"
 	if metadata != nil && metadata.DefaultReasoningLevel != "" {

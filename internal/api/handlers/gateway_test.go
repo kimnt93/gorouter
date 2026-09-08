@@ -428,6 +428,15 @@ func TestCodexModelInfoFillsMissingReasoningDescriptions(t *testing.T) {
 	}
 }
 
+func TestCodexModelInfoFillsMissingDefaultReasoningLevel(t *testing.T) {
+	info := codexModelInfo(entities.ModelDef{Name: "cc/model", Metadata: &entities.ModelMetadata{
+		SupportedReasoningLevels: []entities.ModelReasoningLevel{{Effort: "high"}, {Effort: "medium"}, {Effort: "low"}},
+	}})
+	if info.DefaultReasoningLevel != "medium" {
+		t.Fatalf("default reasoning level = %q, want medium", info.DefaultReasoningLevel)
+	}
+}
+
 func TestCodexModelInfoUsesClientNeutralAgentInstructions(t *testing.T) {
 	info := codexModelInfo(entities.ModelDef{Name: "apollo-guidance/gemini/gemini-2.5-flash", UpstreamModel: "gemini-2.5-flash"})
 	instructions := info.ModelMessages.InstructionsTemplate
