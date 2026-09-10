@@ -299,12 +299,18 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 		}
 		visible := filterCredentialsForSession(v, sess)
 		for index := range visible {
-			if visible[index].Kind != entities.KindOAuth {
+			runtime, runtimeErr := a.CredsSvc.Runtime(c.Context(), visible[index].ID)
+			if runtimeErr != nil {
 				continue
 			}
-			if runtime, runtimeErr := a.CredsSvc.Runtime(c.Context(), visible[index].ID); runtimeErr == nil {
+			switch visible[index].Kind {
+			case entities.KindOAuth:
 				visible[index].AccountLabel = credential.AccountLabel(runtime)
 				visible[index].KeyPreview = ""
+			case entities.KindAPIKey:
+				if strings.TrimSpace(visible[index].KeyPreview) == "" {
+					visible[index].KeyPreview = credential.APIKeyPreview(runtime)
+				}
 			}
 		}
 		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(visible).Send()

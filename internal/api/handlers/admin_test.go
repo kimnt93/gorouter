@@ -127,7 +127,41 @@ func TestCredentialListReturnsOnlyGlobalConnectionsToMaster(t *testing.T) {
 	}
 }
 
-type credentialListRepo struct{ items []entities.Credential }
+func TestCredentialListReturnsSafeConnectionIdentities(t *testing.T) {
+	repo := &credentialListRepo{
+		items: []entities.Credential{
+			{ID: "api", Kind: entities.KindAPIKey, OwnerUserID: "user_1"},
+			{ID: "oauth", Kind: entities.KindOAuth, KeyPreview: "token…cret", OwnerUserID: "user_1"},
+		},
+		runtimes: map[string]*entities.CredentialRuntime{
+			"api":   {Kind: entities.KindAPIKey, APIKey: "gsk_abcdefghijklmnopqrstuvwxyz"},
+			"oauth": {Kind: entities.KindOAuth, OAuthAccess: "private-token", OAuthMeta: entities.OAuthMetadata{Email: "person@example.test"}},
+		},
+	}
+	admin := &Admin{CredsSvc: credential.NewService(repo, nil)}
+	app := fiber.New()
+	app.Get("/credentials", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, PrincipalType: entities.PrincipalUser, UserID: "user_1"})
+		return admin.Credentials(c)
+	})
+	response, err := app.Test(httptest.NewRequest("GET", "/credentials", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var credentials []entities.Credential
+	if err := json.NewDecoder(response.Body).Decode(&credentials); err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 2 || credentials[0].KeyPreview != "gsk_ab…wxyz" || credentials[1].AccountLabel != "person@example.test" || credentials[1].KeyPreview != "" {
+		t.Fatalf("credentials=%+v", credentials)
+	}
+}
+
+type credentialListRepo struct {
+	items    []entities.Credential
+	runtimes map[string]*entities.CredentialRuntime
+}
 
 func (r *credentialListRepo) Create(context.Context, entities.CredentialInput, entities.SecretBox) (*entities.Credential, error) {
 	return nil, nil
@@ -139,7 +173,10 @@ func (*credentialListRepo) Update(context.Context, entities.SecretBox, string, e
 	return nil, nil
 }
 func (*credentialListRepo) Delete(context.Context, string) error { return nil }
-func (*credentialListRepo) Runtime(context.Context, entities.SecretBox, string) (*entities.CredentialRuntime, error) {
+func (r *credentialListRepo) Runtime(_ context.Context, _ entities.SecretBox, id string) (*entities.CredentialRuntime, error) {
+	if runtime := r.runtimes[id]; runtime != nil {
+		return runtime, nil
+	}
 	return nil, entities.ErrNotFound
 }
 func (*credentialListRepo) UpdateOAuthTokens(context.Context, entities.SecretBox, string, string, string) error {

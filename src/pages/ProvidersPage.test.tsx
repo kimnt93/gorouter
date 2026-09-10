@@ -155,5 +155,5 @@ test('shows the full connection name and a masked API-key preview', async () => 
   api.getCredentials.mockResolvedValue([{ id: 'cred-api', name: 'Production Groq Key', provider: 'custom', kind: 'api_key', base_url: 'https://api.example.test/v1', status: 'active', key_preview: 'ghp_fsf…o28fk', owner_tenant_id: null, created_at: '' }])
   render(<ProvidersPage />)
   expect(await screen.findByText('Production Groq Key')).toBeInTheDocument()
-  expect(screen.getByText(/ghp_fs\*{6}o28fk/)).toBeInTheDocument()
+  expect(screen.getByText(/ghp_fsf\*{6}o28fk/)).toBeInTheDocument()
 })

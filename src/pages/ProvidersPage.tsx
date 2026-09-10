@@ -7,6 +7,7 @@ import { PageLoading } from '../components/PageState'
 import { SearchableSelect, TruncatedText } from '../components/SearchableSelect'
 import { useSession } from '../context/SessionContext'
 import { createIdempotencyKey } from '../lib/idempotency'
+import { maskSecretPreview } from '../lib/credentials'
 
 export function ProvidersPage() {
   const { viewOrganizationID } = useSession()
@@ -116,14 +117,6 @@ function QuotaPanel({ quota, accountFallback, busy, onReload }: { quota: Provide
     {quota?.message && <small className="quota-message">{quota.message}</small>}
     {quota?.fetched_at && <small className="quota-fetched">Updated {relativeTime(quota.fetched_at)}</small>}
   </div>
-}
-
-function maskSecretPreview(value = ''): string {
-  if (!value) return 'encrypted API key'
-  const compact = value.replace('…', '')
-  if (compact.length <= 6) return '••••••'
-  const prefixLength = Math.min(6, Math.max(3, compact.indexOf('_') + 3))
-  return `${compact.slice(0, prefixLength)}${'*'.repeat(6)}${compact.slice(-5)}`
 }
 
 function relativeTime(value: string): string {

@@ -306,7 +306,7 @@ func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer Mode
 }
 
 // AccountLabel returns non-secret subscription identity for management display.
-// Metadata populated by the OAuth provider wins; ID-token claims are a fallback.
+// Metadata populated by the OAuth provider wins; JWT claims are a fallback.
 func AccountLabel(runtime *entities.CredentialRuntime) string {
 	if runtime == nil || runtime.Kind != entities.KindOAuth {
 		return ""
@@ -316,26 +316,61 @@ func AccountLabel(runtime *entities.CredentialRuntime) string {
 			return value
 		}
 	}
-	if parts := strings.Split(runtime.OAuthIDToken, "."); len(parts) == 3 {
-		if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-			var claims struct {
-				Email             string `json:"email"`
-				PreferredUsername string `json:"preferred_username"`
-				Name              string `json:"name"`
-			}
-			if json.Unmarshal(payload, &claims) == nil {
-				for _, value := range []string{claims.Email, claims.PreferredUsername, claims.Name} {
-					if value = strings.TrimSpace(value); value != "" {
-						return value
-					}
-				}
-			}
+	for _, token := range []string{runtime.OAuthIDToken, runtime.OAuthAccess} {
+		if value := jwtAccountLabel(token); value != "" {
+			return value
 		}
 	}
-	for _, value := range []string{runtime.OAuthAccount, runtime.OAuthMeta.AccountID} {
+	for _, value := range []string{runtime.OAuthAccount, runtime.OAuthMeta.AccountID, runtime.OAuthMeta.PrincipalID, runtime.OAuthMeta.OrganizationID} {
 		if value = strings.TrimSpace(value); value != "" {
 			return value
 		}
 	}
 	return "connected account"
+}
+
+func jwtAccountLabel(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims map[string]any
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	for _, key := range []string{"email", "preferred_username", "login", "name", "username"} {
+		if value, ok := claims[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	for _, namespace := range []string{"https://api.openai.com/auth", "https://api.x.ai/auth"} {
+		if nested, ok := claims[namespace].(map[string]any); ok {
+			for _, key := range []string{"email", "login", "username", "user_id", "account_id", "chatgpt_account_id"} {
+				if value, ok := nested[key].(string); ok && strings.TrimSpace(value) != "" {
+					return strings.TrimSpace(value)
+				}
+			}
+		}
+	}
+	if value, ok := claims["sub"].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+// APIKeyPreview returns a stable, non-reversible display preview. It is used to
+// repair legacy/imported credentials whose persisted preview is empty.
+func APIKeyPreview(runtime *entities.CredentialRuntime) string {
+	if runtime == nil || runtime.Kind != entities.KindAPIKey {
+		return ""
+	}
+	secret := strings.TrimSpace(runtime.APIKey)
+	if len(secret) <= 8 {
+		return "••••••"
+	}
+	return secret[:6] + "…" + secret[len(secret)-4:]
 }

@@ -219,6 +219,7 @@ func TestRefreshDiscoveredModelsBypassesCachedCatalog(t *testing.T) {
 
 func TestAccountLabelUsesOAuthIdentityWithoutExposingToken(t *testing.T) {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"person@example.test"}`))
+	accessPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"email":"nested@example.test"},"sub":"subject-id"}`))
 	tests := []struct {
 		runtime *entities.CredentialRuntime
 		want    string
@@ -226,10 +227,27 @@ func TestAccountLabelUsesOAuthIdentityWithoutExposingToken(t *testing.T) {
 		{&entities.CredentialRuntime{Kind: entities.KindAPIKey, APIKey: "secret"}, ""},
 		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthAccess: "secret", OAuthMeta: entities.OAuthMetadata{Email: "metadata@example.test"}}, "metadata@example.test"},
 		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthIDToken: "header." + payload + ".signature"}, "person@example.test"},
+		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthAccess: "header." + accessPayload + ".signature"}, "nested@example.test"},
 		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthAccount: "account-id"}, "account-id"},
 	}
 	for _, test := range tests {
 		if got := AccountLabel(test.runtime); got != test.want {
+			t.Fatalf("got %q want %q", got, test.want)
+		}
+	}
+}
+
+func TestAPIKeyPreviewShowsEdgesOnly(t *testing.T) {
+	tests := []struct {
+		runtime *entities.CredentialRuntime
+		want    string
+	}{
+		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthAccess: "secret"}, ""},
+		{&entities.CredentialRuntime{Kind: entities.KindAPIKey, APIKey: "short"}, "••••••"},
+		{&entities.CredentialRuntime{Kind: entities.KindAPIKey, APIKey: "ghp_fsf123456789o28fk"}, "ghp_fs…28fk"},
+	}
+	for _, test := range tests {
+		if got := APIKeyPreview(test.runtime); got != test.want {
 			t.Fatalf("got %q want %q", got, test.want)
 		}
 	}
