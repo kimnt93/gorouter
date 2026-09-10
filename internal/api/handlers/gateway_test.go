@@ -1394,7 +1394,7 @@ func TestListModelsReportsReasoningCapabilitiesWithFallbackSource(t *testing.T) 
 }
 
 func TestGatewayCorrelationUsesAuthenticatedWorkloadBinding(t *testing.T) {
-	key := &entities.ApiKey{ID: "key-agent", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: entities.WorkloadBinding{Application: "xnobrain", Environment: "prod", WorkspaceID: "workspace-1", AgentID: "agent-1"}}
+	key := &entities.ApiKey{ID: "key-agent", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: entities.WorkloadBinding{Application: "automation-suite", Environment: "prod", WorkspaceID: "workspace-1", AgentID: "agent-1"}}
 	repository := &captureUsageRepository{}
 	usageService := usage.NewService(repository, 16, nil)
 	gateway := &Gateway{
@@ -1423,7 +1423,7 @@ func TestGatewayCorrelationUsesAuthenticatedWorkloadBinding(t *testing.T) {
 		t.Fatalf("events=%+v", repository.events)
 	}
 	event := repository.events[0]
-	if event.Application != "xnobrain" || event.WorkspaceID != "workspace-1" || event.AgentID != "agent-1" || event.ConversationID != "conversation-1" || event.RunID != "run-1" || event.LogicalRequestID != "logical-1" || event.AccountingTS.IsZero() || event.ProviderAttemptID == "" {
+	if event.Application != "automation-suite" || event.WorkspaceID != "workspace-1" || event.AgentID != "agent-1" || event.ConversationID != "conversation-1" || event.RunID != "run-1" || event.LogicalRequestID != "logical-1" || event.AccountingTS.IsZero() || event.ProviderAttemptID == "" {
 		t.Fatalf("attribution=%+v", event)
 	}
 }

@@ -3160,83 +3160,6 @@
                 }
             }
         },
-        "/admin/usage/agents/weekly": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "tags": [
-                    "usage"
-                ],
-                "summary": "Get authoritative weekly agent usage",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workload application namespace",
-                        "name": "application",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Environment namespace",
-                        "name": "environment",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Workspace identity",
-                        "name": "workspace_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Comma-separated agent identities",
-                        "name": "agent_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api_handlers.AgentWeeklyUsageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/admin/usage/events/{id}": {
             "get": {
                 "security": [
@@ -3593,6 +3516,83 @@
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/usage/workloads/weekly": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Get authoritative weekly workload usage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workload application namespace",
+                        "name": "application",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment namespace",
+                        "name": "environment",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace identity",
+                        "name": "workspace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated agent identities",
+                        "name": "agent_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.WorkloadWeeklyUsageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
@@ -5994,59 +5994,6 @@
                 }
             }
         },
-        "internal_api_handlers.AgentWeeklyUsageResponse": {
-            "type": "object",
-            "properties": {
-                "accounting_state": {
-                    "type": "string"
-                },
-                "agent_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "application": {
-                    "type": "string"
-                },
-                "as_of": {
-                    "type": "string"
-                },
-                "attribution_coverage": {
-                    "type": "string"
-                },
-                "capability_version": {
-                    "type": "string"
-                },
-                "completeness": {
-                    "type": "string"
-                },
-                "environment": {
-                    "type": "string"
-                },
-                "freshness": {
-                    "type": "string"
-                },
-                "period_end": {
-                    "type": "string"
-                },
-                "period_start": {
-                    "type": "string"
-                },
-                "summary": {
-                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"
-                },
-                "timezone": {
-                    "type": "string"
-                },
-                "week_starts_on": {
-                    "type": "string"
-                },
-                "workspace_id": {
-                    "type": "string"
-                }
-            }
-        },
         "internal_api_handlers.AuditListResponse": {
             "type": "object",
             "properties": {
@@ -7255,6 +7202,59 @@
             "type": "object",
             "properties": {
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.WorkloadWeeklyUsageResponse": {
+            "type": "object",
+            "properties": {
+                "accounting_state": {
+                    "type": "string"
+                },
+                "agent_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "application": {
+                    "type": "string"
+                },
+                "as_of": {
+                    "type": "string"
+                },
+                "attribution_coverage": {
+                    "type": "string"
+                },
+                "capability_version": {
+                    "type": "string"
+                },
+                "completeness": {
+                    "type": "string"
+                },
+                "environment": {
+                    "type": "string"
+                },
+                "freshness": {
+                    "type": "string"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "week_starts_on": {
+                    "type": "string"
+                },
+                "workspace_id": {
                     "type": "string"
                 }
             }

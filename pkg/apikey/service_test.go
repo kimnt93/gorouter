@@ -204,7 +204,7 @@ func TestTenantScopedOperationsDelegateTenant(t *testing.T) {
 func TestWorkloadBindingIsValidatedAndRetainedByCreation(t *testing.T) {
 	repo := &ownedRepoStub{}
 	service := NewService(repo, func(value string) string { return value }, func() string { return "sk_synthetic_workload_secret" })
-	binding := entities.WorkloadBinding{Application: "xnobrain", Environment: "test", WorkspaceID: "workspace-1", AgentID: "agent-1"}
+	binding := entities.WorkloadBinding{Application: "automation-suite", Environment: "test", WorkspaceID: "workspace-1", AgentID: "agent-1"}
 	key, err := service.Create(context.Background(), CreateInput{Name: "agent", Models: []string{"model"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: binding})
 	if err != nil {
 		t.Fatal(err)

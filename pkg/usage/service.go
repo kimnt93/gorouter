@@ -297,10 +297,10 @@ func (s *Service) Detail(ctx context.Context, id string, visibility entities.Usa
 	return detail, nil
 }
 
-func (s *Service) AgentAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
-	repo, ok := s.repo.(entities.AgentUsageAggregateRepository)
+func (s *Service) WorkloadAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	repo, ok := s.repo.(entities.WorkloadUsageAggregateRepository)
 	if !ok {
-		return nil, errors.New("agent usage aggregation unavailable")
+		return nil, errors.New("workload usage aggregation unavailable")
 	}
-	return repo.AgentUsageAggregate(ctx, query)
+	return repo.WorkloadUsageAggregate(ctx, query)
 }

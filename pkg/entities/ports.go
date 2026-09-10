@@ -164,8 +164,8 @@ type PrincipalUsageRepository interface {
 	SummaryUsage(ctx context.Context, query UsageQuery) (*UsageSummary, error)
 }
 
-type AgentUsageAggregateRepository interface {
-	AgentUsageAggregate(ctx context.Context, query UsageQuery) (*UsageSummary, error)
+type WorkloadUsageAggregateRepository interface {
+	WorkloadUsageAggregate(ctx context.Context, query UsageQuery) (*UsageSummary, error)
 }
 
 type UsageDetailRepository interface {

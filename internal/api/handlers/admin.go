@@ -1292,7 +1292,7 @@ func applyUsageFilters(c fiber.Ctx, query *entities.UsageQuery) {
 	query.LogicalRequestID = strings.TrimSpace(c.Query("logical_request_id"))
 }
 
-type AgentWeeklyUsageResponse struct {
+type WorkloadWeeklyUsageResponse struct {
 	CapabilityVersion   string                `json:"capability_version"`
 	Application         string                `json:"application"`
 	Environment         string                `json:"environment,omitempty"`
@@ -1310,19 +1310,19 @@ type AgentWeeklyUsageResponse struct {
 	Summary             entities.UsageSummary `json:"summary"`
 }
 
-// AgentWeeklyUsage returns the exact current Router quota-week aggregate for
+// WorkloadWeeklyUsage returns the exact current Router quota-week aggregate for
 // one authorized workload binding or a bounded batch of agent identities.
-// @Summary Get authoritative weekly agent usage
+// @Summary Get authoritative weekly workload usage
 // @Tags usage
 // @Security BearerAuth
 // @Param application query string false "Workload application namespace"
 // @Param environment query string false "Environment namespace"
 // @Param workspace_id query string false "Workspace identity"
 // @Param agent_id query string false "Comma-separated agent identities"
-// @Success 200 {object} AgentWeeklyUsageResponse
+// @Success 200 {object} WorkloadWeeklyUsageResponse
 // @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
-// @Router /admin/usage/agents/weekly [get]
-func (a *Admin) AgentWeeklyUsage(c fiber.Ctx) error {
+// @Router /admin/usage/workloads/weekly [get]
+func (a *Admin) WorkloadWeeklyUsage(c fiber.Ctx) error {
 	sess := SessionFrom(c)
 	if sess == nil {
 		return responseapi.For(c).Unauthorized("authentication required").Send()
@@ -1364,7 +1364,7 @@ func (a *Admin) AgentWeeklyUsage(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to resolve quota week").Send()
 	}
 	query := entities.UsageQuery{Visibility: visibility, Since: &start, Until: &end, Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs}
-	summary, aggregateErr := a.UsageSvc.AgentAggregate(c.Context(), query)
+	summary, aggregateErr := a.UsageSvc.WorkloadAggregate(c.Context(), query)
 	if aggregateErr != nil {
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "authoritative usage is unavailable", "service_unavailable", "usage_unavailable").Send()
 	}
@@ -1372,7 +1372,7 @@ func (a *Admin) AgentWeeklyUsage(c fiber.Ctx) error {
 	if summary.Requests == 0 {
 		coverage = "no_usage"
 	}
-	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(AgentWeeklyUsageResponse{CapabilityVersion: "xnobrain-agent-usage-v1", Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs, PeriodStart: start, PeriodEnd: end, Timezone: "UTC", WeekStartsOn: strings.ToLower(start.Weekday().String()), AsOf: now, AccountingState: "settled", Completeness: "durable_records", Freshness: "settled_only", AttributionCoverage: coverage, Summary: *summary}).Send()
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(WorkloadWeeklyUsageResponse{CapabilityVersion: "gorouter-workload-usage-v1", Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs, PeriodStart: start, PeriodEnd: end, Timezone: "UTC", WeekStartsOn: strings.ToLower(start.Weekday().String()), AsOf: now, AccountingState: "settled", Completeness: "durable_records", Freshness: "settled_only", AttributionCoverage: coverage, Summary: *summary}).Send()
 }
 
 // CacheStats returns safe prompt-cache counters.

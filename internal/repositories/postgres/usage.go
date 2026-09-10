@@ -321,7 +321,7 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 	return &event, nil
 }
 
-func (r *UsageRepo) AgentUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+func (r *UsageRepo) WorkloadUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
 	filter, args := postgresUsageFilter(query)
 	filter = strings.ReplaceAll(filter, "ts >=", "accounting_ts >=")
 	filter = strings.ReplaceAll(filter, "ts <", "accounting_ts <")

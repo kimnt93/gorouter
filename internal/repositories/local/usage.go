@@ -358,7 +358,7 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 	return nil, entities.ErrNotFound
 }
 
-func (r *UsageRepo) AgentUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+func (r *UsageRepo) WorkloadUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
 	events, err := r.all(ctx)
 	if err != nil {
 		return nil, err

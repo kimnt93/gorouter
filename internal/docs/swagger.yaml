@@ -1056,41 +1056,6 @@ definitions:
       plaintext:
         type: string
     type: object
-  internal_api_handlers.AgentWeeklyUsageResponse:
-    properties:
-      accounting_state:
-        type: string
-      agent_ids:
-        items:
-          type: string
-        type: array
-      application:
-        type: string
-      as_of:
-        type: string
-      attribution_coverage:
-        type: string
-      capability_version:
-        type: string
-      completeness:
-        type: string
-      environment:
-        type: string
-      freshness:
-        type: string
-      period_end:
-        type: string
-      period_start:
-        type: string
-      summary:
-        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary'
-      timezone:
-        type: string
-      week_starts_on:
-        type: string
-      workspace_id:
-        type: string
-    type: object
   internal_api_handlers.AuditListResponse:
     properties:
       data:
@@ -1878,6 +1843,41 @@ definitions:
   internal_api_handlers.UserStatusRequest:
     properties:
       status:
+        type: string
+    type: object
+  internal_api_handlers.WorkloadWeeklyUsageResponse:
+    properties:
+      accounting_state:
+        type: string
+      agent_ids:
+        items:
+          type: string
+        type: array
+      application:
+        type: string
+      as_of:
+        type: string
+      attribution_coverage:
+        type: string
+      capability_version:
+        type: string
+      completeness:
+        type: string
+      environment:
+        type: string
+      freshness:
+        type: string
+      period_end:
+        type: string
+      period_start:
+        type: string
+      summary:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary'
+      timezone:
+        type: string
+      week_starts_on:
+        type: string
+      workspace_id:
         type: string
     type: object
 info:
@@ -3945,55 +3945,6 @@ paths:
       summary: Get usage activity
       tags:
       - usage
-  /admin/usage/agents/weekly:
-    get:
-      parameters:
-      - description: Workload application namespace
-        in: query
-        name: application
-        type: string
-      - description: Environment namespace
-        in: query
-        name: environment
-        type: string
-      - description: Workspace identity
-        in: query
-        name: workspace_id
-        type: string
-      - description: Comma-separated agent identities
-        in: query
-        name: agent_id
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/internal_api_handlers.AgentWeeklyUsageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get authoritative weekly agent usage
-      tags:
-      - usage
   /admin/usage/events/{id}:
     get:
       description: Returns one visible usage event, including encrypted and bounded
@@ -4232,6 +4183,55 @@ paths:
       security:
       - BearerAuth: []
       summary: Get usage summary
+      tags:
+      - usage
+  /admin/usage/workloads/weekly:
+    get:
+      parameters:
+      - description: Workload application namespace
+        in: query
+        name: application
+        type: string
+      - description: Environment namespace
+        in: query
+        name: environment
+        type: string
+      - description: Workspace identity
+        in: query
+        name: workspace_id
+        type: string
+      - description: Comma-separated agent identities
+        in: query
+        name: agent_id
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.WorkloadWeeklyUsageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get authoritative weekly workload usage
       tags:
       - usage
   /admin/users:
