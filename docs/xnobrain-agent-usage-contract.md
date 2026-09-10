@@ -1,6 +1,6 @@
 # XNOBrain agent usage contract
 
-Implemented against GoRouter source revision `1a237fe` (implementation commit follows this document).
+Implemented from GoRouter source revision `1a237fe`; implementation revision `ea9b0fd`.
 
 ## Capability
 
@@ -120,3 +120,14 @@ before claiming fully crash-safe accounting for every historical client path.
 
 Use synthetic IDs such as `workspace_test`, `agent_test`, `run_test`; never put
 emails, secrets, prompts, or mutable display names in workload/correlation IDs.
+
+
+## Verification status
+
+- Implemented: yes
+- Unit-tested: yes (`go test ./...`, `go vet ./...`, frontend 15 files / 49 tests)
+- SQLite integration-tested: yes (local migration, isolation, half-open week, idempotency)
+- PostgreSQL live integration-tested: no (`TEST_DATABASE_URL` not configured)
+- ClickHouse live integration-tested: no (`TEST_CLICKHOUSE_URL` not configured)
+- Released: no
+- Deployed: no
