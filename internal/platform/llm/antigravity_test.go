@@ -36,7 +36,7 @@ func TestAntigravitySendUsesCloudCodeEnvelopeAndConvertsResponse(t *testing.T) {
 		if len(request["tools"].([]any)) != 1 {
 			t.Errorf("tools = %#v", request["tools"])
 		}
-		_, _ = io.WriteString(w, `{"response":{"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}}`)
+		_, _ = io.WriteString(w, `{"response":{"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":1,"cachedContentTokenCount":10,"thoughtsTokenCount":2}}}`)
 	}))
 	defer server.Close()
 
@@ -54,7 +54,7 @@ func TestAntigravitySendUsesCloudCodeEnvelopeAndConvertsResponse(t *testing.T) {
 	if err := json.NewDecoder(result.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Choices[0].Message.Content != "hello" || response.Usage.PromptTokens != 3 {
+	if response.Choices[0].Message.Content != "hello" || response.Usage.PromptTokens != 3 || response.Usage.CacheReadTokens != 10 || response.Usage.CompletionTokens != 3 {
 		t.Fatalf("converted response = %+v", response)
 	}
 }

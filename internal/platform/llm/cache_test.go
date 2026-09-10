@@ -101,9 +101,22 @@ func TestOpenAIPromptCacheKeyCapabilityIsProviderSpecific(t *testing.T) {
 			t.Errorf("%s should support prompt_cache_key", providerID)
 		}
 	}
-	for _, providerID := range []string{"groq", "gemini", "openrouter", "xai", "openai-compatible"} {
+	for _, providerID := range []string{"groq", "gemini", "openrouter", "xai", "openai-compatible", "qwen"} {
 		if SupportsOpenAIPromptCacheKey(providerID) {
 			t.Errorf("%s must remain conservative", providerID)
+		}
+	}
+}
+
+func TestOpenAIFormatCacheControlCapabilityIsProviderSpecific(t *testing.T) {
+	for _, providerID := range []string{"qwen", "openrouter"} {
+		if !SupportsOpenAIFormatCacheControl(providerID) {
+			t.Errorf("%s should preserve explicit cache_control", providerID)
+		}
+	}
+	for _, providerID := range []string{"openai", "codex", "groq", "gemini", "deepseek", "xai", "openai-compatible"} {
+		if SupportsOpenAIFormatCacheControl(providerID) {
+			t.Errorf("%s must not receive undocumented cache_control", providerID)
 		}
 	}
 }

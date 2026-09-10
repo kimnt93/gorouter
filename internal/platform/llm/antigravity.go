@@ -200,6 +200,8 @@ func antigravityResponse(body []byte, model string) ([]byte, error) {
 		Usage struct {
 			Prompt     int64 `json:"promptTokenCount"`
 			Completion int64 `json:"candidatesTokenCount"`
+			Cached     int64 `json:"cachedContentTokenCount"`
+			Thoughts   int64 `json:"thoughtsTokenCount"`
 		} `json:"usageMetadata"`
 	}
 	if err := json.Unmarshal(raw, &response); err != nil {
@@ -218,7 +220,8 @@ func antigravityResponse(body []byte, model string) ([]byte, error) {
 	if len(message.ToolCalls) > 0 {
 		finish = "tool_calls"
 	}
-	out := Response{ID: fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()), Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []Choice{{Index: 0, Message: &message, FinishReason: finish}}, Usage: Usage{PromptTokens: response.Usage.Prompt, CompletionTokens: response.Usage.Completion}}
+	uncachedPrompt := max(int64(0), response.Usage.Prompt-response.Usage.Cached)
+	out := Response{ID: fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()), Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []Choice{{Index: 0, Message: &message, FinishReason: finish}}, Usage: Usage{PromptTokens: uncachedPrompt, CompletionTokens: response.Usage.Completion + response.Usage.Thoughts, CacheReadTokens: response.Usage.Cached}}
 	return json.Marshal(out)
 }
 

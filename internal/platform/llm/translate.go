@@ -167,6 +167,48 @@ func applyAnthropicPromptCache(body *AnthropicRequest) {
 	}
 }
 
+// useExplicitConversationCache replaces Anthropic's top-level automatic marker
+// for Anthropic-compatible providers that only implement block-level caching.
+func useExplicitConversationCache(body *AnthropicRequest) {
+	if body == nil || body.CacheControl == nil {
+		return
+	}
+	body.CacheControl = nil
+	breakpoints := 0
+	for i := range body.Tools {
+		if body.Tools[i].CacheControl != nil {
+			breakpoints++
+		}
+	}
+	for i := range body.System {
+		if body.System[i].CacheControl != nil {
+			breakpoints++
+		}
+	}
+	for i := range body.Messages {
+		for j := range body.Messages[i].Content {
+			if body.Messages[i].Content[j].CacheControl != nil {
+				breakpoints++
+			}
+		}
+	}
+	if breakpoints >= 4 {
+		return
+	}
+	for i := len(body.Messages) - 1; i >= 0; i-- {
+		for j := len(body.Messages[i].Content) - 1; j >= 0; j-- {
+			block := &body.Messages[i].Content[j]
+			if block.Type == "text" && block.Text == "" {
+				continue
+			}
+			if block.CacheControl == nil {
+				block.CacheControl = &CacheControl{Type: "ephemeral"}
+			}
+			return
+		}
+	}
+}
+
 func maxTokensOf(req *ChatRequest) int64 {
 	if v := req.OutputLimit(); v > 0 {
 		return v

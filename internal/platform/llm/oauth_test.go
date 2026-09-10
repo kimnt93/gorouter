@@ -253,3 +253,47 @@ func TestClaudeConnectivityProbeUsesDiscoveredModel(t *testing.T) {
 		t.Fatalf("probe paths = %v", paths)
 	}
 }
+
+func TestOpenAIAdapterPreservesExplicitCacheControlOnlyForSupportedProviders(t *testing.T) {
+	var bodies = map[string]map[string]any{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		bodies[r.Header.Get("X-Test-Provider")] = body
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	raw := []byte(`{"messages":[{"role":"system","content":"stable","cache_control":{"type":"ephemeral"}},{"role":"user","content":"question"}]}`)
+	for _, providerID := range []string{"qwen", "openrouter", "groq"} {
+		adapter := &OpenAIAdapter{HTTP: &http.Client{Transport: headerTransport{base: server.Client().Transport, key: "X-Test-Provider", value: providerID}}}
+		result, err := adapter.Send(context.Background(), &entities.CredentialRuntime{Kind: entities.KindAPIKey, Provider: providerID, BaseURL: server.URL, APIKey: "secret"}, "model", raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Body.Close()
+	}
+	for _, providerID := range []string{"qwen", "openrouter"} {
+		messages := bodies[providerID]["messages"].([]any)
+		content := messages[0].(map[string]any)["content"].([]any)
+		if content[0].(map[string]any)["cache_control"] == nil {
+			t.Fatalf("%s cache_control missing: %#v", providerID, bodies[providerID])
+		}
+	}
+	messages := bodies["groq"]["messages"].([]any)
+	if _, exists := messages[0].(map[string]any)["cache_control"]; exists {
+		t.Fatalf("Groq received unsupported cache_control: %#v", bodies["groq"])
+	}
+}
+
+type headerTransport struct {
+	base       http.RoundTripper
+	key, value string
+}
+
+func (t headerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.Header.Set(t.key, t.value)
+	return t.base.RoundTrip(clone)
+}

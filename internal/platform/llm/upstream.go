@@ -79,7 +79,7 @@ type OpenAIAdapter struct {
 // Send forwards an OpenAI Chat Completions body to the upstream, rewriting the
 // model name and forcing usage reporting on streams.
 func (a *OpenAIAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, upstreamModel string, rawBody []byte) (*entities.UpstreamResult, error) {
-	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel, SupportsOpenAIPromptCacheKey(cr.Provider))
+	body, stream, err := prepareOpenAIRequest(rawBody, upstreamModel, cr.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func openAIEndpoint(baseURL, endpoint string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(endpoint, "/")
 }
 
-func prepareOpenAIRequest(rawBody []byte, upstreamModel string, injectPromptCacheKey bool) ([]byte, bool, error) {
+func prepareOpenAIRequest(rawBody []byte, upstreamModel, providerID string) ([]byte, bool, error) {
 	var request ChatRequest
 	if err := json.Unmarshal(rawBody, &request); err != nil {
 		return nil, false, fmt.Errorf("parse OpenAI request: %w", err)
@@ -152,13 +152,14 @@ func prepareOpenAIRequest(rawBody []byte, upstreamModel string, injectPromptCach
 	}
 	model, _ := json.Marshal(upstreamModel)
 	fields["model"] = model
-	if injectPromptCacheKey {
+	if SupportsOpenAIPromptCacheKey(providerID) {
 		if _, exists := fields["prompt_cache_key"]; !exists {
 			if key := ProviderPromptCacheKey(&request); key != "" {
 				fields["prompt_cache_key"], _ = json.Marshal(key)
 			}
 		}
 	}
+	normalizeOpenAIContentCacheControls(fields, SupportsOpenAIFormatCacheControl(providerID))
 	if request.Stream {
 		var options map[string]json.RawMessage
 		if rawOptions, ok := fields["stream_options"]; ok {
@@ -231,6 +232,72 @@ func applyOAuthProviderHeaders(headers map[string]string, cr *entities.Credentia
 	}
 }
 
+func normalizeOpenAIContentCacheControls(fields map[string]json.RawMessage, preserve bool) {
+	rawMessages, ok := fields["messages"]
+	if !ok {
+		return
+	}
+	var messages []map[string]json.RawMessage
+	if json.Unmarshal(rawMessages, &messages) != nil {
+		return
+	}
+	changed := false
+	for _, message := range messages {
+		if !preserve {
+			if _, exists := message["cache_control"]; exists {
+				delete(message, "cache_control")
+				changed = true
+			}
+			var blocks []map[string]json.RawMessage
+			if json.Unmarshal(message["content"], &blocks) == nil {
+				for _, block := range blocks {
+					if _, exists := block["cache_control"]; exists {
+						delete(block, "cache_control")
+						changed = true
+					}
+				}
+				message["content"], _ = json.Marshal(blocks)
+			}
+			continue
+		}
+		control, ok := message["cache_control"]
+		if !ok || !json.Valid(control) {
+			continue
+		}
+		delete(message, "cache_control")
+		var text string
+		if json.Unmarshal(message["content"], &text) == nil {
+			block, _ := json.Marshal([]map[string]json.RawMessage{{
+				"type":          json.RawMessage(`"text"`),
+				"text":          message["content"],
+				"cache_control": control,
+			}})
+			message["content"] = block
+			changed = true
+			continue
+		}
+		var blocks []map[string]json.RawMessage
+		if json.Unmarshal(message["content"], &blocks) != nil {
+			continue
+		}
+		for index := len(blocks) - 1; index >= 0; index-- {
+			var blockType string
+			_ = json.Unmarshal(blocks[index]["type"], &blockType)
+			if blockType == "text" {
+				if _, exists := blocks[index]["cache_control"]; !exists {
+					blocks[index]["cache_control"] = control
+				}
+				message["content"], _ = json.Marshal(blocks)
+				changed = true
+				break
+			}
+		}
+	}
+	if changed {
+		fields["messages"], _ = json.Marshal(messages)
+	}
+}
+
 type AnthropicAdapter struct {
 	HTTP          *http.Client
 	OAuthClientID string
@@ -246,6 +313,9 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 	}
 	translated := ToAnthropic(&req)
 	translated.Model = upstreamModel
+	if cr.Provider == "kimi-code" {
+		useExplicitConversationCache(translated)
+	}
 	var claudeSessionID string
 	if cr.Kind == entities.KindOAuth && cr.OAuthMeta.AccountID != "" && cr.OAuthMeta.DeviceID != "" {
 		sessionID := StableConversationID(&req)

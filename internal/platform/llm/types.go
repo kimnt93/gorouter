@@ -73,6 +73,18 @@ type CacheControl struct {
 // SupportsOpenAIPromptCacheKey is deliberately allowlisted. Generic OpenAI
 // compatibility does not imply support for prompt_cache_key, and several
 // providers reject unknown request fields.
+// SupportsOpenAIFormatCacheControl identifies providers that document
+// Anthropic-style cache_control markers inside OpenAI message content blocks.
+// Other OpenAI-compatible providers may reject these non-standard fields.
+func SupportsOpenAIFormatCacheControl(providerID string) bool {
+	switch strings.ToLower(strings.TrimSpace(providerID)) {
+	case "qwen", "openrouter":
+		return true
+	default:
+		return false
+	}
+}
+
 func SupportsOpenAIPromptCacheKey(providerID string) bool {
 	switch strings.ToLower(strings.TrimSpace(providerID)) {
 	case "openai", "codex", "opencode-zen", "opencode-go", "grok-build":

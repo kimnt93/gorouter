@@ -101,3 +101,17 @@ func TestAnthropicOmitsAutomaticCacheWhenFourExplicitBreakpointsExist(t *testing
 		}
 	}
 }
+
+func TestAnthropicCompatibleProviderUsesExplicitConversationBoundary(t *testing.T) {
+	got := ToAnthropic(&ChatRequest{Messages: []Message{
+		{Role: "developer", Content: json.RawMessage(`"stable system"`)},
+		{Role: "user", Content: json.RawMessage(`"latest turn"`)},
+	}})
+	useExplicitConversationCache(got)
+	if got.CacheControl != nil {
+		t.Fatal("unsupported top-level automatic cache remained")
+	}
+	if got.Messages[len(got.Messages)-1].Content[0].CacheControl == nil {
+		t.Fatal("explicit conversation cache boundary missing")
+	}
+}
