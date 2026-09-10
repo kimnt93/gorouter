@@ -1,4 +1,4 @@
-# GoRouter v0.1.2 — General workload-attributed usage accounting
+# GoRouter v0.2.0 — Authoritative workload usage accounting
 
 ## Overview
 
@@ -56,9 +56,17 @@ attribution without requiring prompt or completion storage.
 - Frontend build passed.
 - Swagger generation/drift and `git diff --check` passed.
 
+## Upgrade notes
+
+- Run the new workload-usage migrations before enabling workload-bound keys.
+- Update clients from the earlier draft `/admin/usage/agents/weekly` route to
+  `/admin/usage/workloads/weekly`.
+- Negotiate the final `gorouter-workload-usage-v1` capability marker.
+- Existing unbound keys require no migration and continue to work normally.
+
 ## Delivery status
 
+- Target release: `v0.2.0`.
 - Source implementation: complete.
 - Unit and SQLite integration coverage: complete.
-- Released: not yet.
-- Deployed: not yet.
+- Release publication and deployment: pending.
