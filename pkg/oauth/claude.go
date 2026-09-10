@@ -61,14 +61,35 @@ func (s *Service) claudeMetadata(ctx context.Context, token string) entities.OAu
 		return m
 	}
 	var p struct {
-		Account struct {
+		OAuthAccount struct {
 			AccountID      string `json:"account_uuid"`
 			OrganizationID string `json:"organization_uuid"`
+			Email          string `json:"email"`
+			EmailAddress   string `json:"email_address"`
 		} `json:"oauth_account"`
+		Account struct {
+			AccountID    string `json:"uuid"`
+			Email        string `json:"email"`
+			EmailAddress string `json:"email_address"`
+		} `json:"account"`
+		User struct {
+			Email        string `json:"email"`
+			EmailAddress string `json:"email_address"`
+		} `json:"user"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p) == nil {
-		m.AccountID = p.Account.AccountID
-		m.OrganizationID = p.Account.OrganizationID
+		m.AccountID = firstNonEmpty(p.OAuthAccount.AccountID, p.Account.AccountID)
+		m.OrganizationID = strings.TrimSpace(p.OAuthAccount.OrganizationID)
+		m.Email = firstNonEmpty(p.OAuthAccount.Email, p.OAuthAccount.EmailAddress, p.Account.Email, p.Account.EmailAddress, p.User.Email, p.User.EmailAddress)
 	}
 	return m
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }

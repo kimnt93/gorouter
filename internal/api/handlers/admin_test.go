@@ -91,7 +91,7 @@ func TestCredentialListReturnsOnlyAuthenticatedUsersConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	var credentials []entities.Credential
+	var credentials []CredentialResponse
 	if err := json.NewDecoder(response.Body).Decode(&credentials); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestCredentialListReturnsOnlyGlobalConnectionsToMaster(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	var credentials []entities.Credential
+	var credentials []CredentialResponse
 	if err := json.NewDecoder(response.Body).Decode(&credentials); err != nil {
 		t.Fatal(err)
 	}
@@ -149,11 +149,24 @@ func TestCredentialListReturnsSafeConnectionIdentities(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	var credentials []entities.Credential
-	if err := json.NewDecoder(response.Body).Decode(&credentials); err != nil {
+	var raw []map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		t.Fatal(err)
 	}
-	if len(credentials) != 2 || credentials[0].KeyPreview != "gsk_ab…wxyz" || credentials[1].AccountLabel != "person@example.test" || credentials[1].KeyPreview != "" {
+	encoded, _ := json.Marshal(raw)
+	if strings.Contains(string(encoded), "key_preview") || strings.Contains(string(encoded), "account_label") {
+		t.Fatalf("legacy label fields remain in response: %s", encoded)
+	}
+	credentials := make([]CredentialResponse, 0, len(raw))
+	for _, item := range raw {
+		encodedItem, _ := json.Marshal(item)
+		var credential CredentialResponse
+		if err := json.Unmarshal(encodedItem, &credential); err != nil {
+			t.Fatal(err)
+		}
+		credentials = append(credentials, credential)
+	}
+	if len(credentials) != 2 || credentials[0].Label != "gsk_ab******wxyz" || credentials[1].Label != "person@example.test" {
 		t.Fatalf("credentials=%+v", credentials)
 	}
 }

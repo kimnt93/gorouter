@@ -20,7 +20,7 @@ beforeEach(() => {
 
 test('reads cached quota and contacts the provider only after Reload', async () => {
   api.getProviders.mockResolvedValue({ data: [{ id: 'codex', name: 'OpenAI Codex', description: 'Codex subscription', auth: 'oauth', protocol: 'codex', default_base_url: '', model_prefix: 'cx', custom_base_url: false, oauth_supported: true, oauth_refresh_required: true, quota_supported: true }] })
-  api.getCredentials.mockResolvedValue([{ id: 'cred-1', name: 'Primary Codex', account_label: 'person@example.test', provider: 'codex', kind: 'oauth', base_url: 'https://chatgpt.com/backend-api', status: 'active', owner_tenant_id: null, created_at: '' }])
+  api.getCredentials.mockResolvedValue([{ id: 'cred-1', name: 'Primary Codex', label: 'person@example.test', provider: 'codex', kind: 'oauth', base_url: 'https://chatgpt.com/backend-api', status: 'active', owner_tenant_id: null, created_at: '' }])
   api.getCredentialQuota.mockResolvedValue({ credential_id: 'cred-1', provider: 'codex', account: 'pe****@example.test', available: true, in_use: true, windows: [], message: 'Click reload to fetch quota' })
   api.refreshCredentialQuota.mockResolvedValue({ credential_id: 'cred-1', provider: 'codex', account: 'pe****@example.test', available: true, fetched_at: '2026-08-26T00:00:00Z', windows: [{ name: 'Session (5h)', used_percent: 25, remaining_percent: 75, reset_at: '2026-08-26T05:00:00Z' }] })
 
@@ -152,7 +152,7 @@ test('tests every active provider account from the bulk shortcut', async () => {
 
 
 test('shows the full connection name and a masked API-key preview', async () => {
-  api.getCredentials.mockResolvedValue([{ id: 'cred-api', name: 'Production Groq Key', provider: 'custom', kind: 'api_key', base_url: 'https://api.example.test/v1', status: 'active', key_preview: 'ghp_fsf…o28fk', owner_tenant_id: null, created_at: '' }])
+  api.getCredentials.mockResolvedValue([{ id: 'cred-api', name: 'Production Groq Key', provider: 'custom', kind: 'api_key', base_url: 'https://api.example.test/v1', status: 'active', label: 'ghp_fsf******o28fk', owner_tenant_id: null, created_at: '' }])
   render(<ProvidersPage />)
   expect(await screen.findByText('Production Groq Key')).toBeInTheDocument()
   expect(screen.getByText(/ghp_fsf\*{6}o28fk/)).toBeInTheDocument()

@@ -35,6 +35,18 @@ func oauthTestService(t *testing.T, handler http.Handler) (*Service, *oauthRepoS
 	return New(client, credential.NewService(repo, oauthBoxStub{}), Config{AntigravityClientID: "registered.apps.googleusercontent.com", AntigravityClientSecret: "synthetic-secret"}), repo
 }
 
+func TestClaudeMetadataCapturesSubscriptionEmail(t *testing.T) {
+	service, _ := oauthTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"oauth_account": map[string]any{
+			"account_uuid": "account-id", "organization_uuid": "organization-id", "email_address": "claude@example.test",
+		}})
+	}))
+	metadata := service.claudeMetadata(context.Background(), "synthetic-token")
+	if metadata.Email != "claude@example.test" || metadata.AccountID != "account-id" || metadata.OrganizationID != "organization-id" {
+		t.Fatalf("metadata=%+v", metadata)
+	}
+}
+
 func TestGitHubCopilotDeviceFlowPollsAndPersistsCopilotToken(t *testing.T) {
 	service, repo := oauthTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

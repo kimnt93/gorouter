@@ -105,7 +105,7 @@ for (let organizationIndex = 0; organizationIndex < organizations.length; organi
   const organization = organizations[organizationIndex]
   const created = await request('/admin/credentials', { method: 'POST', body: { name: `${organization.name} ${source.provider.label}`, provider: source.provider.id, kind: 'api_key', api_key: source.key, owner_type: 'organization', owner_organization_id: organization.id } })
   const credential = created.data
-  report.credentials.push({ id: credential.id, name: credential.name, provider: credential.provider, owner_type: 'organization', owner_organization_id: organization.id, key_preview: credential.key_preview })
+  report.credentials.push({ id: credential.id, name: credential.name, provider: credential.provider, owner_type: 'organization', owner_organization_id: organization.id, label: credential.label })
   const connectivity = await request(`/admin/credentials/${credential.id}/test`, { method: 'POST', allowFailure: true })
   const discoveredResponse = await request(`/admin/credentials/${credential.id}/models`, { allowFailure: true })
   const discovered = discoveredResponse.ok && Array.isArray(discoveredResponse.data?.data) ? discoveredResponse.data.data.map(modelID).filter(Boolean) : []
@@ -124,7 +124,7 @@ const personalUserIndex = 17
 const personalSource = sources.find((source) => source.provider.id === 'opencode-zen') ?? sources[0]
 const personalCreated = await request('/admin/credentials', { method: 'POST', body: { name: `${people[personalUserIndex]} personal`, provider: personalSource.provider.id, kind: 'api_key', api_key: personalSource.key, owner_type: 'user', owner_user_id: users[personalUserIndex].id } })
 const personalCredential = personalCreated.data
-report.credentials.push({ id: personalCredential.id, name: personalCredential.name, provider: personalCredential.provider, owner_type: 'user', owner_user_id: users[personalUserIndex].id, key_preview: personalCredential.key_preview })
+report.credentials.push({ id: personalCredential.id, name: personalCredential.name, provider: personalCredential.provider, owner_type: 'user', owner_user_id: users[personalUserIndex].id, label: personalCredential.label })
 const personalDiscovery = await request(`/admin/credentials/${personalCredential.id}/models`)
 const personalSelected = chooseModels(personalDiscovery.data.data.map(modelID).filter(Boolean), personalSource.provider.preferred)
 const personalImport = await request(`/admin/credentials/${personalCredential.id}/models/import`, { method: 'POST', body: { models: personalSelected } })

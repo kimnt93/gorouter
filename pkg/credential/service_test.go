@@ -252,3 +252,16 @@ func TestAPIKeyPreviewShowsEdgesOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestMaskPreviewProducesDisplayReadyLabel(t *testing.T) {
+	for input, want := range map[string]string{
+		"":                 "encrypted API key",
+		"…":                "••••••",
+		"sk-oba…Lkxu":      "sk-oba******Lkxu",
+		"already-redacted": "already-redacted",
+	} {
+		if got := MaskPreview(input); got != want {
+			t.Fatalf("MaskPreview(%q)=%q want %q", input, got, want)
+		}
+	}
+}

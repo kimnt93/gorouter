@@ -273,6 +273,40 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 	return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(v).Send()
 }
 
+// CredentialResponse is the secret-safe management projection of a provider
+// connection. Label consistently contains either an OAuth account identity or
+// a masked API-key preview.
+type CredentialResponse struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Provider      string    `json:"provider"`
+	Kind          string    `json:"kind"`
+	BaseURL       string    `json:"base_url"`
+	Status        string    `json:"status"`
+	Label         string    `json:"label"`
+	OwnerTenantID *string   `json:"owner_tenant_id"`
+	OwnerUserID   string    `json:"owner_user_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func credentialResponse(record entities.Credential, runtime *entities.CredentialRuntime) CredentialResponse {
+	label := "connected account"
+	if record.Kind == entities.KindAPIKey {
+		preview := strings.TrimSpace(record.KeyPreview)
+		if preview == "" {
+			preview = credential.APIKeyPreview(runtime)
+		}
+		label = credential.MaskPreview(preview)
+	} else if runtime != nil {
+		label = credential.AccountLabel(runtime)
+	}
+	return CredentialResponse{
+		ID: record.ID, Name: record.Name, Provider: record.Provider, Kind: record.Kind,
+		BaseURL: record.BaseURL, Status: record.Status, Label: label,
+		OwnerTenantID: record.OwnerTenantID, OwnerUserID: record.OwnerUserID, CreatedAt: record.CreatedAt,
+	}
+}
+
 // Credentials lists safe metadata or creates an encrypted credential.
 // @Summary List or create credentials
 // @Description Lists safe credential metadata or creates an encrypted provider credential for the authorized owner or organization.
@@ -281,8 +315,8 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 // @Param organization_id query string false "Organization context"
 // @Param view_user_id query string false "Master-only user View As filter"
 // @Param request body CredentialCreateRequest false "Required for POST"
-// @Success 200 {array} entities.Credential
-// @Success 201 {object} entities.Credential
+// @Success 200 {array} CredentialResponse
+// @Success 201 {object} CredentialResponse
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/credentials [get]
 // @Router /admin/credentials [post]
@@ -298,22 +332,12 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 			return responseapi.For(c).InternalError("failed to load credentials").Send()
 		}
 		visible := filterCredentialsForSession(v, sess)
-		for index := range visible {
-			runtime, runtimeErr := a.CredsSvc.Runtime(c.Context(), visible[index].ID)
-			if runtimeErr != nil {
-				continue
-			}
-			switch visible[index].Kind {
-			case entities.KindOAuth:
-				visible[index].AccountLabel = credential.AccountLabel(runtime)
-				visible[index].KeyPreview = ""
-			case entities.KindAPIKey:
-				if strings.TrimSpace(visible[index].KeyPreview) == "" {
-					visible[index].KeyPreview = credential.APIKeyPreview(runtime)
-				}
-			}
+		responses := make([]CredentialResponse, 0, len(visible))
+		for _, record := range visible {
+			runtime, _ := a.CredsSvc.Runtime(c.Context(), record.ID)
+			responses = append(responses, credentialResponse(record, runtime))
 		}
-		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(visible).Send()
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(responses).Send()
 	}
 	var b CredentialCreateRequest
 	if err := c.Bind().Body(&b); err != nil {
@@ -329,7 +353,8 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
-	return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(v).Send()
+	runtime, _ := a.CredsSvc.Runtime(c.Context(), v.ID)
+	return responseapi.For(c).Response().Status(fiber.StatusCreated).Data(credentialResponse(*v, runtime)).Send()
 }
 
 // CredentialByID updates or deletes a credential.
@@ -339,7 +364,7 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
 // @Param request body CredentialUpdateRequest false "Required for PUT"
-// @Success 200 {object} entities.Credential
+// @Success 200 {object} CredentialResponse
 // @Failure 400,401,403,404,500 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id} [put]
 // @Router /admin/credentials/{id} [delete]
@@ -363,7 +388,8 @@ func (a *Admin) CredentialByID(c fiber.Ctx) error {
 		if err != nil {
 			return responseapi.For(c).BadRequest(err.Error()).Send()
 		}
-		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(updated).Send()
+		runtime, _ := a.CredsSvc.Runtime(c.Context(), updated.ID)
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(credentialResponse(*updated, runtime)).Send()
 	}
 	err := a.CredsSvc.Delete(c.Context(), c.Params("id"))
 	if errors.Is(err, entities.ErrNotFound) {

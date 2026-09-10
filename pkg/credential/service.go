@@ -374,3 +374,20 @@ func APIKeyPreview(runtime *entities.CredentialRuntime) string {
 	}
 	return secret[:6] + "…" + secret[len(secret)-4:]
 }
+
+// MaskPreview normalizes a persisted safe preview into the public display
+// label without ever requiring plaintext secret material.
+func MaskPreview(preview string) string {
+	preview = strings.TrimSpace(preview)
+	if preview == "" {
+		return "encrypted API key"
+	}
+	if preview == "…" {
+		return "••••••"
+	}
+	parts := strings.SplitN(preview, "…", 2)
+	if len(parts) == 2 {
+		return parts[0] + "******" + parts[1]
+	}
+	return preview
+}

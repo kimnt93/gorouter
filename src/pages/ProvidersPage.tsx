@@ -7,7 +7,6 @@ import { PageLoading } from '../components/PageState'
 import { SearchableSelect, TruncatedText } from '../components/SearchableSelect'
 import { useSession } from '../context/SessionContext'
 import { createIdempotencyKey } from '../lib/idempotency'
-import { maskSecretPreview } from '../lib/credentials'
 
 export function ProvidersPage() {
   const { viewOrganizationID } = useSession()
@@ -93,9 +92,9 @@ function ConnectionRow({ credential, quotaSupported, quotaReloadVersion, onModel
       setQuota(response.quota); setResetCredits((await getCodexResetCredits(credential.id)).credits); setResult('Codex reset credit redeemed')
     } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) }
   }
-  const accountIdentity = credential.kind === 'oauth' ? credential.account_label || quota?.account || 'connected account' : maskSecretPreview(credential.key_preview)
+  const accountIdentity = credential.label || quota?.account || (credential.kind === 'oauth' ? 'connected account' : 'encrypted API key')
   return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong title={credential.name}>{credential.name}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small title={`${accountIdentity} · ${credential.base_url}`}>{accountIdentity} · {credential.base_url}</small></span></div>
-    {quotaSupported && <QuotaPanel quota={quota} accountFallback={credential.account_label || credential.name} busy={quotaBusy} onReload={() => void reloadQuota()} />}
+    {quotaSupported && <QuotaPanel quota={quota} accountFallback={credential.label || credential.name} busy={quotaBusy} onReload={() => void reloadQuota()} />}
     {credential.provider === 'codex' && credential.kind === 'oauth' && <div className="reset-credit-panel"><button disabled={quotaBusy} onClick={() => void loadResetCredits()}>{quotaBusy ? 'Loading resets…' : 'Reset credits'}</button></div>}
     <div className="compact-actions">
     <button disabled={busy} onClick={() => void run(async () => { const response = await testCredential(credential.id); setResult(response.ok ? `Healthy · ${response.status ?? 'OK'} · ${response.latency_ms} ms` : 'Health check failed') })}>Test</button>

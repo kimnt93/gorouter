@@ -661,14 +661,14 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Credential"
+                                "$ref": "#/definitions/internal_api_handlers.CredentialResponse"
                             }
                         }
                     },
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Credential"
+                            "$ref": "#/definitions/internal_api_handlers.CredentialResponse"
                         }
                     },
                     "400": {
@@ -736,14 +736,14 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Credential"
+                                "$ref": "#/definitions/internal_api_handlers.CredentialResponse"
                             }
                         }
                     },
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Credential"
+                            "$ref": "#/definitions/internal_api_handlers.CredentialResponse"
                         }
                     },
                     "400": {
@@ -806,7 +806,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Credential"
+                            "$ref": "#/definitions/internal_api_handlers.CredentialResponse"
                         }
                     },
                     "400": {
@@ -873,7 +873,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.Credential"
+                            "$ref": "#/definitions/internal_api_handlers.CredentialResponse"
                         }
                     },
                     "400": {
@@ -4865,44 +4865,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_kimnt93_gorouter_pkg_entities.Credential": {
-            "type": "object",
-            "properties": {
-                "account_label": {
-                    "type": "string"
-                },
-                "base_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "key_preview": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "owner_tenant_id": {
-                    "type": "string"
-                },
-                "owner_user_id": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_kimnt93_gorouter_pkg_entities.KeyU": {
             "type": "object",
             "properties": {
@@ -5818,6 +5780,41 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.CredentialResponse": {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "owner_tenant_id": {
+                    "type": "string"
+                },
+                "owner_user_id": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }
