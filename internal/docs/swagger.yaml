@@ -472,6 +472,8 @@ definitions:
     type: object
   github_com_kimnt93_gorouter_pkg_entities.Credential:
     properties:
+      account_label:
+        type: string
       base_url:
         type: string
       created_at:

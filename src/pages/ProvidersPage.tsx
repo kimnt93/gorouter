@@ -92,9 +92,9 @@ function ConnectionRow({ credential, quotaSupported, quotaReloadVersion, onModel
       setQuota(response.quota); setResetCredits((await getCodexResetCredits(credential.id)).credits); setResult('Codex reset credit redeemed')
     } catch (reason) { setResult((reason as Error).message) } finally { setQuotaBusy(false) }
   }
-  const displayName = maskEmail(credential.name)
-  return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong>{displayName}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small>{credential.key_preview || credential.kind} · {credential.base_url}</small></span></div>
-    {quotaSupported && <QuotaPanel quota={quota} accountFallback={displayName} busy={quotaBusy} onReload={() => void reloadQuota()} />}
+  const accountIdentity = credential.kind === 'oauth' ? credential.account_label || quota?.account || 'connected account' : maskSecretPreview(credential.key_preview)
+  return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong title={credential.name}>{credential.name}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small title={`${accountIdentity} · ${credential.base_url}`}>{accountIdentity} · {credential.base_url}</small></span></div>
+    {quotaSupported && <QuotaPanel quota={quota} accountFallback={credential.account_label || credential.name} busy={quotaBusy} onReload={() => void reloadQuota()} />}
     {credential.provider === 'codex' && credential.kind === 'oauth' && <div className="reset-credit-panel"><button disabled={quotaBusy} onClick={() => void loadResetCredits()}>{quotaBusy ? 'Loading resets…' : 'Reset credits'}</button></div>}
     <div className="compact-actions">
     <button disabled={busy} onClick={() => void run(async () => { const response = await testCredential(credential.id); setResult(response.ok ? `Healthy · ${response.status ?? 'OK'} · ${response.latency_ms} ms` : 'Health check failed') })}>Test</button>
@@ -118,11 +118,12 @@ function QuotaPanel({ quota, accountFallback, busy, onReload }: { quota: Provide
   </div>
 }
 
-function maskEmail(value: string): string {
-  const at = value.indexOf('@')
-  if (at < 1) return value
-  const visible = Math.min(2, at)
-  return `${value.slice(0, visible)}${'*'.repeat(Math.max(4, at - visible))}${value.slice(at)}`
+function maskSecretPreview(value = ''): string {
+  if (!value) return 'encrypted API key'
+  const compact = value.replace('…', '')
+  if (compact.length <= 6) return '••••••'
+  const prefixLength = Math.min(6, Math.max(3, compact.indexOf('_') + 3))
+  return `${compact.slice(0, prefixLength)}${'*'.repeat(6)}${compact.slice(-5)}`
 }
 
 function relativeTime(value: string): string {
@@ -183,7 +184,7 @@ function TestAllProviderModal({ provider, accounts, onClose }: { provider: Provi
   }
   const passed = results.filter((result) => result.status === 'passed').length
   const finished = results.filter((result) => result.status === 'passed' || result.status === 'failed').length
-  return <Modal title={`Test all · ${provider.name}`} onClose={onClose} className="chat-all-modal"><div className="safe-note"><strong>Connectivity tests</strong><span>Runs the lightweight provider health probe for every active account, with up to five concurrent checks.</span></div><div className="bulk-chat-toolbar"><span>{busy ? `${finished}/${accounts.length} finished` : finished ? `${passed}/${accounts.length} healthy` : `${accounts.length} active accounts`}</span><button className="button" disabled={busy || !accounts.length} onClick={() => void runAll()}>{busy ? 'Testing all…' : finished ? 'Test all again' : 'Start all tests'}</button></div><div className="bulk-chat-results">{results.map((result, index) => <article className={`bulk-chat-result ${result.status}`} key={result.credential.id}><div><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{maskEmail(result.credential.name)}</strong><small>{result.detail || result.credential.id}</small></span><Badge tone={result.status === 'passed' ? 'good' : ''}>{result.status}</Badge></div>{result.status === 'failed' && result.detail && <p className="bulk-chat-error">{result.detail}</p>}</article>)}</div></Modal>
+  return <Modal title={`Test all · ${provider.name}`} onClose={onClose} className="chat-all-modal"><div className="safe-note"><strong>Connectivity tests</strong><span>Runs the lightweight provider health probe for every active account, with up to five concurrent checks.</span></div><div className="bulk-chat-toolbar"><span>{busy ? `${finished}/${accounts.length} finished` : finished ? `${passed}/${accounts.length} healthy` : `${accounts.length} active accounts`}</span><button className="button" disabled={busy || !accounts.length} onClick={() => void runAll()}>{busy ? 'Testing all…' : finished ? 'Test all again' : 'Start all tests'}</button></div><div className="bulk-chat-results">{results.map((result, index) => <article className={`bulk-chat-result ${result.status}`} key={result.credential.id}><div><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{result.credential.name}</strong><small>{result.detail || result.credential.id}</small></span><Badge tone={result.status === 'passed' ? 'good' : ''}>{result.status}</Badge></div>{result.status === 'failed' && result.detail && <p className="bulk-chat-error">{result.detail}</p>}</article>)}</div></Modal>
 }
 
 type BulkChatResult = { credential: Credential; model: string; status: 'pending' | 'running' | 'passed' | 'failed'; output: string; error: string }
@@ -222,7 +223,7 @@ function ChatAllProviderModal({ provider, accounts, onClose }: { provider: Provi
   }
   const passed = results.filter((result) => result.status === 'passed').length
   const finished = results.filter((result) => result.status === 'passed' || result.status === 'failed').length
-  return <Modal title={`Chat all · ${provider.name}`} onClose={onClose} className="chat-all-modal"><div className="safe-note"><strong>Bounded test</strong><span>Sends one streaming request with at most 128 output tokens to each active account. Up to three accounts run concurrently.</span></div><Field label="Prompt"><textarea rows={3} value={prompt} disabled={busy} onChange={(event) => setPrompt(event.target.value)} /></Field><div className="bulk-chat-toolbar"><span>{busy ? `${finished}/${accounts.length} finished` : finished ? `${passed}/${accounts.length} passed` : `${accounts.length} active accounts`}</span><button className="button" disabled={busy || !accounts.length || !prompt.trim()} onClick={() => void runAll()}>{busy ? 'Testing all…' : finished ? 'Run all again' : 'Run all accounts'}</button></div><div className="bulk-chat-results">{results.map((result, index) => <article key={result.credential.id} className={`bulk-chat-result ${result.status}`}><div><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{maskEmail(result.credential.name)}</strong><small>{result.model || result.credential.id}</small></span><Badge tone={result.status === 'passed' ? 'good' : ''}>{result.status}</Badge></div>{result.error && <p className="bulk-chat-error">{result.error}</p>}{result.output && <pre>{result.output}</pre>}</article>)}</div></Modal>
+  return <Modal title={`Chat all · ${provider.name}`} onClose={onClose} className="chat-all-modal"><div className="safe-note"><strong>Bounded test</strong><span>Sends one streaming request with at most 128 output tokens to each active account. Up to three accounts run concurrently.</span></div><Field label="Prompt"><textarea rows={3} value={prompt} disabled={busy} onChange={(event) => setPrompt(event.target.value)} /></Field><div className="bulk-chat-toolbar"><span>{busy ? `${finished}/${accounts.length} finished` : finished ? `${passed}/${accounts.length} passed` : `${accounts.length} active accounts`}</span><button className="button" disabled={busy || !accounts.length || !prompt.trim()} onClick={() => void runAll()}>{busy ? 'Testing all…' : finished ? 'Run all again' : 'Run all accounts'}</button></div><div className="bulk-chat-results">{results.map((result, index) => <article key={result.credential.id} className={`bulk-chat-result ${result.status}`}><div><b>{String(index + 1).padStart(2, '0')}</b><span><strong>{result.credential.name}</strong><small>{result.model || result.credential.id}</small></span><Badge tone={result.status === 'passed' ? 'good' : ''}>{result.status}</Badge></div>{result.error && <p className="bulk-chat-error">{result.error}</p>}{result.output && <pre>{result.output}</pre>}</article>)}</div></Modal>
 }
 
 function ChatTestModal({ credential, onClose }: { credential: Credential; onClose: () => void }) {

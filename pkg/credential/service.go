@@ -2,6 +2,8 @@ package credential
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -301,4 +303,39 @@ func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer Mode
 	}
 	models, _ := result.([]ProviderModel)
 	return append([]ProviderModel(nil), models...), nil
+}
+
+// AccountLabel returns non-secret subscription identity for management display.
+// Metadata populated by the OAuth provider wins; ID-token claims are a fallback.
+func AccountLabel(runtime *entities.CredentialRuntime) string {
+	if runtime == nil || runtime.Kind != entities.KindOAuth {
+		return ""
+	}
+	for _, value := range []string{runtime.OAuthMeta.Email, runtime.OAuthMeta.Login} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	if parts := strings.Split(runtime.OAuthIDToken, "."); len(parts) == 3 {
+		if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+			var claims struct {
+				Email             string `json:"email"`
+				PreferredUsername string `json:"preferred_username"`
+				Name              string `json:"name"`
+			}
+			if json.Unmarshal(payload, &claims) == nil {
+				for _, value := range []string{claims.Email, claims.PreferredUsername, claims.Name} {
+					if value = strings.TrimSpace(value); value != "" {
+						return value
+					}
+				}
+			}
+		}
+	}
+	for _, value := range []string{runtime.OAuthAccount, runtime.OAuthMeta.AccountID} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return "connected account"
 }

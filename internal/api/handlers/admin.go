@@ -297,7 +297,17 @@ func (a *Admin) Credentials(c fiber.Ctx) error {
 		if err != nil {
 			return responseapi.For(c).InternalError("failed to load credentials").Send()
 		}
-		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(filterCredentialsForSession(v, sess)).Send()
+		visible := filterCredentialsForSession(v, sess)
+		for index := range visible {
+			if visible[index].Kind != entities.KindOAuth {
+				continue
+			}
+			if runtime, runtimeErr := a.CredsSvc.Runtime(c.Context(), visible[index].ID); runtimeErr == nil {
+				visible[index].AccountLabel = credential.AccountLabel(runtime)
+				visible[index].KeyPreview = ""
+			}
+		}
+		return responseapi.For(c).Response().Status(fiber.StatusOK).Data(visible).Send()
 	}
 	var b CredentialCreateRequest
 	if err := c.Bind().Body(&b); err != nil {

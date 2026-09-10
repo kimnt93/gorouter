@@ -147,7 +147,7 @@ export interface ProviderQuotaSnapshot {
 
 export interface Credential {
   id: string; name: string; provider: string; kind: string; base_url: string; status: string
-  key_preview?: string; owner_user_id?: string; created_at: string
+  key_preview?: string; account_label?: string; owner_user_id?: string; created_at: string
 }
 
 export interface ConnectivityResult { ok: boolean; status?: number; latency_ms: number }

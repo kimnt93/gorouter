@@ -2,6 +2,7 @@ package credential
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -213,5 +214,23 @@ func TestRefreshDiscoveredModelsBypassesCachedCatalog(t *testing.T) {
 	models, err := service.RefreshDiscoveredModels(context.Background(), "cred", discoverer)
 	if err != nil || len(models) != 1 || models[0].ID != "gpt-astra" || calls.Load() != 1 || cache.deleted != 1 {
 		t.Fatalf("models=%+v calls=%d deletes=%d err=%v", models, calls.Load(), cache.deleted, err)
+	}
+}
+
+func TestAccountLabelUsesOAuthIdentityWithoutExposingToken(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"person@example.test"}`))
+	tests := []struct {
+		runtime *entities.CredentialRuntime
+		want    string
+	}{
+		{&entities.CredentialRuntime{Kind: entities.KindAPIKey, APIKey: "secret"}, ""},
+		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthAccess: "secret", OAuthMeta: entities.OAuthMetadata{Email: "metadata@example.test"}}, "metadata@example.test"},
+		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthIDToken: "header." + payload + ".signature"}, "person@example.test"},
+		{&entities.CredentialRuntime{Kind: entities.KindOAuth, OAuthAccount: "account-id"}, "account-id"},
+	}
+	for _, test := range tests {
+		if got := AccountLabel(test.runtime); got != test.want {
+			t.Fatalf("got %q want %q", got, test.want)
+		}
 	}
 }

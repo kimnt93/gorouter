@@ -4868,6 +4868,9 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_pkg_entities.Credential": {
             "type": "object",
             "properties": {
+                "account_label": {
+                    "type": "string"
+                },
                 "base_url": {
                     "type": "string"
                 },

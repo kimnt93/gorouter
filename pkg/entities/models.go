@@ -32,6 +32,7 @@ type Credential struct {
 	BaseURL       string    `json:"base_url"`
 	Status        string    `json:"status"`
 	KeyPreview    string    `json:"key_preview,omitempty"`
+	AccountLabel  string    `json:"account_label,omitempty"`
 	OwnerTenantID *string   `json:"owner_tenant_id"`
 	OwnerUserID   string    `json:"owner_user_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
