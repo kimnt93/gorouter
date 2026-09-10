@@ -23,7 +23,7 @@ import (
 func TestMessagesRequestTranslatesSystemToolsAndToolResults(t *testing.T) {
 	var input MessagesRequest
 	body := `{
-		"model":"model-a","max_tokens":512,
+		"model":"model-a","max_tokens":512,"metadata":{"user_id":"session-stable"},
 		"system":[{"type":"text","text":"be concise","cache_control":{"type":"ephemeral","ttl":"1h"}}],
 		"messages":[
 			{"role":"user","content":[{"type":"text","text":"hello"}]},
@@ -40,7 +40,7 @@ func TestMessagesRequestTranslatesSystemToolsAndToolResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.Model != "model-a" || req.MaxCompletionTokens == nil || *req.MaxCompletionTokens != 512 || len(req.Messages) != 4 || len(req.Tools) != 1 {
+	if req.Model != "model-a" || req.MaxCompletionTokens == nil || *req.MaxCompletionTokens != 512 || len(req.Messages) != 4 || len(req.Tools) != 1 || req.SessionID != "session-stable" {
 		t.Fatalf("request = %+v", req)
 	}
 	if req.Messages[0].Role != "developer" || string(req.Messages[0].Content) != `"be concise"` || req.Messages[2].ToolCalls[0].Function.Arguments != `{"q":"go"}` || req.Messages[3].Role != "tool" {

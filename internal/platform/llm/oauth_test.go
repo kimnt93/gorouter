@@ -128,6 +128,28 @@ func TestClaudeCodeAdapterUsesSubscriptionMessagesContract(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeAdapterReusesExplicitConversationSession(t *testing.T) {
+	var sessions []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessions = append(sessions, r.Header.Get("X-Claude-Code-Session-Id"))
+		_, _ = io.WriteString(w, `{"id":"msg_1","content":[],"usage":{}}`)
+	}))
+	defer server.Close()
+	adapter := &ClaudeCodeAdapter{AnthropicAdapter: &AnthropicAdapter{HTTP: server.Client()}}
+	runtime := &entities.CredentialRuntime{Kind: entities.KindOAuth, Provider: "claude", BaseURL: server.URL, OAuthAccess: "subscription-token", OAuthMeta: entities.OAuthMetadata{AccountID: "account-id", DeviceID: "device-id"}}
+	for _, prompt := range []string{"first", "second"} {
+		raw := []byte(`{"model":"public","session_id":"coding-session","messages":[{"role":"user","content":"` + prompt + `"}]}`)
+		result, err := adapter.Send(context.Background(), runtime, "claude-opus-4-8", raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Body.Close()
+	}
+	if len(sessions) != 2 || sessions[0] == "" || sessions[0] != sessions[1] {
+		t.Fatalf("Claude sessions=%v", sessions)
+	}
+}
+
 func TestAnthropicOAuthAdapterDoesNotClaimClaudeCodeContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {

@@ -387,6 +387,7 @@ type AnthropicRequest struct {
 	StopSequences []string                `json:"stop_sequences,omitempty"`
 	Stream        bool                    `json:"stream"`
 	Tools         []AnthropicTool         `json:"tools,omitempty"`
+	CacheControl  *CacheControl           `json:"cache_control,omitempty"`
 	Metadata      *AnthropicMetadata      `json:"metadata,omitempty"`
 }
 

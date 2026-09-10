@@ -248,9 +248,13 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 	translated.Model = upstreamModel
 	var claudeSessionID string
 	if cr.Kind == entities.KindOAuth && cr.OAuthMeta.AccountID != "" && cr.OAuthMeta.DeviceID != "" {
-		sessionID, sessionErr := randomUUID()
-		if sessionErr != nil {
-			return nil, sessionErr
+		sessionID := StableConversationID(&req)
+		if sessionID == "" {
+			var sessionErr error
+			sessionID, sessionErr = randomUUID()
+			if sessionErr != nil {
+				return nil, sessionErr
+			}
 		}
 		identity, _ := json.Marshal(struct {
 			DeviceID    string `json:"device_id"`

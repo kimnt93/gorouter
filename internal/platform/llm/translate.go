@@ -129,11 +129,14 @@ func applyAnthropicPromptCache(body *AnthropicRequest) {
 		}
 		breakpoints++
 	}
-	for i := range body.System {
-		keep(&body.System[i].CacheControl)
-	}
+	// Anthropic hashes prompt prefixes in wire order: tools, system, messages.
+	// Preserve caller-selected boundaries in that same order before adding any
+	// automatic boundaries.
 	for i := range body.Tools {
 		keep(&body.Tools[i].CacheControl)
+	}
+	for i := range body.System {
+		keep(&body.System[i].CacheControl)
 	}
 	for i := range body.Messages {
 		for j := range body.Messages[i].Content {
@@ -146,24 +149,22 @@ func applyAnthropicPromptCache(body *AnthropicRequest) {
 			breakpoints++
 		}
 	}
-	if len(body.System) > 0 {
-		add(&body.System[len(body.System)-1].CacheControl)
-	}
+	// Stable definitions are the highest-value reusable prefixes. Tool
+	// definitions precede system blocks in Anthropic's cache hierarchy.
 	if len(body.Tools) > 0 {
 		add(&body.Tools[len(body.Tools)-1].CacheControl)
 	}
-	// Add boundaries to completed assistant history in chronological order.
-	// Existing boundaries therefore remain at the same bytes as conversations
-	// grow; the current user turn is never marked. Capacity left after stable
-	// system and tool prefixes determines how many history checkpoints exist.
-	for i := range body.Messages {
-		if body.Messages[i].Role != "assistant" || len(body.Messages[i].Content) == 0 {
-			continue
-		}
-		content := &body.Messages[i].Content
-		add(&(*content)[len(*content)-1].CacheControl)
+	if len(body.System) > 0 {
+		add(&body.System[len(body.System)-1].CacheControl)
 	}
-
+	// Anthropic's top-level automatic breakpoint advances to the final
+	// cacheable block on every request. It is preferable to manually pinning
+	// early history: the API looks back up to 20 blocks and writes a fresh
+	// conversation prefix for the next turn. The automatic boundary consumes
+	// one of the same four slots, so omit it when all slots are explicit.
+	if breakpoints < maxBreakpoints {
+		body.CacheControl = &CacheControl{Type: "ephemeral"}
+	}
 }
 
 func maxTokensOf(req *ChatRequest) int64 {

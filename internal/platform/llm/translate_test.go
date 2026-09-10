@@ -19,7 +19,7 @@ func TestToAnthropicUsesTypedPayload(t *testing.T) {
 	if got.Model != "public" || len(got.System) != 1 || got.System[0].Text != "be concise" || len(got.Messages) != 1 || len(got.Tools) != 1 {
 		t.Fatalf("translation incomplete: %+v", got)
 	}
-	if got.System[0].CacheControl == nil || got.Messages[0].Content[0].CacheControl != nil || got.Tools[0].CacheControl == nil {
+	if got.System[0].CacheControl == nil || got.CacheControl == nil || got.Tools[0].CacheControl == nil {
 		t.Fatalf("prompt cache breakpoints missing: %+v", got)
 	}
 	if !json.Valid(got.Tools[0].InputSchema) {
@@ -60,7 +60,7 @@ func TestAnthropicStreamConverterCollectsEstimatedUsage(t *testing.T) {
 	}
 }
 
-func TestAnthropicAutomaticHistoryBreakpointStaysStableAcrossTurns(t *testing.T) {
+func TestAnthropicAutomaticConversationBreakpointAdvancesEachTurn(t *testing.T) {
 	build := func(extra bool) *AnthropicRequest {
 		messages := []Message{
 			{Role: "system", Content: json.RawMessage(`"stable system"`)},
@@ -75,13 +75,29 @@ func TestAnthropicAutomaticHistoryBreakpointStaysStableAcrossTurns(t *testing.T)
 	}
 	first := build(false)
 	second := build(true)
-	if first.Messages[1].Content[0].CacheControl == nil {
-		t.Fatalf("first history boundary missing: %+v", first.Messages)
+	if first.System[0].CacheControl == nil || second.System[0].CacheControl == nil {
+		t.Fatal("stable system boundary missing")
 	}
-	if second.Messages[1].Content[0].CacheControl == nil || second.Messages[3].Content[0].CacheControl == nil {
-		t.Fatalf("stable/new boundaries missing: %+v", second.Messages)
+	if first.CacheControl == nil || second.CacheControl == nil {
+		t.Fatal("automatic conversation boundary is missing")
 	}
 	if first.Messages[len(first.Messages)-1].Content[0].CacheControl != nil || second.Messages[len(second.Messages)-1].Content[0].CacheControl != nil {
-		t.Fatal("current user turn received a moving cache breakpoint")
+		t.Fatal("automatic boundary was incorrectly materialized on a moving message block")
+	}
+}
+
+func TestAnthropicOmitsAutomaticCacheWhenFourExplicitBreakpointsExist(t *testing.T) {
+	messages := make([]Message, 4)
+	for i := range messages {
+		messages[i] = Message{Role: "user", Content: json.RawMessage(`"stable"`), CacheControl: &CacheControl{Type: "ephemeral"}}
+	}
+	got := ToAnthropic(&ChatRequest{Messages: messages})
+	if got.CacheControl != nil {
+		t.Fatal("automatic cache used a fifth breakpoint")
+	}
+	for i := range got.Messages {
+		if got.Messages[i].Content[0].CacheControl == nil {
+			t.Fatalf("explicit breakpoint %d was removed", i)
+		}
 	}
 }

@@ -207,6 +207,9 @@ func (r MessagesRequest) chatRequest() (*llm.ChatRequest, error) {
 	}
 	if r.Metadata != nil {
 		req.User = r.Metadata.UserID
+		// Claude Code uses metadata.user_id as its stable conversation/account
+		// identity. Preserve it for provider cache partitioning and route affinity.
+		req.SessionID = r.Metadata.UserID
 	}
 	return req, nil
 }
