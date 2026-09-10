@@ -1,0 +1,21 @@
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS workload_application TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS workload_environment TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS workload_workspace_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS workload_agent_id TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_application TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_environment TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_workspace_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_agent_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS conversation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS parent_run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS logical_request_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS provider_attempt_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS accounting_ts TIMESTAMPTZ;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS usage_measurement TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS accounting_state TEXT NOT NULL DEFAULT 'settled';
+UPDATE usage_events SET accounting_ts=ts WHERE accounting_ts IS NULL;
+ALTER TABLE usage_events ALTER COLUMN accounting_ts SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_usage_workload_week ON usage_events (workload_application, workload_workspace_id, workload_agent_id, accounting_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_conversation_run ON usage_events (conversation_id, run_id, accounting_ts DESC);

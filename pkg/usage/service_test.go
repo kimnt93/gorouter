@@ -231,3 +231,18 @@ func BenchmarkNormalizeConversationLargeStream(b *testing.B) {
 		normalizeConversation(request, response)
 	}
 }
+
+func TestAgentBoundAccountingBypassesVolatileQueue(t *testing.T) {
+	repo := &testRepo{}
+	svc := NewService(repo, 1, nil)
+	defer svc.Close()
+	event := entities.UsageEvent{ID: "usage-agent", AgentID: "agent-1", WorkspaceID: "workspace-1", CostUSD: 1}
+	if err := svc.RecordContext(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.events) != 1 || repo.events[0].ID != event.ID {
+		t.Fatalf("durable events=%+v", repo.events)
+	}
+}

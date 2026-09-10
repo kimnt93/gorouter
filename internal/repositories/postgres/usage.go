@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,14 +27,25 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if ev.ActorType == "" {
 			ev.ActorType, ev.Username, ev.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, ev.TenantID
 		}
+		if ev.AccountingTS.IsZero() {
+			ev.AccountingTS = ev.TS
+		}
+		if ev.AccountingState == "" {
+			ev.AccountingState = "settled"
+		}
+		if ev.UsageMeasurement == "" {
+			ev.UsageMeasurement = "unknown"
+		}
 		b.Queue(`INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 			prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,
-			actor_type,user_id,username,organization_id,conversation_enc,content_truncated)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
+			actor_type,user_id,username,organization_id,conversation_enc,content_truncated,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)
+			ON CONFLICT (event_id) DO NOTHING`,
 			ev.ID, ev.TS, ev.TenantID, ev.ApiKeyID, ev.CredentialID, ev.Provider, ev.Model, ev.UpstreamModel,
 			ev.PromptTokens, ev.CompletionTokens, ev.CacheReadTokens, ev.CacheWriteTokens,
 			ev.CostUSD, ev.InputCostUSD, ev.OutputCostUSD, ev.CacheReadCostUSD, ev.CacheWriteCostUSD, ev.Priced, ev.CacheHit, ev.StatusCode, ev.DurationMS, ev.Error,
-			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID, nullableBytes(ev.ConversationEnc), ev.ContentTruncated)
+			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID, nullableBytes(ev.ConversationEnc), ev.ContentTruncated,
+			ev.Application, ev.Environment, ev.WorkspaceID, ev.AgentID, ev.ConversationID, ev.RunID, ev.ParentRunID, ev.LogicalRequestID, ev.ProviderAttemptID, ev.AccountingTS, ev.UsageMeasurement, ev.AccountingState)
 	}
 	return r.db.Pool.SendBatch(ctx, b).Close()
 }
@@ -132,15 +144,16 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	}
 	rows, err := r.db.Pool.Query(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-		actor_type,user_id,username,organization_id FROM usage_events WHERE
+		actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state FROM usage_events WHERE
 		($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND
 		($5='' OR organization_id=ANY(string_to_array($5,','))) AND ($6='' OR user_id=ANY(string_to_array($6,','))) AND
 		($7='' OR model=$7) AND ($8='' OR api_key_id=ANY(string_to_array($8,','))) AND (NOT $9 OR status_code=$10) AND
 		($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND
-		($12::timestamptz='0001-01-01 00:00:00+00' OR ts <= $12) AND
-		($13::timestamptz='0001-01-01 00:00:00+00' OR (ts,COALESCE(event_id,'legacy_' || seq::text)) < ($13,$14))
-		ORDER BY ts DESC,event_id DESC LIMIT $15`, master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID,
-		query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until, cursor.TS, cursor.ID, limit+1)
+		($12::timestamptz='0001-01-01 00:00:00+00' OR ts < $12) AND
+		($13='' OR provider=$13) AND ($14='' OR credential_id=$14) AND ($15='' OR workload_application=$15) AND ($16='' OR workload_environment=$16) AND ($17='' OR workload_workspace_id=$17) AND (($18='' AND cardinality($19::text[])=0) OR workload_agent_id=$18 OR workload_agent_id=ANY($19::text[])) AND ($20='' OR conversation_id=$20) AND ($21='' OR run_id=$21) AND ($22='' OR logical_request_id=$22) AND
+		($23::timestamptz='0001-01-01 00:00:00+00' OR (ts,COALESCE(event_id,'legacy_' || seq::text)) < ($23,$24))
+		ORDER BY ts DESC,event_id DESC LIMIT $25`, master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID,
+		query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until, query.Provider, query.CredentialID, query.Application, query.Environment, query.WorkspaceID, query.AgentID, query.AgentIDs, query.ConversationID, query.RunID, query.LogicalRequestID, cursor.TS, cursor.ID, limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +163,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 		var event entities.RecentEvent
 		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
 			&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-			&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID); err != nil {
+			&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState); err != nil {
 			return nil, err
 		}
 		page.Data = append(page.Data, event)
@@ -274,7 +287,7 @@ func postgresUsageFilter(query entities.UsageQuery) (string, []any) {
 	if hasStatus {
 		status = *query.StatusCode
 	}
-	return `($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND ($5='' OR organization_id=ANY(string_to_array($5,','))) AND ($6='' OR user_id=ANY(string_to_array($6,','))) AND ($7='' OR model=$7) AND ($8='' OR api_key_id=ANY(string_to_array($8,','))) AND (NOT $9 OR status_code=$10) AND ($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND ($12::timestamptz='0001-01-01 00:00:00+00' OR ts <= $12)`, []any{master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID, query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until}
+	return `($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND ($5='' OR organization_id=ANY(string_to_array($5,','))) AND ($6='' OR user_id=ANY(string_to_array($6,','))) AND ($7='' OR model=$7) AND ($8='' OR api_key_id=ANY(string_to_array($8,','))) AND (NOT $9 OR status_code=$10) AND ($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND ($12::timestamptz='0001-01-01 00:00:00+00' OR ts < $12) AND ($13='' OR provider=$13) AND ($14='' OR credential_id=$14) AND ($15='' OR workload_application=$15) AND ($16='' OR workload_environment=$16) AND ($17='' OR workload_workspace_id=$17) AND (($18='' AND cardinality($19::text[])=0) OR workload_agent_id=$18 OR workload_agent_id=ANY($19::text[])) AND ($20='' OR conversation_id=$20) AND ($21='' OR run_id=$21) AND ($22='' OR logical_request_id=$22)`, []any{master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID, query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until, query.Provider, query.CredentialID, query.Application, query.Environment, query.WorkspaceID, query.AgentID, query.AgentIDs, query.ConversationID, query.RunID, query.LogicalRequestID}
 }
 
 func nullableBytes(value []byte) any {
@@ -291,12 +304,12 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 	var encrypted []byte
 	err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-		actor_type,user_id,username,organization_id,COALESCE(conversation_enc,''::bytea),content_truncated
+		actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state,COALESCE(conversation_enc,''::bytea),content_truncated
 		FROM usage_events WHERE COALESCE(event_id,'legacy_' || seq::text)=$1 AND
 		($2 OR ($3 AND organization_id=$4) OR (NOT $3 AND user_id=$5))`, id, master, organizationWide, visibility.OrganizationID, visibility.UserID).Scan(
 		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
 		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID,
+		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState,
 		&encrypted, &event.ContentTruncated)
 	if err == pgx.ErrNoRows {
 		return nil, entities.ErrNotFound
@@ -306,4 +319,13 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 	}
 	event.ConversationEncrypted = encrypted
 	return &event, nil
+}
+
+func (r *UsageRepo) AgentUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	filter, args := postgresUsageFilter(query)
+	filter = strings.ReplaceAll(filter, "ts >=", "accounting_ts >=")
+	filter = strings.ReplaceAll(filter, "ts <", "accounting_ts <")
+	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
+	err := r.db.Pool.QueryRow(ctx, `SELECT count(*),coalesce(sum(cost_usd),0),coalesce(sum(input_cost_usd),0),coalesce(sum(output_cost_usd),0),coalesce(sum(cache_read_cost_usd),0),coalesce(sum(cache_write_cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),coalesce(sum(cache_write_tokens),0),count(*) FILTER (WHERE cache_hit),count(*) FILTER (WHERE NOT priced) FROM usage_events WHERE `+filter, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.InputCostUSD, &summary.OutputCostUSD, &summary.CacheReadCostUSD, &summary.CacheWriteCostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced)
+	return summary, err
 }

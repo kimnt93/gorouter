@@ -88,3 +88,37 @@ func TestLocalUsagePersistsEncryptedConversationColumns(t *testing.T) {
 		t.Fatal("usage JSON payload contains encrypted conversation column")
 	}
 }
+
+func TestLocalAgentUsageAggregateIsIsolatedAndHalfOpen(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.ConnectSQLite(ctx, t.TempDir()+"/agent-usage.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewUsageRepo(New(db.DB))
+	start := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
+	events := []entities.UsageEvent{
+		{ID: "usage-a", TS: start.Add(time.Hour), AccountingTS: start.Add(time.Hour), UserID: "user-1", Application: "xnobrain", WorkspaceID: "workspace-1", AgentID: "agent-1", CostUSD: 1, PromptTokens: 10, Priced: true},
+		{ID: "usage-b", TS: start.Add(2 * time.Hour), AccountingTS: start.Add(2 * time.Hour), UserID: "user-1", Application: "xnobrain", WorkspaceID: "workspace-2", AgentID: "agent-1", CostUSD: 20, Priced: true},
+		{ID: "usage-end", TS: start.AddDate(0, 0, 7), AccountingTS: start.AddDate(0, 0, 7), UserID: "user-1", Application: "xnobrain", WorkspaceID: "workspace-1", AgentID: "agent-1", CostUSD: 30, Priced: true},
+	}
+	if err = repo.InsertBatch(ctx, events); err != nil {
+		t.Fatal(err)
+	}
+	end := start.AddDate(0, 0, 7)
+	summary, err := repo.AgentUsageAggregate(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: "user-1"}, Since: &start, Until: &end, Application: "xnobrain", WorkspaceID: "workspace-1", AgentID: "agent-1"})
+	if err != nil || summary.Requests != 1 || summary.CostUSD != 1 || summary.PromptTok != 10 {
+		t.Fatalf("summary=%+v err=%v", summary, err)
+	}
+	if err = repo.InsertBatch(ctx, events[:1]); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = repo.AgentUsageAggregate(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: "user-1"}, Since: &start, Until: &end, Application: "xnobrain", WorkspaceID: "workspace-1", AgentID: "agent-1"})
+	if err != nil || summary.Requests != 1 {
+		t.Fatalf("idempotent summary=%+v err=%v", summary, err)
+	}
+}

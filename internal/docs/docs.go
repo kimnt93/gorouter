@@ -3073,6 +3073,60 @@ const docTemplate = `{
                         "description": "Master-only user View As filter",
                         "name": "view_user_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload application filter",
+                        "name": "application",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload environment filter",
+                        "name": "environment",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload workspace filter",
+                        "name": "workspace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload agent filter",
+                        "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Conversation filter",
+                        "name": "conversation_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run filter",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request filter",
+                        "name": "logical_request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider filter",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Credential filter",
+                        "name": "credential_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3102,6 +3156,83 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/usage/agents/weekly": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Get authoritative weekly agent usage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workload application namespace",
+                        "name": "application",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Environment namespace",
+                        "name": "environment",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace identity",
+                        "name": "workspace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated agent identities",
+                        "name": "agent_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.AgentWeeklyUsageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
@@ -3256,6 +3387,60 @@ const docTemplate = `{
                         "description": "Master-only user View As filter",
                         "name": "view_user_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload application filter",
+                        "name": "application",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload environment filter",
+                        "name": "environment",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload workspace filter",
+                        "name": "workspace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload agent filter",
+                        "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Conversation filter",
+                        "name": "conversation_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run filter",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request filter",
+                        "name": "logical_request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider filter",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Credential filter",
+                        "name": "credential_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3327,6 +3512,60 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Master-only user View As filter",
                         "name": "view_user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload application filter",
+                        "name": "application",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload environment filter",
+                        "name": "environment",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload workspace filter",
+                        "name": "workspace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workload agent filter",
+                        "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Conversation filter",
+                        "name": "conversation_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run filter",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request filter",
+                        "name": "logical_request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider filter",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Credential filter",
+                        "name": "credential_id",
                         "in": "query"
                     }
                 ],
@@ -4752,6 +4991,9 @@ const docTemplate = `{
                 },
                 "tenant_name": {
                     "type": "string"
+                },
+                "workload": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.WorkloadBinding"
                 }
             }
         },
@@ -5104,10 +5346,22 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_pkg_entities.RecentEvent": {
             "type": "object",
             "properties": {
+                "accounting_state": {
+                    "type": "string"
+                },
+                "accounting_ts": {
+                    "type": "string"
+                },
                 "actor_type": {
                     "type": "string"
                 },
+                "agent_id": {
+                    "type": "string"
+                },
                 "api_key_id": {
+                    "type": "string"
+                },
+                "application": {
                     "type": "string"
                 },
                 "cache_hit": {
@@ -5122,6 +5376,9 @@ const docTemplate = `{
                 "completion_tokens": {
                     "type": "integer"
                 },
+                "conversation_id": {
+                    "type": "string"
+                },
                 "cost_usd": {
                     "type": "number"
                 },
@@ -5131,16 +5388,25 @@ const docTemplate = `{
                 "duration_ms": {
                     "type": "integer"
                 },
+                "environment": {
+                    "type": "string"
+                },
                 "error": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
+                "logical_request_id": {
+                    "type": "string"
+                },
                 "model": {
                     "type": "string"
                 },
                 "organization_id": {
+                    "type": "string"
+                },
+                "parent_run_id": {
                     "type": "string"
                 },
                 "priced": {
@@ -5150,6 +5416,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "provider_attempt_id": {
+                    "type": "string"
+                },
+                "run_id": {
                     "type": "string"
                 },
                 "status_code": {
@@ -5164,10 +5436,16 @@ const docTemplate = `{
                 "upstream_model": {
                     "type": "string"
                 },
+                "usage_measurement": {
+                    "type": "string"
+                },
                 "user_id": {
                     "type": "string"
                 },
                 "username": {
+                    "type": "string"
+                },
+                "workspace_id": {
                     "type": "string"
                 }
             }
@@ -5219,10 +5497,22 @@ const docTemplate = `{
         "github_com_kimnt93_gorouter_pkg_entities.UsageDetail": {
             "type": "object",
             "properties": {
+                "accounting_state": {
+                    "type": "string"
+                },
+                "accounting_ts": {
+                    "type": "string"
+                },
                 "actor_type": {
                     "type": "string"
                 },
+                "agent_id": {
+                    "type": "string"
+                },
                 "api_key_id": {
+                    "type": "string"
+                },
+                "application": {
                     "type": "string"
                 },
                 "cache_hit": {
@@ -5249,6 +5539,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.ConversationEntry"
                     }
                 },
+                "conversation_id": {
+                    "type": "string"
+                },
                 "cost_usd": {
                     "type": "number"
                 },
@@ -5258,16 +5551,25 @@ const docTemplate = `{
                 "duration_ms": {
                     "type": "integer"
                 },
+                "environment": {
+                    "type": "string"
+                },
                 "error": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
+                "logical_request_id": {
+                    "type": "string"
+                },
                 "model": {
                     "type": "string"
                 },
                 "organization_id": {
+                    "type": "string"
+                },
+                "parent_run_id": {
                     "type": "string"
                 },
                 "priced": {
@@ -5277,6 +5579,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "provider_attempt_id": {
+                    "type": "string"
+                },
+                "run_id": {
                     "type": "string"
                 },
                 "status_code": {
@@ -5291,10 +5599,16 @@ const docTemplate = `{
                 "upstream_model": {
                     "type": "string"
                 },
+                "usage_measurement": {
+                    "type": "string"
+                },
                 "user_id": {
                     "type": "string"
                 },
                 "username": {
+                    "type": "string"
+                },
+                "workspace_id": {
                     "type": "string"
                 }
             }
@@ -5406,6 +5720,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.WorkloadBinding": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "application": {
+                    "type": "string"
+                },
+                "environment": {
+                    "type": "string"
+                },
+                "workspace_id": {
                     "type": "string"
                 }
             }
@@ -5575,6 +5906,9 @@ const docTemplate = `{
                 },
                 "tenant_id": {
                     "type": "string"
+                },
+                "workload": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.WorkloadBinding"
                 }
             }
         },
@@ -5663,6 +5997,59 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_handlers.AgentWeeklyUsageResponse": {
+            "type": "object",
+            "properties": {
+                "accounting_state": {
+                    "type": "string"
+                },
+                "agent_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "application": {
+                    "type": "string"
+                },
+                "as_of": {
+                    "type": "string"
+                },
+                "attribution_coverage": {
+                    "type": "string"
+                },
+                "capability_version": {
+                    "type": "string"
+                },
+                "completeness": {
+                    "type": "string"
+                },
+                "environment": {
+                    "type": "string"
+                },
+                "freshness": {
+                    "type": "string"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageSummary"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "week_starts_on": {
+                    "type": "string"
+                },
+                "workspace_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_handlers.AuditListResponse": {
             "type": "object",
             "properties": {
@@ -5744,6 +6131,9 @@ const docTemplate = `{
                 },
                 "tenant_id": {
                     "type": "string"
+                },
+                "workload": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.WorkloadBinding"
                 }
             }
         },

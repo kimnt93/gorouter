@@ -71,6 +71,12 @@ func (s *Service) RecordContext(ctx context.Context, ev entities.UsageEvent) err
 	} else {
 		ev.TS = ev.TS.UTC()
 	}
+	// Agent-bound accounting is budget-sensitive and bypasses the volatile
+	// process queue. The inference path does not return until the selected
+	// durable backend acknowledges this idempotent event.
+	if ev.AgentID != "" {
+		return s.repo.InsertBatch(ctx, []entities.UsageEvent{ev})
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
@@ -289,4 +295,12 @@ func (s *Service) Detail(ctx context.Context, id string, visibility entities.Usa
 	detail.ContentTruncated = storedTruncated || detail.ContentTruncated
 	detail.ContentAvailable = len(detail.Conversation) > 0
 	return detail, nil
+}
+
+func (s *Service) AgentAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	repo, ok := s.repo.(entities.AgentUsageAggregateRepository)
+	if !ok {
+		return nil, errors.New("agent usage aggregation unavailable")
+	}
+	return repo.AgentUsageAggregate(ctx, query)
 }

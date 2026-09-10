@@ -31,7 +31,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		return err
 	}
 	defer tx.Rollback()
-	statement, err := tx.PrepareContext(ctx, `INSERT INTO usage_events(id,ts,payload,conversation_enc,content_truncated) VALUES(?,?,?,?,?)`)
+	statement, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO usage_events(id,ts,payload,conversation_enc,content_truncated) VALUES(?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -47,6 +47,15 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		}
 		if event.ActorType == "" {
 			event.ActorType, event.Username, event.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, event.TenantID
+		}
+		if event.AccountingTS.IsZero() {
+			event.AccountingTS = event.TS
+		}
+		if event.AccountingState == "" {
+			event.AccountingState = "settled"
+		}
+		if event.UsageMeasurement == "" {
+			event.UsageMeasurement = "unknown"
 		}
 		payload, err := json.Marshal(event)
 		if err != nil {
@@ -104,17 +113,26 @@ func usageMatches(event entities.UsageEvent, query entities.UsageQuery, cursor a
 		}
 		return false
 	}
-	if !contains(query.OrganizationID, event.OrganizationID) || !contains(query.UserID, event.UserID) || !contains(query.Model, event.Model) || !contains(query.APIKeyID, event.ApiKeyID) {
+	if !contains(query.OrganizationID, event.OrganizationID) || !contains(query.UserID, event.UserID) || !contains(query.Model, event.Model) || !contains(query.APIKeyID, event.ApiKeyID) || !contains(query.Provider, event.Provider) || !contains(query.CredentialID, event.CredentialID) || !contains(query.Application, event.Application) || !contains(query.Environment, event.Environment) || !contains(query.WorkspaceID, event.WorkspaceID) || !contains(query.AgentID, event.AgentID) || !contains(query.ConversationID, event.ConversationID) || !contains(query.RunID, event.RunID) || !contains(query.LogicalRequestID, event.LogicalRequestID) {
 		return false
 	}
-	if query.StatusCode != nil && event.StatusCode != *query.StatusCode || query.Since != nil && event.TS.Before(*query.Since) || query.Until != nil && event.TS.After(*query.Until) {
+	if len(query.AgentIDs) > 0 {
+		matched := false
+		for _, agentID := range query.AgentIDs {
+			matched = matched || agentID == event.AgentID
+		}
+		if !matched {
+			return false
+		}
+	}
+	if query.StatusCode != nil && event.StatusCode != *query.StatusCode || query.Since != nil && event.TS.Before(*query.Since) || query.Until != nil && !event.TS.Before(*query.Until) {
 		return false
 	}
 	return cursor.TS.IsZero() || event.TS.Before(cursor.TS) || event.TS.Equal(cursor.TS) && event.ID < cursor.ID
 }
 
 func recent(event entities.UsageEvent) entities.RecentEvent {
-	return entities.RecentEvent{ID: event.ID, TS: event.TS, TenantID: event.TenantID, KeyID: event.ApiKeyID, CredentialID: event.CredentialID, Provider: event.Provider, Model: event.Model, UpstreamModel: event.UpstreamModel, PromptTokens: event.PromptTokens, CompletionTokens: event.CompletionTokens, CacheReadTokens: event.CacheReadTokens, CacheWriteTokens: event.CacheWriteTokens, CostUSD: event.CostUSD, Priced: event.Priced, CacheHit: event.CacheHit, StatusCode: event.StatusCode, DurationMS: event.DurationMS, Error: event.Error, ActorType: event.ActorType, UserID: event.UserID, Username: event.Username, OrganizationID: event.OrganizationID}
+	return entities.RecentEvent{ID: event.ID, TS: event.TS, TenantID: event.TenantID, KeyID: event.ApiKeyID, CredentialID: event.CredentialID, Provider: event.Provider, Model: event.Model, UpstreamModel: event.UpstreamModel, PromptTokens: event.PromptTokens, CompletionTokens: event.CompletionTokens, CacheReadTokens: event.CacheReadTokens, CacheWriteTokens: event.CacheWriteTokens, CostUSD: event.CostUSD, Priced: event.Priced, CacheHit: event.CacheHit, StatusCode: event.StatusCode, DurationMS: event.DurationMS, Error: event.Error, ActorType: event.ActorType, UserID: event.UserID, Username: event.Username, OrganizationID: event.OrganizationID, Application: event.Application, Environment: event.Environment, WorkspaceID: event.WorkspaceID, AgentID: event.AgentID, ConversationID: event.ConversationID, RunID: event.RunID, ParentRunID: event.ParentRunID, LogicalRequestID: event.LogicalRequestID, ProviderAttemptID: event.ProviderAttemptID, AccountingTS: event.AccountingTS, UsageMeasurement: event.UsageMeasurement, AccountingState: event.AccountingState}
 }
 
 func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsagePage, error) {
@@ -338,4 +356,39 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 		return &entities.UsageDetail{RecentEvent: value, ContentTruncated: event.ContentTruncated, ConversationEncrypted: append([]byte(nil), event.ConversationEnc...)}, nil
 	}
 	return nil, entities.ErrNotFound
+}
+
+func (r *UsageRepo) AgentUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	events, err := r.all(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
+	for _, event := range events {
+		originalTS := event.TS
+		if !event.AccountingTS.IsZero() {
+			event.TS = event.AccountingTS
+		}
+		if !usageMatches(event, query, auditCursor{}) {
+			continue
+		}
+		event.TS = originalTS
+		out.Requests++
+		out.CostUSD += event.CostUSD
+		out.InputCostUSD += event.InputCostUSD
+		out.OutputCostUSD += event.OutputCostUSD
+		out.CacheReadCostUSD += event.CacheReadCostUSD
+		out.CacheWriteCostUSD += event.CacheWriteCostUSD
+		out.PromptTok += event.PromptTokens
+		out.CompletionTo += event.CompletionTokens
+		out.CacheReadTok += event.CacheReadTokens
+		out.CacheWriteTok += event.CacheWriteTokens
+		if event.CacheHit {
+			out.CacheHits++
+		}
+		if !event.Priced {
+			out.Unpriced++
+		}
+	}
+	return out, nil
 }

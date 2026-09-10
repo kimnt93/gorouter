@@ -66,9 +66,48 @@ type ProviderQuotaRouter interface {
 // request policy, cache isolation, credential visibility, and actor snapshot.
 type GatewayAccessContext struct {
 	*entities.ApiKey
-	StoredKey *entities.ApiKey
-	Actor     entities.UsageActor
-	Master    bool
+	StoredKey   *entities.ApiKey
+	Actor       entities.UsageActor
+	Master      bool
+	Workload    entities.WorkloadBinding
+	Correlation UsageCorrelation
+}
+
+type UsageCorrelation struct {
+	ConversationID   string
+	RunID            string
+	ParentRunID      string
+	LogicalRequestID string
+}
+
+const (
+	headerConversationID   = "X-GoRouter-Conversation-Id"
+	headerRunID            = "X-GoRouter-Run-Id"
+	headerParentRunID      = "X-GoRouter-Parent-Run-Id"
+	headerLogicalRequestID = "X-GoRouter-Request-Id"
+)
+
+func correlationFromRequest(c fiber.Ctx) (UsageCorrelation, error) {
+	correlation := UsageCorrelation{
+		ConversationID:   strings.TrimSpace(c.Get(headerConversationID)),
+		RunID:            strings.TrimSpace(c.Get(headerRunID)),
+		ParentRunID:      strings.TrimSpace(c.Get(headerParentRunID)),
+		LogicalRequestID: strings.TrimSpace(c.Get(headerLogicalRequestID)),
+	}
+	for _, value := range []string{correlation.ConversationID, correlation.RunID, correlation.ParentRunID, correlation.LogicalRequestID} {
+		if len(value) > 128 {
+			return UsageCorrelation{}, errors.New("correlation fields must not exceed 128 bytes")
+		}
+		for _, r := range value {
+			if !(r == '-' || r == '_' || r == '.' || r == ':' || r == '/' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+				return UsageCorrelation{}, errors.New("correlation fields contain invalid characters")
+			}
+		}
+	}
+	if correlation.LogicalRequestID == "" {
+		correlation.LogicalRequestID = entities.NewID("request")
+	}
+	return correlation, nil
 }
 
 func providerOwnerUserID(access *GatewayAccessContext) string {
@@ -117,6 +156,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	key, err := g.accessForSession(c, sess)
 	if err != nil {
 		return responseapi.For(c).Unauthorized("API key required").Send()
+	}
+	correlation, correlationErr := correlationFromRequest(c)
+	if correlationErr != nil {
+		return responseapi.For(c).BadRequest(correlationErr.Error()).Send()
+	}
+	key.Correlation = correlation
+	if key.StoredKey != nil {
+		key.Workload = key.StoredKey.Workload
 	}
 	autoRequested := req.Model == "auto" || strings.HasSuffix(req.Model, "/auto")
 	if !key.Master && !contains(key.Models, req.Model) {
@@ -1279,7 +1326,7 @@ func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *
 		providerID = model.Metadata.Provider
 	}
 	conversation, truncated := g.Usage.CaptureConversation(requestBody, responseBody)
-	g.Usage.Record(entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, ConversationEnc: conversation, ContentTruncated: truncated})
+	_ = g.Usage.RecordContext(context.Background(), entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, Application: key.Workload.Application, Environment: key.Workload.Environment, WorkspaceID: key.Workload.WorkspaceID, AgentID: key.Workload.AgentID, ConversationID: key.Correlation.ConversationID, RunID: key.Correlation.RunID, ParentRunID: key.Correlation.ParentRunID, LogicalRequestID: key.Correlation.LogicalRequestID, ProviderAttemptID: entities.NewID("attempt"), AccountingTS: started.UTC(), UsageMeasurement: usageMeasurement(u, hit), AccountingState: "settled", ConversationEnc: conversation, ContentTruncated: truncated})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {
@@ -1323,4 +1370,14 @@ func contains(xs []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func usageMeasurement(value llm.Usage, routerCacheHit bool) string {
+	if routerCacheHit {
+		return "router_cache"
+	}
+	if value.PromptTokens > 0 || value.CompletionTokens > 0 || value.CacheReadTokens > 0 || value.CacheWriteTokens > 0 {
+		return "provider_reported_or_adapter_normalized"
+	}
+	return "unknown"
 }

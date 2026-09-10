@@ -330,3 +330,21 @@ func TestCredentialCreateRejectsOrganizationPrincipal(t *testing.T) {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
 }
+
+func TestAgentWeeklyUsageRejectsUnboundKey(t *testing.T) {
+	repo := &revealKeyRepo{key: entities.ApiKey{ID: "key-1", OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Scopes: []string{entities.ScopeUsageRead}}}
+	admin := &Admin{KeysSvc: apikey.NewService(repo, func(string) string { return "" }, func() string { return "" })}
+	app := fiber.New()
+	app.Get("/weekly", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: "key-1", PrincipalType: entities.PrincipalUser, UserID: "user-1", Scopes: []string{entities.ScopeUsageRead}})
+		return admin.AgentWeeklyUsage(c)
+	})
+	response, err := app.Test(httptest.NewRequest("GET", "/weekly", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != fiber.StatusNotFound {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+}

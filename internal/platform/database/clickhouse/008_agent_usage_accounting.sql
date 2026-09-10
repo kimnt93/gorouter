@@ -1,0 +1,12 @@
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_application String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_environment String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_workspace_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS workload_agent_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS conversation_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS run_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS parent_run_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS logical_request_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS provider_attempt_id String DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS accounting_ts Nullable(DateTime64(3, 'UTC'));
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS usage_measurement LowCardinality(String) DEFAULT 'unknown';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS accounting_state LowCardinality(String) DEFAULT 'settled';

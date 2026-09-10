@@ -97,25 +97,37 @@ type CredentialUpdate struct {
 	OAuthRefresh string
 }
 
+type WorkloadBinding struct {
+	Application string `json:"application,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+}
+
+func (b WorkloadBinding) Bound() bool {
+	return b.Application != "" && b.WorkspaceID != "" && b.AgentID != ""
+}
+
 type ApiKey struct {
-	ID                    string    `json:"id"`
-	TenantID              string    `json:"tenant_id"`
-	TenantName            string    `json:"tenant_name,omitempty"`
-	Name                  string    `json:"name"`
-	SecretHash            string    `json:"-"`
-	SecretPrefix          string    `json:"key_prefix"`
-	Models                []string  `json:"models"`
-	Scopes                []string  `json:"scopes"`
-	QuotaUSD              *float64  `json:"quota_usd"`
-	QuotaPeriod           string    `json:"quota_period"`
-	RPM                   *int      `json:"rpm"`
-	Enabled               bool      `json:"enabled"`
-	CreatedAt             time.Time `json:"created_at"`
-	OwnerType             string    `json:"owner_type"`
-	OwnerUserID           string    `json:"owner_user_id,omitempty"`
-	OwnerOrganizationID   string    `json:"owner_organization_id,omitempty"`
-	ContextOrganizationID string    `json:"context_organization_id,omitempty"`
-	CredentialOwnerUserID string    `json:"-"`
+	ID                    string          `json:"id"`
+	TenantID              string          `json:"tenant_id"`
+	TenantName            string          `json:"tenant_name,omitempty"`
+	Name                  string          `json:"name"`
+	SecretHash            string          `json:"-"`
+	SecretPrefix          string          `json:"key_prefix"`
+	Models                []string        `json:"models"`
+	Scopes                []string        `json:"scopes"`
+	QuotaUSD              *float64        `json:"quota_usd"`
+	QuotaPeriod           string          `json:"quota_period"`
+	RPM                   *int            `json:"rpm"`
+	Enabled               bool            `json:"enabled"`
+	CreatedAt             time.Time       `json:"created_at"`
+	OwnerType             string          `json:"owner_type"`
+	OwnerUserID           string          `json:"owner_user_id,omitempty"`
+	OwnerOrganizationID   string          `json:"owner_organization_id,omitempty"`
+	ContextOrganizationID string          `json:"context_organization_id,omitempty"`
+	CredentialOwnerUserID string          `json:"-"`
+	Workload              WorkloadBinding `json:"workload,omitempty"`
 
 	Plaintext string `json:"-"`
 }
@@ -199,33 +211,57 @@ type UsageEvent struct {
 	UserID            string    `json:"user_id"`
 	Username          string    `json:"username"`
 	OrganizationID    string    `json:"organization_id"`
+	Application       string    `json:"application,omitempty"`
+	Environment       string    `json:"environment,omitempty"`
+	WorkspaceID       string    `json:"workspace_id,omitempty"`
+	AgentID           string    `json:"agent_id,omitempty"`
+	ConversationID    string    `json:"conversation_id,omitempty"`
+	RunID             string    `json:"run_id,omitempty"`
+	ParentRunID       string    `json:"parent_run_id,omitempty"`
+	LogicalRequestID  string    `json:"logical_request_id,omitempty"`
+	ProviderAttemptID string    `json:"provider_attempt_id,omitempty"`
+	AccountingTS      time.Time `json:"accounting_ts"`
+	UsageMeasurement  string    `json:"usage_measurement"`
+	AccountingState   string    `json:"accounting_state"`
 	ConversationEnc   []byte    `json:"-"`
 	ContentTruncated  bool      `json:"-"`
 }
 
 type RecentEvent struct {
-	ID               string    `json:"id"`
-	TS               time.Time `json:"ts"`
-	TenantID         string    `json:"tenant_id"`
-	KeyID            string    `json:"api_key_id"`
-	CredentialID     string    `json:"credential_id"`
-	Provider         string    `json:"provider"`
-	Model            string    `json:"model"`
-	UpstreamModel    string    `json:"upstream_model"`
-	PromptTokens     int64     `json:"prompt_tokens"`
-	CompletionTokens int64     `json:"completion_tokens"`
-	CacheReadTokens  int64     `json:"cache_read_tokens"`
-	CacheWriteTokens int64     `json:"cache_write_tokens"`
-	CostUSD          float64   `json:"cost_usd"`
-	Priced           bool      `json:"priced"`
-	CacheHit         bool      `json:"cache_hit"`
-	StatusCode       int       `json:"status_code"`
-	DurationMS       int64     `json:"duration_ms"`
-	Error            string    `json:"error"`
-	ActorType        string    `json:"actor_type"`
-	UserID           string    `json:"user_id"`
-	Username         string    `json:"username"`
-	OrganizationID   string    `json:"organization_id"`
+	ID                string    `json:"id"`
+	TS                time.Time `json:"ts"`
+	TenantID          string    `json:"tenant_id"`
+	KeyID             string    `json:"api_key_id"`
+	CredentialID      string    `json:"credential_id"`
+	Provider          string    `json:"provider"`
+	Model             string    `json:"model"`
+	UpstreamModel     string    `json:"upstream_model"`
+	PromptTokens      int64     `json:"prompt_tokens"`
+	CompletionTokens  int64     `json:"completion_tokens"`
+	CacheReadTokens   int64     `json:"cache_read_tokens"`
+	CacheWriteTokens  int64     `json:"cache_write_tokens"`
+	CostUSD           float64   `json:"cost_usd"`
+	Priced            bool      `json:"priced"`
+	CacheHit          bool      `json:"cache_hit"`
+	StatusCode        int       `json:"status_code"`
+	DurationMS        int64     `json:"duration_ms"`
+	Error             string    `json:"error"`
+	ActorType         string    `json:"actor_type"`
+	UserID            string    `json:"user_id"`
+	Username          string    `json:"username"`
+	OrganizationID    string    `json:"organization_id"`
+	Application       string    `json:"application,omitempty"`
+	Environment       string    `json:"environment,omitempty"`
+	WorkspaceID       string    `json:"workspace_id,omitempty"`
+	AgentID           string    `json:"agent_id,omitempty"`
+	ConversationID    string    `json:"conversation_id,omitempty"`
+	RunID             string    `json:"run_id,omitempty"`
+	ParentRunID       string    `json:"parent_run_id,omitempty"`
+	LogicalRequestID  string    `json:"logical_request_id,omitempty"`
+	ProviderAttemptID string    `json:"provider_attempt_id,omitempty"`
+	AccountingTS      time.Time `json:"accounting_ts"`
+	UsageMeasurement  string    `json:"usage_measurement"`
+	AccountingState   string    `json:"accounting_state"`
 }
 
 type ConversationEntry struct {

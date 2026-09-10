@@ -50,16 +50,17 @@ type CredentialUpdateRequest struct {
 	OAuthRefresh string `json:"oauth_refresh"`
 }
 type APIKeyCreateRequest struct {
-	TenantID              string   `json:"tenant_id"`
-	Name                  string   `json:"name"`
-	Models                []string `json:"models"`
-	Scopes                []string `json:"scopes"`
-	QuotaUSD              *float64 `json:"quota_usd"`
-	QuotaPeriod           string   `json:"quota_period"`
-	OwnerType             string   `json:"owner_type"`
-	OwnerUserID           string   `json:"owner_user_id"`
-	OwnerOrganizationID   string   `json:"owner_organization_id"`
-	ContextOrganizationID string   `json:"context_organization_id"`
+	TenantID              string                   `json:"tenant_id"`
+	Name                  string                   `json:"name"`
+	Models                []string                 `json:"models"`
+	Scopes                []string                 `json:"scopes"`
+	QuotaUSD              *float64                 `json:"quota_usd"`
+	QuotaPeriod           string                   `json:"quota_period"`
+	OwnerType             string                   `json:"owner_type"`
+	OwnerUserID           string                   `json:"owner_user_id"`
+	OwnerOrganizationID   string                   `json:"owner_organization_id"`
+	ContextOrganizationID string                   `json:"context_organization_id"`
+	Workload              entities.WorkloadBinding `json:"workload"`
 }
 type APIKeyPatchRequest struct {
 	Enabled     *bool     `json:"enabled"`
@@ -70,21 +71,22 @@ type APIKeyPatchRequest struct {
 	RPM         **int     `json:"rpm"`
 }
 type CreatedAPIKeyResponse struct {
-	ID                    string   `json:"id"`
-	TenantID              string   `json:"tenant_id"`
-	Name                  string   `json:"name"`
-	KeyPrefix             string   `json:"key_prefix"`
-	Models                []string `json:"models"`
-	Scopes                []string `json:"scopes"`
-	QuotaUSD              *float64 `json:"quota_usd"`
-	QuotaPeriod           string   `json:"quota_period"`
-	RPM                   *int     `json:"rpm"`
-	Enabled               bool     `json:"enabled"`
-	Plaintext             string   `json:"plaintext"`
-	OwnerType             string   `json:"owner_type"`
-	OwnerUserID           string   `json:"owner_user_id,omitempty"`
-	OwnerOrganizationID   string   `json:"owner_organization_id,omitempty"`
-	ContextOrganizationID string   `json:"context_organization_id,omitempty"`
+	ID                    string                   `json:"id"`
+	TenantID              string                   `json:"tenant_id"`
+	Name                  string                   `json:"name"`
+	KeyPrefix             string                   `json:"key_prefix"`
+	Models                []string                 `json:"models"`
+	Scopes                []string                 `json:"scopes"`
+	QuotaUSD              *float64                 `json:"quota_usd"`
+	QuotaPeriod           string                   `json:"quota_period"`
+	RPM                   *int                     `json:"rpm"`
+	Enabled               bool                     `json:"enabled"`
+	Plaintext             string                   `json:"plaintext"`
+	OwnerType             string                   `json:"owner_type"`
+	OwnerUserID           string                   `json:"owner_user_id,omitempty"`
+	OwnerOrganizationID   string                   `json:"owner_organization_id,omitempty"`
+	ContextOrganizationID string                   `json:"context_organization_id,omitempty"`
+	Workload              entities.WorkloadBinding `json:"workload,omitempty"`
 }
 type APIKeyRevealResponse struct {
 	Plaintext string `json:"plaintext"`

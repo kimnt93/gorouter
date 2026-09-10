@@ -200,3 +200,50 @@ func TestTenantScopedOperationsDelegateTenant(t *testing.T) {
 		t.Fatalf("tenant was not propagated: %+v", repo)
 	}
 }
+
+func TestWorkloadBindingIsValidatedAndRetainedByCreation(t *testing.T) {
+	repo := &ownedRepoStub{}
+	service := NewService(repo, func(value string) string { return value }, func() string { return "sk_synthetic_workload_secret" })
+	binding := entities.WorkloadBinding{Application: "xnobrain", Environment: "test", WorkspaceID: "workspace-1", AgentID: "agent-1"}
+	key, err := service.Create(context.Background(), CreateInput{Name: "agent", Models: []string{"model"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.Workload != binding {
+		t.Fatalf("binding=%+v", key.Workload)
+	}
+	_, err = service.Create(context.Background(), CreateInput{Name: "invalid", Models: []string{"model"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: entities.WorkloadBinding{AgentID: "agent-only"}})
+	if err == nil {
+		t.Fatal("partial workload binding was accepted")
+	}
+}
+
+type ownedRepoStub struct{ key *entities.ApiKey }
+
+func (r *ownedRepoStub) CreateOwned(_ context.Context, key entities.ApiKey) (*entities.ApiKey, error) {
+	r.key = &key
+	return &key, nil
+}
+func (r *ownedRepoStub) Rotate(context.Context, string) (*entities.ApiKey, error) { return r.key, nil }
+func (r *ownedRepoStub) Create(context.Context, string, string, []string, []string, *float64, *int) (*entities.ApiKey, error) {
+	return nil, nil
+}
+func (r *ownedRepoStub) GetBySecret(context.Context, string) (*entities.ApiKey, error) {
+	return nil, entities.ErrNotFound
+}
+func (r *ownedRepoStub) GetByID(context.Context, string) (*entities.ApiKey, error) { return r.key, nil }
+func (r *ownedRepoStub) GetByIDForTenant(context.Context, string, string) (*entities.ApiKey, error) {
+	return r.key, nil
+}
+func (r *ownedRepoStub) List(context.Context) ([]entities.ApiKey, error) { return nil, nil }
+func (r *ownedRepoStub) ListByTenant(context.Context, string) ([]entities.ApiKey, error) {
+	return nil, nil
+}
+func (r *ownedRepoStub) Patch(context.Context, string, *bool, *[]string, *[]string, **float64, **int) error {
+	return nil
+}
+func (r *ownedRepoStub) PatchForTenant(context.Context, string, string, *bool, *[]string, *[]string, **float64, **int) error {
+	return nil
+}
+func (r *ownedRepoStub) Delete(context.Context, string) error                  { return nil }
+func (r *ownedRepoStub) DeleteForTenant(context.Context, string, string) error { return nil }

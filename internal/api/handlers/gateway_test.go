@@ -1392,3 +1392,38 @@ func TestListModelsReportsReasoningCapabilitiesWithFallbackSource(t *testing.T) 
 		}
 	}
 }
+
+func TestGatewayCorrelationUsesAuthenticatedWorkloadBinding(t *testing.T) {
+	key := &entities.ApiKey{ID: "key-agent", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: entities.WorkloadBinding{Application: "xnobrain", Environment: "prod", WorkspaceID: "workspace-1", AgentID: "agent-1"}}
+	repository := &captureUsageRepository{}
+	usageService := usage.NewService(repository, 16, nil)
+	gateway := &Gateway{
+		Keys:   apikey.NewService(gatewayKeyRepo{key}, func(string) string { return "" }, func() string { return "" }),
+		Creds:  credential.NewService(gatewayCredRepo{routes: []entities.RouteCandidate{{CredentialID: "cred-a"}}, runtimes: map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}}}, nil),
+		Models: modelroute.NewService(gatewayModelRepo{model: entities.ModelDef{Name: "model-a", UpstreamModel: "upstream", Strategy: chat.StrategyPriority, Enabled: true}}),
+		OpenAI: &gatewayUpstream{statuses: map[string]int{"cred-a": 200}}, Selector: &chat.Selector{}, Health: chat.NewHealth(), Usage: usageService,
+	}
+	app := fiber.New()
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		c.Locals(localSession, &entities.Session{Role: entities.RoleAPIKey, KeyID: key.ID, PrincipalType: entities.PrincipalUser, UserID: "user-1", Scopes: key.Scopes})
+		return gateway.Chat(c)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Content-Type", fiber.MIMEApplicationJSON)
+	request.Header.Set(headerConversationID, "conversation-1")
+	request.Header.Set(headerRunID, "run-1")
+	request.Header.Set(headerLogicalRequestID, "logical-1")
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	usageService.Close()
+	if len(repository.events) != 1 {
+		t.Fatalf("events=%+v", repository.events)
+	}
+	event := repository.events[0]
+	if event.Application != "xnobrain" || event.WorkspaceID != "workspace-1" || event.AgentID != "agent-1" || event.ConversationID != "conversation-1" || event.RunID != "run-1" || event.LogicalRequestID != "logical-1" || event.AccountingTS.IsZero() || event.ProviderAttemptID == "" {
+		t.Fatalf("attribution=%+v", event)
+	}
+}

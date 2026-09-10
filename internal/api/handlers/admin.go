@@ -22,6 +22,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	"github.com/kimnt93/gorouter/pkg/policy"
 	"github.com/kimnt93/gorouter/pkg/provider"
+	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
@@ -678,7 +679,7 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	if err := a.validateCredentialBackedModels(c.Context(), credentialOwnerUserID, globalCredentialOwner, b.Models); err != nil {
 		return responseapi.For(c).Forbidden("only models from your provider connections can be shared").Send()
 	}
-	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID, CredentialOwnerUserID: credentialOwnerUserID, CredentialOwnerGlobal: globalCredentialOwner}
+	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID, CredentialOwnerUserID: credentialOwnerUserID, CredentialOwnerGlobal: globalCredentialOwner, Workload: b.Workload}
 	v, err := a.KeysSvc.Create(c.Context(), in)
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
@@ -848,7 +849,7 @@ func (a *Admin) appendKeyAudit(c fiber.Ctx, actor entities.Principal, action str
 }
 
 func keyCreatedResponse(v *entities.ApiKey) createdAPIKeyResponse {
-	return createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext, OwnerType: v.OwnerType, OwnerUserID: v.OwnerUserID, OwnerOrganizationID: v.OwnerOrganizationID, ContextOrganizationID: v.ContextOrganizationID}
+	return createdAPIKeyResponse{ID: v.ID, TenantID: v.TenantID, Name: v.Name, KeyPrefix: v.SecretPrefix, Models: v.Models, Scopes: v.Scopes, QuotaUSD: v.QuotaUSD, QuotaPeriod: v.QuotaPeriod, RPM: v.RPM, Enabled: v.Enabled, Plaintext: v.Plaintext, OwnerType: v.OwnerType, OwnerUserID: v.OwnerUserID, OwnerOrganizationID: v.OwnerOrganizationID, ContextOrganizationID: v.ContextOrganizationID, Workload: v.Workload}
 }
 
 // ModelsList returns models visible to the principal.
@@ -1010,6 +1011,15 @@ func (a *Admin) Prices(c fiber.Ctx) error {
 // @Param organization_id query string false "Organization filter"
 // @Param user_id query string false "User filter"
 // @Param view_user_id query string false "Master-only user View As filter"
+// @Param application query string false "Workload application filter"
+// @Param environment query string false "Workload environment filter"
+// @Param workspace_id query string false "Workload workspace filter"
+// @Param agent_id query string false "Workload agent filter"
+// @Param conversation_id query string false "Conversation filter"
+// @Param run_id query string false "Run filter"
+// @Param logical_request_id query string false "Logical request filter"
+// @Param provider query string false "Provider filter"
+// @Param credential_id query string false "Credential filter"
 // @Success 200 {object} entities.UsageSummary
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/summary [get]
@@ -1040,6 +1050,7 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
 	}
 	query := entities.UsageQuery{Visibility: visibility, Since: &since, OrganizationID: requestedOrganization, UserID: c.Query("user_id")}
+	applyUsageFilters(c, &query)
 	v, err := a.UsageSvc.SummaryQuery(c.Context(), query)
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load usage summary").Send()
@@ -1062,6 +1073,15 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 // @Param api_key_id query string false "API-key filter"
 // @Param status query int false "HTTP status filter"
 // @Param view_user_id query string false "Master-only user View As filter"
+// @Param application query string false "Workload application filter"
+// @Param environment query string false "Workload environment filter"
+// @Param workspace_id query string false "Workload workspace filter"
+// @Param agent_id query string false "Workload agent filter"
+// @Param conversation_id query string false "Conversation filter"
+// @Param run_id query string false "Run filter"
+// @Param logical_request_id query string false "Logical request filter"
+// @Param provider query string false "Provider filter"
+// @Param credential_id query string false "Credential filter"
 // @Success 200 {object} UsageRecentResponse
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/recent [get]
@@ -1086,6 +1106,7 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "100"))
 	query := entities.UsageQuery{Visibility: visibility, Cursor: c.Query("cursor"), Limit: limit, OrganizationID: requestedOrganization, UserID: c.Query("user_id"), Model: c.Query("model"), APIKeyID: c.Query("api_key_id")}
+	applyUsageFilters(c, &query)
 	if value := c.Query("status"); value != "" {
 		status, parseErr := strconv.Atoi(value)
 		if parseErr != nil {
@@ -1173,6 +1194,15 @@ func (a *Admin) UsageDetail(c fiber.Ctx) error {
 // @Param user_id query string false "User filter"
 // @Param api_key_id query string false "API-key filter"
 // @Param view_user_id query string false "Master-only user View As filter"
+// @Param application query string false "Workload application filter"
+// @Param environment query string false "Workload environment filter"
+// @Param workspace_id query string false "Workload workspace filter"
+// @Param agent_id query string false "Workload agent filter"
+// @Param conversation_id query string false "Conversation filter"
+// @Param run_id query string false "Run filter"
+// @Param logical_request_id query string false "Logical request filter"
+// @Param provider query string false "Provider filter"
+// @Param credential_id query string false "Credential filter"
 // @Success 200 {object} UsageActivityResponse
 // @Failure 400,401,403,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/activity [get]
@@ -1201,6 +1231,7 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 	}
 	now := time.Now().UTC()
 	query := entities.UsageQuery{Visibility: visibility, OrganizationID: requestedOrganization, UserID: strings.TrimSpace(c.Query("user_id")), APIKeyID: strings.TrimSpace(c.Query("api_key_id"))}
+	applyUsageFilters(c, &query)
 	switch strings.ToLower(strings.TrimSpace(c.Query("range", "7d"))) {
 	case "1d":
 		since := now.Add(-24 * time.Hour)
@@ -1247,6 +1278,101 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load provider health").Send()
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(UsageActivityResponse{GroupBy: groupBy, Data: buckets, Summary: summary, Health: health}).Send()
+}
+
+func applyUsageFilters(c fiber.Ctx, query *entities.UsageQuery) {
+	query.Provider = strings.TrimSpace(c.Query("provider"))
+	query.CredentialID = strings.TrimSpace(c.Query("credential_id"))
+	query.Application = strings.TrimSpace(c.Query("application"))
+	query.Environment = strings.TrimSpace(c.Query("environment"))
+	query.WorkspaceID = strings.TrimSpace(c.Query("workspace_id"))
+	query.AgentID = strings.TrimSpace(c.Query("agent_id"))
+	query.ConversationID = strings.TrimSpace(c.Query("conversation_id"))
+	query.RunID = strings.TrimSpace(c.Query("run_id"))
+	query.LogicalRequestID = strings.TrimSpace(c.Query("logical_request_id"))
+}
+
+type AgentWeeklyUsageResponse struct {
+	CapabilityVersion   string                `json:"capability_version"`
+	Application         string                `json:"application"`
+	Environment         string                `json:"environment,omitempty"`
+	WorkspaceID         string                `json:"workspace_id"`
+	AgentIDs            []string              `json:"agent_ids"`
+	PeriodStart         time.Time             `json:"period_start"`
+	PeriodEnd           time.Time             `json:"period_end"`
+	Timezone            string                `json:"timezone"`
+	WeekStartsOn        string                `json:"week_starts_on"`
+	AsOf                time.Time             `json:"as_of"`
+	AccountingState     string                `json:"accounting_state"`
+	Completeness        string                `json:"completeness"`
+	Freshness           string                `json:"freshness"`
+	AttributionCoverage string                `json:"attribution_coverage"`
+	Summary             entities.UsageSummary `json:"summary"`
+}
+
+// AgentWeeklyUsage returns the exact current Router quota-week aggregate for
+// one authorized workload binding or a bounded batch of agent identities.
+// @Summary Get authoritative weekly agent usage
+// @Tags usage
+// @Security BearerAuth
+// @Param application query string false "Workload application namespace"
+// @Param environment query string false "Environment namespace"
+// @Param workspace_id query string false "Workspace identity"
+// @Param agent_id query string false "Comma-separated agent identities"
+// @Success 200 {object} AgentWeeklyUsageResponse
+// @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
+// @Router /admin/usage/agents/weekly [get]
+func (a *Admin) AgentWeeklyUsage(c fiber.Ctx) error {
+	sess := SessionFrom(c)
+	if sess == nil {
+		return responseapi.For(c).Unauthorized("authentication required").Send()
+	}
+	if sess.IsMaster() {
+		return responseapi.For(c).BadRequest("master must use a workload-bound integration key").Send()
+	}
+	key, err := a.KeysSvc.GetByID(c.Context(), sess.KeyID)
+	if err != nil || !key.Workload.Bound() {
+		return responseapi.For(c).NotFound("workload binding not found").Send()
+	}
+	application := strings.TrimSpace(c.Query("application", key.Workload.Application))
+	environment := strings.TrimSpace(c.Query("environment", key.Workload.Environment))
+	workspaceID := strings.TrimSpace(c.Query("workspace_id", key.Workload.WorkspaceID))
+	if application != key.Workload.Application || environment != key.Workload.Environment || workspaceID != key.Workload.WorkspaceID {
+		return responseapi.For(c).Forbidden("workload binding cannot be broadened").Send()
+	}
+	agentIDs := splitCSV(strings.TrimSpace(c.Query("agent_id", key.Workload.AgentID)))
+	if len(agentIDs) == 0 || len(agentIDs) > 100 {
+		return responseapi.For(c).BadRequest("agent_id must contain between 1 and 100 identities").Send()
+	}
+	for _, agentID := range agentIDs {
+		if agentID != key.Workload.AgentID {
+			return responseapi.For(c).Forbidden("agent filter exceeds the authenticated binding").Send()
+		}
+	}
+	actor, readErr := a.principalForRead(c)
+	if readErr != nil {
+		return principalReadError(c, readErr)
+	}
+	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
+	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
+	if policyErr != nil {
+		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
+	}
+	now := time.Now().UTC()
+	start, end, _, windowErr := quota.Window(entities.QuotaPeriodWeek, now)
+	if windowErr != nil {
+		return responseapi.For(c).InternalError("failed to resolve quota week").Send()
+	}
+	query := entities.UsageQuery{Visibility: visibility, Since: &start, Until: &end, Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs}
+	summary, aggregateErr := a.UsageSvc.AgentAggregate(c.Context(), query)
+	if aggregateErr != nil {
+		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "authoritative usage is unavailable", "service_unavailable", "usage_unavailable").Send()
+	}
+	coverage := "attributed"
+	if summary.Requests == 0 {
+		coverage = "no_usage"
+	}
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(AgentWeeklyUsageResponse{CapabilityVersion: "xnobrain-agent-usage-v1", Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs, PeriodStart: start, PeriodEnd: end, Timezone: "UTC", WeekStartsOn: strings.ToLower(start.Weekday().String()), AsOf: now, AccountingState: "settled", Completeness: "durable_records", Freshness: "settled_only", AttributionCoverage: coverage, Summary: *summary}).Send()
 }
 
 // CacheStats returns safe prompt-cache counters.

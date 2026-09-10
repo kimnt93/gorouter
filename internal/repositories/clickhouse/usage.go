@@ -22,10 +22,37 @@ func (r *UsageRepo) SpendForKeySince(ctx context.Context, id string, since time.
 	return v, e
 }
 func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEvent) error {
+	legacy := make([]entities.UsageEvent, 0, len(events))
+	for _, event := range events {
+		if event.ID == "" {
+			return errors.New("usage event ID is required")
+		}
+		if event.AgentID == "" {
+			legacy = append(legacy, event)
+			continue
+		}
+		current := event
+		if err := r.s.mutate(ctx, "usage:"+event.ID, func() error {
+			var count uint64
+			if err := r.s.Conn.QueryRow(ctx, `SELECT count() FROM usage_events WHERE event_id=?`, current.ID).Scan(&count); err != nil {
+				return err
+			}
+			if count > 0 {
+				return nil
+			}
+			return r.insertBatch(ctx, []entities.UsageEvent{current})
+		}); err != nil {
+			return err
+		}
+	}
+	return r.insertBatch(ctx, legacy)
+}
+
+func (r *UsageRepo) insertBatch(ctx context.Context, events []entities.UsageEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
-	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,conversation_enc,content_truncated)`)
+	b, e := r.s.Conn.PrepareBatch(ctx, `INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,conversation_enc,content_truncated,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state)`)
 	if e != nil {
 		return e
 	}
@@ -41,7 +68,16 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if v.ActorType == "" {
 			v.ActorType, v.Username, v.OrganizationID = entities.ActorLegacy, entities.ActorLegacy, v.TenantID
 		}
-		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Provider, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.InputCostUSD, v.OutputCostUSD, v.CacheReadCostUSD, v.CacheWriteCostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID, string(v.ConversationEnc), v.ContentTruncated); e != nil {
+		if v.AccountingTS.IsZero() {
+			v.AccountingTS = v.TS
+		}
+		if v.AccountingState == "" {
+			v.AccountingState = "settled"
+		}
+		if v.UsageMeasurement == "" {
+			v.UsageMeasurement = "unknown"
+		}
+		if e = b.Append(v.ID, v.TS, v.TenantID, v.ApiKeyID, v.CredentialID, v.Provider, v.Model, v.UpstreamModel, v.PromptTokens, v.CompletionTokens, v.CacheReadTokens, v.CacheWriteTokens, v.CostUSD, v.InputCostUSD, v.OutputCostUSD, v.CacheReadCostUSD, v.CacheWriteCostUSD, v.Priced, v.CacheHit, int32(v.StatusCode), v.DurationMS, v.Error, v.ActorType, v.UserID, v.Username, v.OrganizationID, string(v.ConversationEnc), v.ContentTruncated, v.Application, v.Environment, v.WorkspaceID, v.AgentID, v.ConversationID, v.RunID, v.ParentRunID, v.LogicalRequestID, v.ProviderAttemptID, v.AccountingTS, v.UsageMeasurement, v.AccountingState); e != nil {
 			return e
 		}
 	}
@@ -110,7 +146,7 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	q := `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id FROM usage_events`
+	q := `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,coalesce(accounting_ts,ts),usage_measurement,accounting_state FROM usage_events`
 	args := []any{}
 	if tenant != "" {
 		q += ` WHERE tenant_id=?`
@@ -127,7 +163,7 @@ func (r *UsageRepo) recent(ctx context.Context, tenant string, limit int) ([]ent
 	for rows.Next() {
 		var v entities.RecentEvent
 		var statusCode int32
-		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Provider, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &statusCode, &v.DurationMS, &v.Error, &v.ActorType, &v.UserID, &v.Username, &v.OrganizationID); e != nil {
+		if e = rows.Scan(&v.ID, &v.TS, &v.TenantID, &v.KeyID, &v.CredentialID, &v.Provider, &v.Model, &v.UpstreamModel, &v.PromptTokens, &v.CompletionTokens, &v.CacheReadTokens, &v.CacheWriteTokens, &v.CostUSD, &v.Priced, &v.CacheHit, &statusCode, &v.DurationMS, &v.Error, &v.ActorType, &v.UserID, &v.Username, &v.OrganizationID, &v.Application, &v.Environment, &v.WorkspaceID, &v.AgentID, &v.ConversationID, &v.RunID, &v.ParentRunID, &v.LogicalRequestID, &v.ProviderAttemptID, &v.AccountingTS, &v.UsageMeasurement, &v.AccountingState); e != nil {
 			return nil, e
 		}
 		v.StatusCode = int(statusCode)
@@ -155,6 +191,14 @@ func usageWhere(query entities.UsageQuery, includeCursor bool) ([]string, []any)
 			}
 		}
 	}
+	for _, filter := range []struct{ column, value string }{{"provider", query.Provider}, {"credential_id", query.CredentialID}, {"workload_application", query.Application}, {"workload_environment", query.Environment}, {"workload_workspace_id", query.WorkspaceID}, {"workload_agent_id", query.AgentID}, {"conversation_id", query.ConversationID}, {"run_id", query.RunID}, {"logical_request_id", query.LogicalRequestID}} {
+		if filter.value != "" {
+			clauses, args = append(clauses, filter.column+"=?"), append(args, filter.value)
+		}
+	}
+	if len(query.AgentIDs) > 0 {
+		clauses, args = append(clauses, "workload_agent_id IN ?"), append(args, query.AgentIDs)
+	}
 	if query.StatusCode != nil {
 		clauses, args = append(clauses, "status_code=?"), append(args, int32(*query.StatusCode))
 	}
@@ -162,7 +206,7 @@ func usageWhere(query entities.UsageQuery, includeCursor bool) ([]string, []any)
 		clauses, args = append(clauses, "ts>=?"), append(args, query.Since.UTC())
 	}
 	if query.Until != nil {
-		clauses, args = append(clauses, "ts<=?"), append(args, query.Until.UTC())
+		clauses, args = append(clauses, "ts<?"), append(args, query.Until.UTC())
 	}
 	if includeCursor {
 		cursor := clickhouseAuditCursorDecode(query.Cursor)
@@ -177,7 +221,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	clauses, args := usageWhere(query, true)
 	limit := boundedConfigLimit(query.Limit)
 	args = append(args, limit+1)
-	rows, err := r.s.Conn.Query(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` ORDER BY ts DESC,event_id DESC LIMIT ?`, args...)
+	rows, err := r.s.Conn.Query(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,coalesce(accounting_ts,ts),usage_measurement,accounting_state FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` ORDER BY ts DESC,event_id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +230,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 	for rows.Next() {
 		var event entities.RecentEvent
 		var status int32
-		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel, &event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced, &event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID); err != nil {
+		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel, &event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced, &event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState); err != nil {
 			return nil, err
 		}
 		event.StatusCode = int(status)
@@ -320,10 +364,10 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 	var event entities.UsageDetail
 	var status int32
 	var encrypted string
-	err := r.s.Conn.QueryRow(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,conversation_enc,content_truncated FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` LIMIT 1`, args...).Scan(
+	err := r.s.Conn.QueryRow(ctx, `SELECT event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,coalesce(accounting_ts,ts),usage_measurement,accounting_state,conversation_enc,content_truncated FROM usage_events WHERE `+strings.Join(clauses, " AND ")+` LIMIT 1`, args...).Scan(
 		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
 		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-		&event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &encrypted, &event.ContentTruncated)
+		&event.CacheHit, &status, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState, &encrypted, &event.ContentTruncated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, entities.ErrNotFound
 	}
@@ -332,4 +376,17 @@ func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entit
 	}
 	event.StatusCode, event.ConversationEncrypted = int(status), []byte(encrypted)
 	return &event, nil
+}
+
+func (r *UsageRepo) AgentUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	clauses, args := usageWhere(query, false)
+	for index := range clauses {
+		clauses[index] = strings.ReplaceAll(clauses[index], "ts>=", "coalesce(accounting_ts,ts)>=")
+		clauses[index] = strings.ReplaceAll(clauses[index], "ts<", "coalesce(accounting_ts,ts)<")
+	}
+	summary := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
+	var requests, cacheHits, unpriced uint64
+	err := r.s.Conn.QueryRow(ctx, `SELECT count(),sum(cost_usd),sum(input_cost_usd),sum(output_cost_usd),sum(cache_read_cost_usd),sum(cache_write_cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens),countIf(cache_hit),countIf(NOT priced) FROM usage_events WHERE `+strings.Join(clauses, " AND "), args...).Scan(&requests, &summary.CostUSD, &summary.InputCostUSD, &summary.OutputCostUSD, &summary.CacheReadCostUSD, &summary.CacheWriteCostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &cacheHits, &unpriced)
+	summary.Requests, summary.CacheHits, summary.Unpriced = int64(requests), int64(cacheHits), int64(unpriced)
+	return summary, err
 }

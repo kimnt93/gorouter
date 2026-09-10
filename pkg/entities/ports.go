@@ -132,16 +132,26 @@ type UsageVisibility struct {
 }
 
 type UsageQuery struct {
-	Visibility     UsageVisibility
-	Cursor         string
-	Limit          int
-	Since          *time.Time
-	Until          *time.Time
-	OrganizationID string
-	UserID         string
-	Model          string
-	APIKeyID       string
-	StatusCode     *int
+	Visibility       UsageVisibility
+	Cursor           string
+	Limit            int
+	Since            *time.Time
+	Until            *time.Time
+	OrganizationID   string
+	UserID           string
+	Model            string
+	APIKeyID         string
+	StatusCode       *int
+	Provider         string
+	CredentialID     string
+	Application      string
+	Environment      string
+	WorkspaceID      string
+	AgentID          string
+	AgentIDs         []string
+	ConversationID   string
+	RunID            string
+	LogicalRequestID string
 }
 
 type UsagePage struct {
@@ -152,6 +162,10 @@ type UsagePage struct {
 type PrincipalUsageRepository interface {
 	QueryUsage(ctx context.Context, query UsageQuery) (*UsagePage, error)
 	SummaryUsage(ctx context.Context, query UsageQuery) (*UsageSummary, error)
+}
+
+type AgentUsageAggregateRepository interface {
+	AgentUsageAggregate(ctx context.Context, query UsageQuery) (*UsageSummary, error)
 }
 
 type UsageDetailRepository interface {

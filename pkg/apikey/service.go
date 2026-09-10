@@ -107,6 +107,7 @@ type CreateInput struct {
 	ContextOrganizationID string
 	CredentialOwnerUserID string
 	CredentialOwnerGlobal bool
+	Workload              entities.WorkloadBinding
 }
 
 // CreateUserWithInitialKey persists a prepared user, its first personal key,
@@ -161,12 +162,15 @@ func (s *Service) prepareOwned(in CreateInput) (*entities.ApiKey, error) {
 	if err = validateLimits(quota, in.RPM); err != nil {
 		return nil, err
 	}
+	if in.Workload, err = normalizeWorkload(in.Workload); err != nil {
+		return nil, err
+	}
 	plain := s.genFn()
 	prefix := plain
 	if len(prefix) > 11 {
 		prefix = prefix[:11]
 	}
-	key := &entities.ApiKey{ID: entities.NewID("key"), Name: in.Name, SecretHash: s.hashFn(plain), SecretPrefix: prefix, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM, Enabled: true, CreatedAt: time.Now().UTC(), OwnerType: entities.OwnerUser, OwnerUserID: in.OwnerUserID, CredentialOwnerUserID: in.CredentialOwnerUserID, Plaintext: plain}
+	key := &entities.ApiKey{ID: entities.NewID("key"), Name: in.Name, SecretHash: s.hashFn(plain), SecretPrefix: prefix, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM, Enabled: true, CreatedAt: time.Now().UTC(), OwnerType: entities.OwnerUser, OwnerUserID: in.OwnerUserID, CredentialOwnerUserID: in.CredentialOwnerUserID, Workload: in.Workload, Plaintext: plain}
 	if err = key.ValidateOwnerShape(); err != nil {
 		return nil, err
 	}
@@ -197,9 +201,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	if err := validateLimits(quota, in.RPM); err != nil {
 		return nil, err
 	}
+	if in.Workload, err = normalizeWorkload(in.Workload); err != nil {
+		return nil, err
+	}
 	if owned {
 		key := entities.ApiKey{Name: in.Name, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM,
-			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID), CredentialOwnerUserID: strings.TrimSpace(in.CredentialOwnerUserID)}
+			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID), CredentialOwnerUserID: strings.TrimSpace(in.CredentialOwnerUserID), Workload: in.Workload}
 		if key.OwnerType == entities.OwnerUser && key.CredentialOwnerUserID == "" && !in.CredentialOwnerGlobal {
 			key.CredentialOwnerUserID = key.OwnerUserID
 		}
@@ -503,4 +510,27 @@ func validateLimits(quota *float64, rpm *int) error {
 		return ErrInvalidRPM
 	}
 	return nil
+}
+
+func normalizeWorkload(binding entities.WorkloadBinding) (entities.WorkloadBinding, error) {
+	binding.Application = strings.TrimSpace(binding.Application)
+	binding.Environment = strings.TrimSpace(binding.Environment)
+	binding.WorkspaceID = strings.TrimSpace(binding.WorkspaceID)
+	binding.AgentID = strings.TrimSpace(binding.AgentID)
+	values := []string{binding.Application, binding.Environment, binding.WorkspaceID, binding.AgentID}
+	for _, value := range values {
+		if len(value) > 128 {
+			return entities.WorkloadBinding{}, errors.New("workload binding fields must not exceed 128 bytes")
+		}
+		for _, r := range value {
+			if !(r == '-' || r == '_' || r == '.' || r == ':' || r == '/' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+				return entities.WorkloadBinding{}, errors.New("workload binding fields contain invalid characters")
+			}
+		}
+	}
+	present := binding.Application != "" || binding.Environment != "" || binding.WorkspaceID != "" || binding.AgentID != ""
+	if present && !binding.Bound() {
+		return entities.WorkloadBinding{}, errors.New("workload application, workspace_id, and agent_id are required together")
+	}
+	return binding, nil
 }
