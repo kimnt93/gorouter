@@ -331,7 +331,7 @@ func TestCredentialCreateRejectsOrganizationPrincipal(t *testing.T) {
 	}
 }
 
-func TestWorkloadWeeklyUsageRejectsUnboundKey(t *testing.T) {
+func TestWeeklyUsageRequiresUsageRepository(t *testing.T) {
 	repo := &revealKeyRepo{key: entities.ApiKey{ID: "key-1", OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Scopes: []string{entities.ScopeUsageRead}}}
 	admin := &Admin{KeysSvc: apikey.NewService(repo, func(string) string { return "" }, func() string { return "" })}
 	app := fiber.New()
@@ -344,7 +344,7 @@ func TestWorkloadWeeklyUsageRejectsUnboundKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != fiber.StatusNotFound {
+	if response.StatusCode != fiber.StatusServiceUnavailable {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
 }

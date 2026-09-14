@@ -4,38 +4,17 @@ This is an application-neutral integration contract for coding clients, services
 and agent runtimes. It tracks **agent, user, request, run, parent run, trace, and
 session/conversation** without requiring prompt/completion capture.
 
-## 1. Trusted identity: agent and user
+## 1. User-first authority
 
-GoRouter derives `user_id` from the authenticated principal and `agent_id` from
-an immutable API-key workload binding. Do **not** use `X-Agent-ID`, `X-User-ID`,
-OpenAI `user`, or a model's generated response ID as an authorization mechanism.
-Those values cannot replace the authenticated accounting owner.
+The authenticated user is the top-level owner and uses one canonical API key.
+Agents are request correlation beneath that user, not separate principals or
+key bindings. See [User model access](user-model-access.md) for canonical-key
+migration, organization aliases/groups, assignment APIs and limits.
 
-Create workload-bound keys through an authorized `POST /admin/api-keys` call
-(`keys:manage` and existing owner/model-grant policy):
-
-```json
-{
-  "name": "Worker A",
-  "owner_type": "user",
-  "owner_user_id": "usr_example",
-  "models": ["openai/example-model"],
-  "scopes": ["chat", "usage:read"],
-  "workload": {
-    "application": "example-app",
-    "environment": "production",
-    "workspace_id": "workspace_example",
-    "agent_id": "agent_a"
-  }
-}
-```
-
-Replace the example model with an allowed, configured model. Workload application,
-workspace, and agent are required together; environment is optional. Key creation
-requires the existing authorized management identity (master or permitted org
-admin), not an ordinary chat-only caller. Rotation retains the binding. Use a
-separate key for each agent/user authority; application namespaces are arbitrary,
-not tied to a particular consuming project.
+Send `X-GoRouter-Agent-Id` to track an agent. `user_id` comes from authentication;
+caller headers cannot replace it. A different agent ID cannot bypass shared
+model, group, or user limits. New API keys reject workload binding configuration;
+old bindings remain historical metadata, not authorization.
 
 ## 2. Request headers and defaults
 
@@ -43,6 +22,7 @@ Send these headers on any of `/v1/chat/completions`, `/v1/responses`, or
 `/v1/messages`, with or without streaming:
 
 ```yaml
+X-GoRouter-Agent-Id: agent_a
 X-GoRouter-Conversation-Id: conversation_123
 X-GoRouter-Run-Id: run_123
 X-GoRouter-Parent-Run-Id: run_parent_123
@@ -52,7 +32,7 @@ X-GoRouter-Trace-Id: trace_123
 
 | Tracked dimension | Source | Default if omitted | Usage record / query field |
 |---|---|---|---|
-| Agent | API key `workload.agent_id` | Unattributed | `agent_id` |
+| Agent | `X-GoRouter-Agent-Id` | Unattributed | `agent_id` |
 | User | Authenticated Router user | Empty for organization/master actors | `user_id` |
 | Request | `X-GoRouter-Request-Id` | Router generates a unique ID | `logical_request_id` |
 | Run | `X-GoRouter-Run-Id` | Empty | `run_id` |
@@ -80,10 +60,9 @@ cache keys. Traces remain absent on older records; no historical IDs are guessed
 ## 3. Query endpoints
 
 All reads require `usage:read` and object-level authorization. Use a management
-read identity for authorized cross-agent queries. A workload-bound key is
-restricted to its own exact application/environment/workspace/agent, even when
-filters are omitted. A user-owned workload key is additionally restricted to its
-user/context; owning an org-admin account does not broaden that workload key.
+read identity for authorized cross-agent queries. A user key queries that user’s records by default. An authorized organization
+context narrows the scope; an org admin can query organization usage, never
+another member’s unrelated personal activity. Agent filters are optional.
 
 | Endpoint | Result | Time behavior |
 |---|---|---|
@@ -116,11 +95,10 @@ org filters. Master View As narrows, never broadens, access. Missing scope is
 403; a foreign detail ID is concealed with 404. Foreign selections on aggregate
 or list queries are intersected with visibility and therefore yield no matches.
 
-Weekly is a **self-binding endpoint**: it still requires a workload-bound key,
-not a master key, and defaults to that binding. Run, parent-run, trace,
-conversation, request, and user selections further narrow the week's totals.
-Explicit attempts to change the weekly key's binding return 403. Use the other
-three endpoints for authorized multi-agent queries.
+Weekly is retained at `/admin/usage/workloads/weekly` for compatibility, but
+now uses the same user/org authority as other usage reads. Agent and correlation
+filters are optional; omitted means all authorized values. Its capability marker
+is `gorouter-user-usage-v1`.
 
 ### Examples
 
@@ -143,7 +121,7 @@ Authorization: Bearer <usage-read-key>
 
 ```http
 GET /admin/usage/workloads/weekly?trace_id=trace_123,trace_456
-Authorization: Bearer <workload-bound-usage-read-key>
+Authorization: Bearer <user-usage-read-key>
 ```
 
 An illustrative event fragment (other existing fields remain unchanged):
@@ -201,8 +179,8 @@ Metadata tracking requires no new environment flag. Leave
 - ClickHouse: `009_usage_trace.sql` adds trace storage and skip indexes.
 - SQLite: trace is serialized in the existing usage JSON payload; no column
   migration is needed. Round-trip and filtering are tested with real SQLite.
-- Existing clients, API envelopes, binding fields, and weekly capability version
-  are preserved. The additions require GoRouter v0.2.1; Swagger exposes them.
+- Existing clients, API envelopes, binding metadata remain readable; new key bindings are rejected and the weekly
+  capability is `gorouter-user-usage-v1`. The additions require GoRouter v0.2.1; Swagger exposes them.
 
 See [v0.2.1 release notes](release-notes-v0.2.1.md) for verification and delivery
 status. Source baseline for this update: `045c6e7`.

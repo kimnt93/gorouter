@@ -647,3 +647,41 @@ func (r *ApiKeyRepo) delete(ctx context.Context, tenantID, id string, scoped boo
 	}
 	return nil
 }
+
+// CreatePrimary serializes one-key-per-user creation without deleting legacy
+// credentials. Users with an existing key must rotate it rather than add one.
+func (r *ApiKeyRepo) CreatePrimary(ctx context.Context, input entities.ApiKey) (*entities.ApiKey, error) {
+	if err := input.ValidateOwnerShape(); err != nil {
+		return nil, err
+	}
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "primary-key:"+input.OwnerUserID); err != nil {
+		return nil, err
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM api_keys WHERE owner_type='user' AND owner_user_id=$1`, input.OwnerUserID).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count > 0 {
+		return nil, entities.ErrConflict
+	}
+	plain := GenerateSecret()
+	input.ID, input.SecretHash, input.SecretPrefix = NewID("key"), HashSecret(plain), plain[:11]
+	input.Enabled, input.CreatedAt, input.Plaintext = true, time.Now().UTC(), plain
+	input.TenantID = ""
+	input.ContextOrganizationID = ""
+	models, _ := json.Marshal(orEmpty(input.Models))
+	scopes, _ := json.Marshal(orEmpty(input.Scopes))
+	_, err = tx.Exec(ctx, `INSERT INTO api_keys (id,tenant_id,name,key_hash,key_prefix,models,scopes,quota_usd,quota_period,rpm,enabled,created_at,owner_type,owner_user_id,credential_owner_user_id) VALUES($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'user',$12,$12)`, input.ID, input.Name, input.SecretHash, input.SecretPrefix, models, scopes, input.QuotaUSD, input.QuotaPeriod, input.RPM, input.Enabled, input.CreatedAt, input.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &input, nil
+}

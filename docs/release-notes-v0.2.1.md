@@ -1,4 +1,30 @@
-# GoRouter v0.2.1 — Usage tracking and multi-select queries
+# GoRouter v0.2.1 — User access, organization models and tracking
+
+## User-first access and organization limits
+
+- One canonical key per user; new duplicate-key creation returns 409. Rotation
+  retains user ownership. Legacy secondary keys stop authenticating without
+  deleting historical rows (see upgrade guide).
+- `X-GoRouter-Agent-Id` tracks agents beneath the authenticated user; no agent
+  binding or separate agent key is required.
+- Organization aliases rename existing sources, for example `xno/xno-lite`.
+- Organization `/g/` groups provide ordered fallback packages such as
+  `xno/g/default`; grant access to existing users without changing their key.
+- Optional shared weekly USD limits on groups/aliases and per-user assignment
+  limits. Applicable limits are checked together; agent changes do not reset them.
+- Durable same-backend budget reservations with serialized multi-node admission.
+  Unknown failed work retains its estimate; budget exhaustion returns 429,
+  storage/coordination failures return 503. These are admission limits, not an
+  exact invoice/spending ceiling.
+- Dashboard: Organizations → Models and limits, with editable model/group and
+  per-user limits, assignment and revocation.
+- Existing weekly usage path is now user-scoped (`gorouter-user-usage-v1`), with
+  optional agent filters.
+
+**Upgrade:** review users with multiple existing keys, migrate them to the
+canonical key, and apply PostgreSQL migration 0030 along with 0028/0029.
+ClickHouse/SQLite reuse existing config stores. No provider credentials or
+historical usage are deleted. See [user model access](user-model-access.md).
 
 ## Added
 
@@ -42,8 +68,8 @@ marker stay compatible; see the guide for exact defaults and query examples.
 This release adds tracking and filtering, not an exactly-once accounting engine
 or strict agent budgets. Existing persistence/in-flight/failed-attempt accounting
 limitations remain; a successful chat is not a durable accounting receipt.
-The weekly endpoint remains self-binding; general authorized multi-agent queries
-use summary, activity, and recent APIs.
+The weekly endpoint now uses user/org authority; general authorized multi-agent
+queries also use summary, activity, and recent APIs.
 
 ## Verification and delivery
 
@@ -65,3 +91,15 @@ No production migration, real-provider quota, multi-replica HA test, release
 publication, push, or deployment is included in this source change. The two
 isolated test database containers were removed after verification; existing
 application/database containers and their volumes were not modified.
+
+
+### Continued v0.2.1 user-model verification
+
+- User-first personal/group inference, grants/revocation, duplicate-key rejection,
+  per-agent correlation, and no agent-ID quota bypass: unit/integration tested.
+- Concurrent budget and primary-key contracts: SQLite/PostgreSQL/ClickHouse.
+- Two ClickHouse repository instances sharing real Redis: serialized admission
+  and Redis outage fail-closed behavior tested.
+- Desktop Chrome 1440×900: organization models/limits modal, displayed shared and
+  per-user limits, revocation request, no horizontal overflow or JS errors.
+- Frontend: 16 files / 51 tests. Go/vet/race and Swagger checks run for this update.

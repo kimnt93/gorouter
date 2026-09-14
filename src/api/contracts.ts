@@ -221,3 +221,12 @@ export interface UsageFilters {
   providerIds?: string[]
   credentialIds?: string[]
 }
+
+export interface OrganizationModel {
+  organization_id: string; name: string; kind: 'alias' | 'group'; targets: string[]
+  enabled: boolean; weekly_limit_usd: number | null; created_at: string; updated_at: string
+}
+export interface OrganizationModelGrant {
+  organization_id: string; model: string; user_id: string; enabled: boolean
+  weekly_limit_usd: number | null; updated_at: string
+}

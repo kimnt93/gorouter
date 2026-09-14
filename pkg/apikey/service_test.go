@@ -103,7 +103,7 @@ func TestCreateAllowsEmptyModelAllowlist(t *testing.T) {
 	}
 }
 
-func TestCreatePreservesExplicitGlobalCredentialOwner(t *testing.T) {
+func TestCreateUserKeyUsesOwnCredentialOwner(t *testing.T) {
 	repo := &repositoryStub{}
 	_, err := newTestService(repo).Create(context.Background(), CreateInput{
 		Name: "master shared", OwnerType: entities.OwnerUser, OwnerUserID: "user-1",
@@ -112,8 +112,8 @@ func TestCreatePreservesExplicitGlobalCredentialOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.createdOwned.CredentialOwnerUserID != "" {
-		t.Fatalf("credential owner=%q, want global", repo.createdOwned.CredentialOwnerUserID)
+	if repo.createdOwned.CredentialOwnerUserID != "user-1" {
+		t.Fatalf("credential owner=%q, want user", repo.createdOwned.CredentialOwnerUserID)
 	}
 }
 
@@ -201,20 +201,18 @@ func TestTenantScopedOperationsDelegateTenant(t *testing.T) {
 	}
 }
 
-func TestWorkloadBindingIsValidatedAndRetainedByCreation(t *testing.T) {
+func TestWorkloadBindingCannotBeAssignedToUserKey(t *testing.T) {
 	repo := &ownedRepoStub{}
-	service := NewService(repo, func(value string) string { return value }, func() string { return "sk_synthetic_workload_secret" })
-	binding := entities.WorkloadBinding{Application: "automation-suite", Environment: "test", WorkspaceID: "workspace-1", AgentID: "agent-1"}
-	key, err := service.Create(context.Background(), CreateInput{Name: "agent", Models: []string{"model"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: binding})
+	service := NewService(repo, func(v string) string { return v }, func() string { return "synthetic" })
+	if _, err := service.Create(context.Background(), CreateInput{Name: "agent", Models: []string{"m"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user", Workload: entities.WorkloadBinding{Application: "app", WorkspaceID: "ws", AgentID: "agent"}}); err == nil {
+		t.Fatal("new key accepted workload authority")
+	}
+	key, err := service.Create(context.Background(), CreateInput{Name: "user", Models: []string{"m"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user", ContextOrganizationID: "org"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if key.Workload != binding {
-		t.Fatalf("binding=%+v", key.Workload)
-	}
-	_, err = service.Create(context.Background(), CreateInput{Name: "invalid", Models: []string{"model"}, Scopes: []string{entities.ScopeChat}, OwnerType: entities.OwnerUser, OwnerUserID: "user-1", Workload: entities.WorkloadBinding{AgentID: "agent-only"}})
-	if err == nil {
-		t.Fatal("partial workload binding was accepted")
+	if key.ContextOrganizationID != "" {
+		t.Fatal("user key retains org restriction")
 	}
 }
 
@@ -247,3 +245,22 @@ func (r *ownedRepoStub) PatchForTenant(context.Context, string, string, *bool, *
 }
 func (r *ownedRepoStub) Delete(context.Context, string) error                  { return nil }
 func (r *ownedRepoStub) DeleteForTenant(context.Context, string, string) error { return nil }
+
+type primarySelectionRepo struct {
+	repositoryStub
+	keys []entities.ApiKey
+}
+
+func (r *primarySelectionRepo) List(context.Context) ([]entities.ApiKey, error) { return r.keys, nil }
+func TestPrimaryKeySelectionIsStable(t *testing.T) {
+	repo := &primarySelectionRepo{keys: []entities.ApiKey{{ID: "org-key", OwnerType: entities.OwnerUser, OwnerUserID: "u", ContextOrganizationID: "org"}, {ID: "z", OwnerType: entities.OwnerUser, OwnerUserID: "u"}, {ID: "a", OwnerType: entities.OwnerUser, OwnerUserID: "u", Enabled: false}, {ID: "foreign", OwnerType: entities.OwnerUser, OwnerUserID: "other"}}}
+	svc := NewService(repo, nil, nil)
+	key, err := svc.PrimaryForUser(context.Background(), "u")
+	if err != nil || key.ID != "a" {
+		t.Fatalf("canonical=%+v err=%v", key, err)
+	}
+	// Disabling the canonical key must not activate another secret.
+	if key.Enabled {
+		t.Fatal("disabled canonical replaced")
+	}
+}

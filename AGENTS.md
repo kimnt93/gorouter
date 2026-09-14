@@ -57,6 +57,18 @@ canonical, read that reference before editing and follow its structure unless
 the existing local contract has a concrete reason to differ. Adapt example
 domain names and types; do not copy hypothetical identifiers literally.
 
+## v0.2.1 user-first access update
+
+The user is the top-level authority and has one canonical API key. Agent IDs are
+request tracking (`X-GoRouter-Agent-Id`), never principals or per-agent keys.
+User keys access personal provider models plus explicit organization grants.
+Organizations publish aliases (`<org>/<alias>`) and ordered groups
+(`<org>/g/<group>`) and apply weekly USD shared/per-user limits. Use
+`pkg/orgmodel` for publication, ownership, assignment and budget policy; read
+`docs/user-model-access.md`. Earlier references to per-agent key bindings or
+creating extra org-scoped user keys are superseded by this contract. Preserve
+legacy key records/history while enforcing the canonical authentication key.
+
 ## Non-negotiable domain rules
 
 ### Authorization and visibility

@@ -39,7 +39,10 @@ func TestLocalUsageTracking(t *testing.T) {
 	if err = db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	integration.RunUsageTrackingContract(t, NewUsageRepo(New(db.DB)))
+	store := New(db.DB)
+	integration.RunUsageTrackingContract(t, NewUsageRepo(store))
+	integration.RunOrganizationModelsContract(t, NewOrganizationModelRepo(store))
+	integration.RunPrimaryKeyContract(t, NewApiKeyRepo(store), "primary-user")
 }
 
 func TestLocalGlobalCredentialRoundTrip(t *testing.T) {

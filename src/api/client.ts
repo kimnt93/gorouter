@@ -193,3 +193,8 @@ function applyTrackingFilters(params: URLSearchParams, filters: UsageFilters) {
   ]
   for (const [key, values] of selections) if (values?.length) params.set(key, values.join(','))
 }
+
+export const getOrganizationModels = (id: string): Promise<import('./contracts').OrganizationModel[]> => request(`/admin/organizations/${encodeURIComponent(id)}/models`)
+export const getOrganizationGrants = (id: string): Promise<import('./contracts').OrganizationModelGrant[]> => request(`/admin/organizations/${encodeURIComponent(id)}/model-grants`)
+export const publishOrganizationModel = (id: string, body: Pick<import('./contracts').OrganizationModel, 'name' | 'kind' | 'targets' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModel> => request(`/admin/organizations/${encodeURIComponent(id)}/models`, { method: 'POST', body: JSON.stringify(body) })
+export const assignOrganizationModel = (id: string, body: Pick<import('./contracts').OrganizationModelGrant, 'model' | 'user_id' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModelGrant> => request(`/admin/organizations/${encodeURIComponent(id)}/model-grants`, { method: 'POST', body: JSON.stringify(body) })

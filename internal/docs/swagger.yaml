@@ -608,6 +608,44 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_kimnt93_gorouter_pkg_entities.OrganizationModel:
+    properties:
+      created_at:
+        type: string
+      enabled:
+        type: boolean
+      kind:
+        type: string
+      name:
+        type: string
+      organization_id:
+        type: string
+      source_owner_id:
+        type: string
+      targets:
+        items:
+          type: string
+        type: array
+      updated_at:
+        type: string
+      weekly_limit_usd:
+        type: number
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant:
+    properties:
+      enabled:
+        type: boolean
+      model:
+        type: string
+      organization_id:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+      weekly_limit_usd:
+        type: number
+    type: object
   github_com_kimnt93_gorouter_pkg_entities.Price:
     properties:
       cache_write_per_m:
@@ -1456,6 +1494,17 @@ definitions:
       organization:
         $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.Organization'
     type: object
+  internal_api_handlers.OrganizationGrantRequest:
+    properties:
+      enabled:
+        type: boolean
+      model:
+        type: string
+      user_id:
+        type: string
+      weekly_limit_usd:
+        type: number
+    type: object
   internal_api_handlers.OrganizationListItem:
     properties:
       created_at:
@@ -1485,6 +1534,21 @@ definitions:
         type: string
       object:
         type: string
+    type: object
+  internal_api_handlers.OrganizationModelRequest:
+    properties:
+      enabled:
+        type: boolean
+      kind:
+        type: string
+      name:
+        type: string
+      targets:
+        items:
+          type: string
+        type: array
+      weekly_limit_usd:
+        type: number
     type: object
   internal_api_handlers.OrganizationUpdateRequest:
     properties:
@@ -3525,6 +3589,216 @@ paths:
       summary: Update or remove an organization member
       tags:
       - memberships
+  /admin/organizations/{id}/model-grants:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: Organization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Assignment; POST
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationGrantRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+            type: array
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List or assign organization models to users
+      tags:
+      - organization-models
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Organization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Assignment; POST
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationGrantRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+            type: array
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List or assign organization models to users
+      tags:
+      - organization-models
+  /admin/organizations/{id}/models:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: Organization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Alias or group; POST
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+            type: array
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List or publish organization models
+      tags:
+      - organization-models
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Organization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Alias or group; POST
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationModelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+            type: array
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List or publish organization models
+      tags:
+      - organization-models
   /admin/prices:
     get:
       description: Returns manually configured model prices.
@@ -4307,7 +4581,7 @@ paths:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get authoritative weekly workload usage
+      summary: Get weekly user-scoped usage
       tags:
       - usage
   /admin/users:
@@ -4636,6 +4910,10 @@ paths:
         model policy, quota, cache, routing, and usage accounting, then returns a
         provider response or stream.
       parameters:
+      - description: Agent correlation under authenticated user; never grants permissions
+        in: header
+        name: X-GoRouter-Agent-Id
+        type: string
       - description: Application conversation/session ID; opaque ID, maximum 128 bytes
         in: header
         name: X-GoRouter-Conversation-Id
@@ -4714,6 +4992,10 @@ paths:
       description: Accepts an Anthropic Messages request and translates it through
         the gateway chat pipeline.
       parameters:
+      - description: Agent correlation under authenticated user; never grants permissions
+        in: header
+        name: X-GoRouter-Agent-Id
+        type: string
       - description: Application conversation/session ID; opaque ID, maximum 128 bytes
         in: header
         name: X-GoRouter-Conversation-Id
@@ -4817,6 +5099,10 @@ paths:
       description: Accepts an OpenAI Responses API request and translates it through
         the gateway chat pipeline.
       parameters:
+      - description: Agent correlation under authenticated user; never grants permissions
+        in: header
+        name: X-GoRouter-Agent-Id
+        type: string
       - description: Application conversation/session ID; opaque ID, maximum 128 bytes
         in: header
         name: X-GoRouter-Conversation-Id

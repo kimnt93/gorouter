@@ -131,23 +131,7 @@ func (a *Admin) usageReadVisibility(c fiber.Ctx) (entities.UsageVisibility, erro
 	if err != nil {
 		return v, err
 	}
-	// A workload-bound token is a narrower integration authority even if its
-	// owner is an org admin. Preserve this boundary on every usage endpoint.
-	if a.KeysSvc != nil && actor.KeyID != "" {
-		key, keyErr := a.KeysSvc.GetByID(c.Context(), actor.KeyID)
-		if keyErr != nil || key == nil {
-			return v, fmt.Errorf("usage key lookup: %w", errUsageUnavailable)
-		}
-		if key.Workload.Bound() {
-			binding := key.Workload
-			v.Workload = &binding
-			if key.OwnerType == entities.OwnerUser {
-				v.UserID = key.OwnerUserID
-				v.OrganizationWide = false
-				v.OrganizationID = key.ContextOrganizationID
-			}
-		}
-	}
+
 	return v, nil
 }
 

@@ -92,7 +92,7 @@ func TestTrackingAcrossInferenceProtocols(t *testing.T) {
 					body += "}"
 					request := httptest.NewRequest("POST", "/test", strings.NewReader(body))
 					request.Header.Set("Content-Type", "application/json")
-					for name, value := range map[string]string{headerConversationID: "conversation", headerRunID: "run", headerParentRunID: "parent", headerLogicalRequestID: "request-marker", headerTraceID: "trace-marker", "X-Agent-ID": "forged", "X-User-ID": "foreign"} {
+					for name, value := range map[string]string{headerAgentID: "agent", headerConversationID: "conversation", headerRunID: "run", headerParentRunID: "parent", headerLogicalRequestID: "request-marker", headerTraceID: "trace-marker", "X-Agent-ID": "forged", "X-User-ID": "foreign"} {
 						request.Header.Set(name, value)
 					}
 					res, err := app.Test(request)
@@ -120,7 +120,7 @@ func TestTrackingAcrossInferenceProtocols(t *testing.T) {
 					if mode == "failed_stream" && ev.StatusCode < 400 {
 						t.Fatal("failed stream not recorded")
 					}
-					if ev.TraceID != "trace-marker" || ev.ParentRunID != "parent" || ev.ConversationID != "conversation" || ev.RunID != "run" || ev.LogicalRequestID != "request-marker" || ev.AgentID != key.Workload.AgentID || ev.UserID != "user-1" {
+					if ev.TraceID != "trace-marker" || ev.ParentRunID != "parent" || ev.ConversationID != "conversation" || ev.RunID != "run" || ev.LogicalRequestID != "request-marker" || ev.AgentID != "agent" || ev.UserID != "user-1" {
 						t.Fatal("incorrect attribution")
 					}
 					if len(ev.ConversationEnc) != 0 {
@@ -211,8 +211,8 @@ func TestTrackingQueryAuthorizationAndMultiSelect(t *testing.T) {
 			{"multi_or", entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster}, "&agent_id=a&agent_id=b&trace_id=trace-one,trace-two&parent_run_id=parent&run_id=run&logical_request_id=req&conversation_id=session", 200, 2, false},
 			{"foreign_filter", entities.Session{PrincipalType: entities.PrincipalUser, UserID: "u1", Scopes: []string{entities.ScopeUsageRead}}, "&user_id=u2", 200, 0, false},
 			{"no_scope", entities.Session{PrincipalType: entities.PrincipalUser, UserID: "u1"}, "", 403, 0, false},
-			{"bound_all", entities.Session{KeyID: "key", PrincipalType: entities.PrincipalUser, UserID: "u1", Scopes: []string{entities.ScopeUsageRead}}, "", 200, 1, true},
-			{"bound_forged", entities.Session{KeyID: "key", PrincipalType: entities.PrincipalUser, UserID: "u1", Scopes: []string{entities.ScopeUsageRead}}, "&agent_id=b", 200, 0, true},
+			{"bound_all", entities.Session{KeyID: "key", PrincipalType: entities.PrincipalUser, UserID: "u1", Scopes: []string{entities.ScopeUsageRead}}, "", 200, 3, true},
+			{"bound_forged", entities.Session{KeyID: "key", PrincipalType: entities.PrincipalUser, UserID: "u1", Scopes: []string{entities.ScopeUsageRead}}, "&agent_id=b", 200, 1, true},
 			{"invalid_filter", entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster}, "&trace_id=a,,b", 400, 0, false},
 			{"oversized_filter", entities.Session{Role: entities.RoleMaster, PrincipalType: entities.PrincipalMaster}, "&agent_id=" + strings.Repeat("a,", 100) + "a", 400, 0, false},
 		} {
@@ -309,7 +309,7 @@ func TestWeeklyTrackingFiltersRespectBinding(t *testing.T) {
 		query  string
 		count  int64
 		status int
-	}{{"", 2, 200}, {"?trace_id=t1", 1, 200}, {"?trace_id=t1&trace_id=t2", 2, 200}, {"?trace_id=missing", 0, 200}, {"?agent_id=other&agent_id=a", 0, 403}, {"?application=foreign&application=app", 0, 403}, {"?environment=foreign", 0, 403}, {"?trace_id=a,,b", 0, 400}} {
+	}{{"", 2, 200}, {"?trace_id=t1", 1, 200}, {"?trace_id=t1&trace_id=t2", 2, 200}, {"?trace_id=missing", 0, 200}, {"?agent_id=other&agent_id=a", 2, 200}, {"?application=foreign&application=app", 2, 200}, {"?environment=foreign", 0, 200}, {"?trace_id=a,,b", 0, 400}} {
 		t.Run(tc.query, func(t *testing.T) {
 			app := fiber.New()
 			app.Get("/", func(c fiber.Ctx) error {

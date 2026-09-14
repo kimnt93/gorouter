@@ -103,6 +103,22 @@ func (s *Service) Revalidate(ctx context.Context, sess *entities.Session) (*enti
 	if !key.Enabled {
 		return nil, ErrDisabled
 	}
+
+	if key.OwnerType == entities.OwnerUser {
+		if primary, ok := s.keys.(interface {
+			PrimaryForUser(context.Context, string) (*entities.ApiKey, error)
+		}); ok {
+			selected, err := primary.PrimaryForUser(ctx, key.OwnerUserID)
+			if err != nil || selected.ID != key.ID {
+				return nil, ErrDisabled
+			}
+			current := *key
+			current.TenantID = ""
+			current.ContextOrganizationID = ""
+			current.CredentialOwnerUserID = current.OwnerUserID
+			key = &current
+		}
+	}
 	if sess.TenantID != "" && sess.TenantID != key.TenantID {
 		return nil, ErrBadToken
 	}

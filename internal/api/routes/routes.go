@@ -23,12 +23,14 @@ import (
 	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
+	"github.com/kimnt93/gorouter/pkg/orgmodel"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/tenant"
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
 type Dependencies struct {
+	OrgModels        *orgmodel.Service
 	Auth             *auth.Service
 	Tenants          *tenant.Service
 	Credentials      *credential.Service
@@ -156,13 +158,17 @@ func New(d Dependencies) *fiber.App {
 	app.Post("/v1/messages/", handlers.Require(d.Auth, "chat"), d.Gateway.Messages)
 	app.Get("/v1/models", handlers.Optional(d.Auth, entities.ScopeChat), d.Gateway.ListModels)
 
-	admin := &handlers.Admin{Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit, OAuthAvailable: d.OAuthAvailable}
+	admin := &handlers.Admin{OrgModels: d.OrgModels, Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit, OAuthAvailable: d.OAuthAvailable}
 	mgmt := app.Group("/admin", handlers.Require(d.Auth, ""))
 	mgmt.Get("/session", admin.Session)
 	mgmt.Get("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
 	mgmt.Post("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
 	mgmt.Get("/organizations", admin.Organizations)
 	mgmt.Post("/organizations", admin.Organizations)
+	mgmt.Get("/organizations/:id/models", admin.OrganizationModels)
+	mgmt.Post("/organizations/:id/models", admin.OrganizationModels)
+	mgmt.Get("/organizations/:id/model-grants", admin.OrganizationModelGrants)
+	mgmt.Post("/organizations/:id/model-grants", admin.OrganizationModelGrants)
 	mgmt.Get("/organizations/:id", admin.OrganizationByID)
 	mgmt.Patch("/organizations/:id", admin.OrganizationByID)
 	mgmt.Get("/organizations/:id/members", admin.Members)

@@ -137,3 +137,11 @@ func OrganizationSlug(name string) string {
 	}
 	return strings.Trim(value.String(), "-")
 }
+
+// OrganizationAliasID and OrganizationGroupID reserve /g/ for model groups.
+func OrganizationAliasID(organizationName, alias string) string {
+	return OrganizationSlug(organizationName) + "/" + alias
+}
+func OrganizationGroupID(organizationName, group string) string {
+	return OrganizationSlug(organizationName) + "/g/" + group
+}

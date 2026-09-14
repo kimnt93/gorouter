@@ -276,3 +276,34 @@ func (r *ApiKeyRepo) DeleteForTenant(ctx context.Context, tenant, id string) err
 	}
 	return r.Delete(ctx, id)
 }
+
+func (r *ApiKeyRepo) CreatePrimary(ctx context.Context, input entities.ApiKey) (*entities.ApiKey, error) {
+	var result *entities.ApiKey
+	err := r.s.mutate(ctx, "primary-key:"+input.OwnerUserID, func() error {
+		stored, err := list[storedAPIKey](ctx, r.s, "api_key")
+		if err != nil {
+			return err
+		}
+		for _, v := range stored {
+			if v.OwnerType == entities.OwnerUser && v.OwnerUserID == input.OwnerUserID {
+				return entities.ErrConflict
+			}
+		}
+		if err = input.ValidateOwnerShape(); err != nil {
+			return err
+		}
+		plain := GenerateSecret()
+		input.ID, input.SecretHash, input.SecretPrefix = id("key"), HashSecret(plain), plain[:11]
+		input.Enabled, input.CreatedAt, input.Plaintext = true, time.Now().UTC(), plain
+		input.TenantID = ""
+		if err = r.s.put(ctx, "api_key", input.ID, storedAPIKey{ApiKey: input, Hash: input.SecretHash}); err != nil {
+			return err
+		}
+		if err = r.s.put(ctx, "api_key_hash", input.SecretHash, input.ID); err != nil {
+			return err
+		}
+		result = &input
+		return nil
+	})
+	return result, err
+}

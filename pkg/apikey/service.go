@@ -162,6 +162,9 @@ func (s *Service) prepareOwned(in CreateInput) (*entities.ApiKey, error) {
 	if err = validateLimits(quota, in.RPM); err != nil {
 		return nil, err
 	}
+	if in.Workload != (entities.WorkloadBinding{}) {
+		return nil, errors.New("workload binding is no longer assigned to keys; send X-GoRouter-Agent-Id per request")
+	}
 	if in.Workload, err = normalizeWorkload(in.Workload); err != nil {
 		return nil, err
 	}
@@ -201,10 +204,18 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 	if err := validateLimits(quota, in.RPM); err != nil {
 		return nil, err
 	}
+	if in.Workload != (entities.WorkloadBinding{}) {
+		return nil, errors.New("workload binding is no longer assigned to keys; send X-GoRouter-Agent-Id per request")
+	}
 	if in.Workload, err = normalizeWorkload(in.Workload); err != nil {
 		return nil, err
 	}
 	if owned {
+		in.OwnerType = strings.TrimSpace(in.OwnerType)
+		if in.OwnerType == entities.OwnerUser {
+			in.ContextOrganizationID = ""
+			in.CredentialOwnerUserID = in.OwnerUserID
+		}
 		key := entities.ApiKey{Name: in.Name, Models: in.Models, Scopes: in.Scopes, QuotaUSD: quota, QuotaPeriod: period, RPM: in.RPM,
 			OwnerType: strings.TrimSpace(in.OwnerType), OwnerUserID: strings.TrimSpace(in.OwnerUserID), OwnerOrganizationID: strings.TrimSpace(in.OwnerOrganizationID), ContextOrganizationID: strings.TrimSpace(in.ContextOrganizationID), CredentialOwnerUserID: strings.TrimSpace(in.CredentialOwnerUserID), Workload: in.Workload}
 		if key.OwnerType == entities.OwnerUser && key.CredentialOwnerUserID == "" && !in.CredentialOwnerGlobal {
@@ -218,7 +229,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*entities.ApiKey,
 		if !ok {
 			return nil, errors.New("API key repository does not support principal ownership")
 		}
-		created, err := repo.CreateOwned(ctx, key)
+		var created *entities.ApiKey
+		var err error
+		if key.OwnerType == entities.OwnerUser {
+			if primary, ok := s.repo.(interface {
+				CreatePrimary(context.Context, entities.ApiKey) (*entities.ApiKey, error)
+			}); ok {
+				created, err = primary.CreatePrimary(ctx, key)
+			} else {
+				created, err = repo.CreateOwned(ctx, key)
+			}
+		} else {
+			created, err = repo.CreateOwned(ctx, key)
+		}
 		if err == nil {
 			err = s.persistPlaintext(ctx, created)
 		}
@@ -533,4 +556,28 @@ func normalizeWorkload(binding entities.WorkloadBinding) (entities.WorkloadBindi
 		return entities.WorkloadBinding{}, errors.New("workload application, workspace_id, and agent_id are required together")
 	}
 	return binding, nil
+}
+
+// PrimaryForUser selects the one canonical user key without deleting historical
+// records. Prefer an existing personal key, then stable creation order. Rotation
+// preserves its ID; legacy secondary keys cannot authenticate.
+func (s *Service) PrimaryForUser(ctx context.Context, userID string) (*entities.ApiKey, error) {
+	keys, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var primary *entities.ApiKey
+	for _, k := range keys {
+		if k.OwnerType != entities.OwnerUser || k.OwnerUserID != userID {
+			continue
+		}
+		if primary == nil || k.ContextOrganizationID == "" && primary.ContextOrganizationID != "" || (k.ContextOrganizationID == "") == (primary.ContextOrganizationID == "") && (k.CreatedAt.Before(primary.CreatedAt) || k.CreatedAt.Equal(primary.CreatedAt) && k.ID < primary.ID) {
+			value := k
+			primary = &value
+		}
+	}
+	if primary == nil {
+		return nil, entities.ErrNotFound
+	}
+	return primary, nil
 }

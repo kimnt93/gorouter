@@ -20,6 +20,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/orgmodel"
 	"github.com/kimnt93/gorouter/pkg/policy"
 	"github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/quota"
@@ -53,6 +54,7 @@ type loginResponse = LoginResponse
 type createdAPIKeyResponse = CreatedAPIKeyResponse
 
 type Admin struct {
+	OrgModels      *orgmodel.Service
 	Auth           *auth.Service
 	TenantSvc      *tenant.Service
 	CredsSvc       *credential.Service
@@ -681,6 +683,9 @@ func (a *Admin) KeysCreate(c fiber.Ctx) error {
 	}
 	in := apikey.CreateInput{TenantID: b.TenantID, Name: b.Name, Models: b.Models, Scopes: b.Scopes, QuotaUSD: b.QuotaUSD, QuotaPeriod: b.QuotaPeriod, OwnerType: b.OwnerType, OwnerUserID: b.OwnerUserID, OwnerOrganizationID: b.OwnerOrganizationID, ContextOrganizationID: b.ContextOrganizationID, CredentialOwnerUserID: credentialOwnerUserID, CredentialOwnerGlobal: globalCredentialOwner, Workload: b.Workload}
 	v, err := a.KeysSvc.Create(c.Context(), in)
+	if errors.Is(err, entities.ErrConflict) {
+		return responseapi.For(c).Conflict("user already has an API key; rotate the existing key", "user_key_exists").Send()
+	}
 	if err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
@@ -1272,8 +1277,8 @@ type WorkloadWeeklyUsageResponse struct {
 }
 
 // WorkloadWeeklyUsage returns the exact current Router quota-week aggregate for
-// one authorized workload binding or a bounded batch of agent identities.
-// @Summary Get authoritative weekly workload usage
+// the authorized user/organization scope, optionally filtered by agents.
+// @Summary Get weekly user-scoped usage
 // @Tags usage
 // @Security BearerAuth
 // @Param application query string false "Workload application namespace"
@@ -1291,67 +1296,32 @@ type WorkloadWeeklyUsageResponse struct {
 // @Router /admin/usage/workloads/weekly [get]
 func (a *Admin) WorkloadWeeklyUsage(c fiber.Ctx) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
-	sess := SessionFrom(c)
-	if sess == nil {
-		return responseapi.For(c).Unauthorized("authentication required").Send()
+	visibility, err := a.usageReadVisibility(c)
+	if err != nil {
+		return usageReadFailure(c, err)
 	}
-	if !sess.Has(entities.ScopeUsageRead) {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
-	}
-	if a.KeysSvc == nil {
-		return usageReadFailure(c, errUsageUnavailable)
-	}
-	if sess.IsMaster() {
-		return responseapi.For(c).BadRequest("master must use a workload-bound integration key").Send()
-	}
-	key, err := a.KeysSvc.GetByID(c.Context(), sess.KeyID)
-	if err != nil || key == nil {
-		return usageReadFailure(c, errUsageUnavailable)
-	}
-	if !key.Workload.Bound() {
-		return responseapi.For(c).NotFound("workload binding not found").Send()
-	}
-	query := entities.UsageQuery{}
-	if err := applyUsageFilters(c, &query); err != nil {
-		return responseapi.For(c).BadRequest(err.Error()).Send()
-	}
-	for _, pair := range []struct{ selected, bound string }{
-		{query.Application, key.Workload.Application}, {query.Environment, key.Workload.Environment},
-		{query.WorkspaceID, key.Workload.WorkspaceID}, {query.AgentID, key.Workload.AgentID},
-	} {
-		if pair.selected != "" {
-			for _, value := range strings.Split(pair.selected, ",") {
-				if value != pair.bound {
-					return responseapi.For(c).Forbidden("workload binding cannot be broadened").Send()
-				}
-			}
-		}
-	}
-	application, environment, workspaceID := key.Workload.Application, key.Workload.Environment, key.Workload.WorkspaceID
-	agentIDs := []string{key.Workload.AgentID}
-	visibility, readErr := a.usageReadVisibility(c)
-	if readErr != nil {
-		return usageReadFailure(c, readErr)
+	query := entities.UsageQuery{Visibility: visibility}
+	if err = applyUsageFilters(c, &query); err != nil {
+		return usageReadFailure(c, err)
 	}
 	now := time.Now().UTC()
-	start, end, _, windowErr := quota.Window(entities.QuotaPeriodWeek, now)
-	if windowErr != nil {
-		return responseapi.For(c).InternalError("failed to resolve quota week").Send()
+	start, end, _, err := quota.Window("week", now)
+	if err != nil {
+		return usageReadFailure(c, err)
 	}
-	query.Visibility, query.Since, query.Until = visibility, &start, &end
-	query.Workload = &key.Workload
+	query.Since, query.Until = &start, &end
 	if a.UsageSvc == nil {
 		return usageReadFailure(c, errUsageUnavailable)
 	}
-	summary, aggregateErr := a.UsageSvc.WorkloadAggregate(c.Context(), query)
-	if aggregateErr != nil {
-		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "authoritative usage is unavailable", "service_unavailable", "usage_unavailable").Send()
+	summary, err := a.UsageSvc.WorkloadAggregate(c.Context(), query)
+	if err != nil {
+		return usageReadFailure(c, errUsageUnavailable)
 	}
-	coverage := "attributed"
-	if summary.Requests == 0 {
-		coverage = "no_usage"
+	ids := []string{}
+	if query.AgentID != "" {
+		ids = strings.Split(query.AgentID, ",")
 	}
-	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(WorkloadWeeklyUsageResponse{CapabilityVersion: "gorouter-workload-usage-v1", Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs, PeriodStart: start, PeriodEnd: end, Timezone: "UTC", WeekStartsOn: strings.ToLower(start.Weekday().String()), AsOf: now, AccountingState: "settled", Completeness: "durable_records", Freshness: "settled_only", AttributionCoverage: coverage, Summary: *summary}).Send()
+	return responseapi.For(c).Response().Status(200).Data(WorkloadWeeklyUsageResponse{CapabilityVersion: "gorouter-user-usage-v1", Application: query.Application, Environment: query.Environment, WorkspaceID: query.WorkspaceID, AgentIDs: ids, PeriodStart: start, PeriodEnd: end, Timezone: "UTC", WeekStartsOn: strings.ToLower(start.Weekday().String()), AsOf: now, AccountingState: "settled", Completeness: "durable_records", Freshness: "settled_only", AttributionCoverage: "user_scoped", Summary: *summary}).Send()
 }
 
 // CacheStats returns safe prompt-cache counters.

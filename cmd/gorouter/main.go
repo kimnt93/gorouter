@@ -44,6 +44,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
+	"github.com/kimnt93/gorouter/pkg/orgmodel"
 	"github.com/kimnt93/gorouter/pkg/pricing"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/quota"
@@ -87,6 +88,7 @@ func main() {
 	var usageRepo usage.Repository
 	var identityRepo identity.Repository
 	var auditRepo entities.AuditRepository
+	var orgModelRepo orgmodel.Repository
 	var hashSecret func(string) string
 	var generateSecret func() string
 	var clickhouseStore *clickhouserepo.Store
@@ -104,6 +106,7 @@ func main() {
 		store := clickhouserepo.New(db.Conn)
 		clickhouseStore = store
 		providerQuotaStore = clickhouserepo.NewProviderQuotaRepo(store)
+		orgModelRepo = clickhouserepo.NewOrganizationModelRepo(store)
 		tenantRepo, credRepo, keyRepo = clickhouserepo.NewTenantRepo(store), clickhouserepo.NewCredentialRepo(store), clickhouserepo.NewApiKeyRepo(store)
 		modelRepo, usageRepo = clickhouserepo.NewModelRouteRepo(store), clickhouserepo.NewUsageRepo(store)
 		identityRepo, auditRepo = clickhouserepo.NewIdentityRepo(store), clickhouserepo.NewAuditRepo(store)
@@ -119,6 +122,7 @@ func main() {
 		}
 		store := localrepo.New(db.DB)
 		providerQuotaStore = localrepo.NewProviderQuotaRepo(store)
+		orgModelRepo = localrepo.NewOrganizationModelRepo(store)
 		tenantRepo, credRepo, keyRepo = localrepo.NewTenantRepo(store), localrepo.NewCredentialRepo(store), localrepo.NewApiKeyRepo(store)
 		modelRepo, usageRepo = localrepo.NewModelRouteRepo(store), localrepo.NewUsageRepo(store)
 		identityRepo, auditRepo = localrepo.NewIdentityRepo(store), localrepo.NewAuditRepo(store)
@@ -134,6 +138,7 @@ func main() {
 		}
 		store := postgres.New(db.Pool)
 		providerQuotaStore = postgres.NewProviderQuotaRepo(store)
+		orgModelRepo = postgres.NewOrganizationModelRepo(store)
 		tenantRepo, credRepo, keyRepo = postgres.NewTenantRepo(store), postgres.NewCredentialRepo(store), postgres.NewApiKeyRepo(store)
 		modelRepo, usageRepo = postgres.NewModelRouteRepo(store), postgres.NewUsageRepo(store)
 		identityRepo, auditRepo = postgres.NewIdentityRepo(store), postgres.NewAuditRepo(store)
@@ -331,15 +336,17 @@ func main() {
 		selector.SetRedis(redisClient)
 		health.SetRedis(redisClient)
 	}
+	orgModelSvc := &orgmodel.Service{Repo: orgModelRepo, Audit: auditRepo, Identity: identityRepo, Credentials: credSvc, Models: modelSvc}
 	gw := &handlers.Gateway{
-		Keys: keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
+		OrgModels: orgModelSvc,
+		Keys:      keySvc, Creds: credSvc, Models: modelSvc, Usage: usageSvc,
 		Cache: cacheSvc, OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerUpstreams,
 		Selector: selector, Health: health, Quota: quotaSvc,
 		Pricing: priceResolver, ProviderQuotas: providerQuotaSvc,
 		RouteRetries: cfg.RouteRetries, AutoMaxTries: cfg.AutoMaxTries,
 	}
 	app := routes.New(routes.Dependencies{
-		Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
+		OrgModels: orgModelSvc, Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
 		Identity: identitySvc, IdentityRepo: identityRepo, Audit: auditRepo,
 		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc, OAuthAvailable: oauthSvc.OAuthAvailable,

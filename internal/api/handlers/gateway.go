@@ -23,6 +23,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
+	"github.com/kimnt93/gorouter/pkg/orgmodel"
 	"github.com/kimnt93/gorouter/pkg/policy"
 	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/quota"
@@ -30,6 +31,7 @@ import (
 )
 
 type Gateway struct {
+	OrgModels      *orgmodel.Service
 	Keys           *apikey.Service
 	Creds          *credential.Service
 	Models         *modelroute.Service
@@ -71,9 +73,11 @@ type GatewayAccessContext struct {
 	Master      bool
 	Workload    entities.WorkloadBinding
 	Correlation UsageCorrelation
+	ModelBudget *entities.ModelBudgetReservation
 }
 
 type UsageCorrelation struct {
+	AgentID          string
 	ConversationID   string
 	RunID            string
 	ParentRunID      string
@@ -83,6 +87,7 @@ type UsageCorrelation struct {
 
 const (
 	headerConversationID   = "X-GoRouter-Conversation-Id"
+	headerAgentID          = "X-GoRouter-Agent-Id"
 	headerTraceID          = "X-GoRouter-Trace-Id"
 	headerRunID            = "X-GoRouter-Run-Id"
 	headerParentRunID      = "X-GoRouter-Parent-Run-Id"
@@ -93,11 +98,12 @@ func correlationFromRequest(c fiber.Ctx) (UsageCorrelation, error) {
 	correlation := UsageCorrelation{
 		ConversationID:   strings.TrimSpace(strings.Clone(c.Get(headerConversationID))),
 		RunID:            strings.TrimSpace(strings.Clone(c.Get(headerRunID))),
+		AgentID:          strings.TrimSpace(strings.Clone(c.Get(headerAgentID))),
 		TraceID:          strings.TrimSpace(strings.Clone(c.Get(headerTraceID))),
 		ParentRunID:      strings.TrimSpace(strings.Clone(c.Get(headerParentRunID))),
 		LogicalRequestID: strings.TrimSpace(strings.Clone(c.Get(headerLogicalRequestID))),
 	}
-	for _, value := range []string{correlation.ConversationID, correlation.RunID, correlation.ParentRunID, correlation.LogicalRequestID, correlation.TraceID} {
+	for _, value := range []string{correlation.ConversationID, correlation.RunID, correlation.ParentRunID, correlation.LogicalRequestID, correlation.TraceID, correlation.AgentID} {
 		if len(value) > 128 {
 			return UsageCorrelation{}, errors.New("correlation fields must not exceed 128 bytes")
 		}
@@ -141,6 +147,7 @@ type PriceCatalog interface {
 // @Security BearerAuth
 // @Accept json
 // @Produce json
+// @Param X-GoRouter-Agent-Id header string false "Agent correlation under authenticated user; never grants permissions"
 // @Param X-GoRouter-Conversation-Id header string false "Application conversation/session ID; opaque ID, maximum 128 bytes"
 // @Param X-GoRouter-Run-Id header string false "Run correlation ID; opaque ID, maximum 128 bytes"
 // @Param X-GoRouter-Parent-Run-Id header string false "Parent run correlation ID; opaque ID, maximum 128 bytes"
@@ -173,14 +180,35 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	c.Set(headerLogicalRequestID, correlation.LogicalRequestID)
 	if key.StoredKey != nil {
 		key.Workload = key.StoredKey.Workload
+
 	}
+	key.Workload.AgentID = correlation.AgentID
 	autoRequested := req.Model == "auto" || strings.HasSuffix(req.Model, "/auto")
-	if !key.Master && !contains(key.Models, req.Model) {
+	userPrimary := g.OrgModels != nil && !key.Master && key.Actor.UserID != ""
+	if !userPrimary && !key.Master && !contains(key.Models, req.Model) {
 		return responseapi.For(c).Forbidden("model is not allowed for this API key").Send()
 	}
 	models, err := g.Models.List(c.Context())
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load model").Send()
+	}
+	grants := map[string]orgmodel.Resolution{}
+	if userPrimary {
+		models, grants, err = g.userModels(c.Context(), key, models)
+		if err != nil {
+			return orgModelError(c, err)
+		}
+		// Personal calls never inherit an organization from the user's membership.
+		copyKey := *key.ApiKey
+		copyKey.TenantID = ""
+
+		copyKey.CredentialOwnerUserID = key.Actor.UserID
+		key.ApiKey = &copyKey
+		key.Actor.OrganizationID = ""
+		if grant, ok := grants[req.Model]; ok {
+			key.TenantID = grant.OrganizationID
+			key.Actor.OrganizationID = grant.OrganizationID
+		}
 	}
 	var model *entities.ModelDef
 	var autoModels []*entities.ModelDef
@@ -188,7 +216,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		eligible := autoModelIndexes(req.Model, models)
 		filtered := eligible[:0]
 		for _, index := range eligible {
-			if models[index].Enabled {
+			if _, isGrant := grants[models[index].Name]; models[index].Enabled && !isGrant {
 				filtered = append(filtered, index)
 			}
 		}
@@ -233,7 +261,8 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			return responseapi.For(c).Error(fiber.StatusTooManyRequests, "requests-per-minute limit exceeded", "rate_limit_error", "rate_limit_exceeded").Send()
 		}
 	}
-	deterministic := llm.IsDeterministic(req) && !autoRequested
+	_, organizationRequest := grants[req.Model]
+	deterministic := llm.IsDeterministic(req) && !autoRequested && !organizationRequest
 	cacheEnabled := g.cacheEnabled()
 	if cacheEnabled && deterministic {
 		if cached, ok := g.Cache.Lookup(key.ID, key.TenantID, model.Name, raw); ok {
@@ -281,6 +310,18 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		if g.Pricing != nil {
 			estimate = g.Pricing.Estimates(model.Name, model.UpstreamModel, req.EstimatePromptTokens(), req.EstimateOutputTokens()).WithoutCache
 		}
+		if grant, ok := grants[req.Model]; ok {
+			for _, r := range grant.Routes {
+				p, _, err := g.resolvePrice(c.Context(), &r.Model)
+				if err != nil {
+					return orgModelError(c, err)
+				}
+				cost := entities.CalculateCost(&p, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
+				if cost.USD > estimate.USD {
+					estimate = cost
+				}
+			}
+		}
 		spent, spendErr := g.Usage.SpendForKeySince(c.Context(), key.ID, windowStart)
 		if spendErr != nil {
 			return responseapi.For(c).InternalError("failed to load quota usage").Send()
@@ -310,7 +351,19 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		routes []entities.RouteCandidate
 	}
 	routeGroups := make([]modelRoutes, 0, 1)
-	if autoRequested {
+	if userPrimary {
+		chosen := []*entities.ModelDef{model}
+		if autoRequested {
+			chosen = autoModels
+		}
+		for _, m := range chosen {
+			routes := []entities.RouteCandidate{}
+			for _, r := range m.Routes {
+				routes = append(routes, entities.RouteCandidate{CredentialID: r.CredentialID, UpstreamModel: r.UpstreamModel, Priority: r.Priority, Weight: r.Weight})
+			}
+			routeGroups = append(routeGroups, modelRoutes{m, routes})
+		}
+	} else if autoRequested {
 		for _, candidateModel := range autoModels {
 			routes, routeErr := g.Creds.Routes(c.Context(), candidateModel.Name)
 			if routeErr == nil && len(routes) > 0 {
@@ -336,14 +389,15 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	credentialIDs := make(map[string]string, totalRoutes)
 	upstreamModels := make(map[string]string, totalRoutes)
 	candidateModels := make(map[string]*entities.ModelDef, totalRoutes)
+	candidateOrgRoutes := map[string]*orgmodel.Route{}
 	fillFirstProvider := ""
 	fillFirst := true
 	for _, group := range routeGroups {
-		for _, route := range group.routes {
-			if key.CredentialOwnerUserID != "" && route.OwnerUserID == "" {
+		for routeIndex, route := range group.routes {
+			if !userPrimary && key.CredentialOwnerUserID != "" && route.OwnerUserID == "" {
 				continue
 			}
-			if route.OwnerUserID != "" && !key.Master && route.OwnerUserID != providerOwnerUserID(key) {
+			if !userPrimary && route.OwnerUserID != "" && !key.Master && route.OwnerUserID != providerOwnerUserID(key) {
 				continue
 			}
 			if !policy.CredentialVisible(key.Master, key.TenantID, route.OwnerTenant) {
@@ -355,6 +409,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 				continue
 			}
 			candidateID := group.model.Name + "\x00" + route.CredentialID + "\x00" + route.UpstreamModel
+			if res, ok := grants[group.model.Name]; ok {
+				candidateID += fmt.Sprintf("\x00%d", routeIndex)
+				candidateOrgRoutes[candidateID] = &res.Routes[routeIndex]
+			}
 			runtimes[candidateID] = runtime
 			credentialIDs[candidateID] = route.CredentialID
 			upstreamModels[candidateID] = route.UpstreamModel
@@ -369,6 +427,10 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			}
 			candidates = append(candidates, chat.Candidate{ID: candidateID, Priority: route.Priority, Weight: route.Weight})
 		}
+	}
+	if organizationRequest {
+		fillFirst = false
+		fillFirstProvider = ""
 	}
 	strategy := model.Strategy
 	if fillFirst && fillFirstProvider != "" {
@@ -477,9 +539,32 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			exhausted       bool
 			accountLocal    bool
 			transientStatus int
+			budgetBlocked   bool
 		)
 		attempts := g.routeAttempts(runtime.Provider)
 		for attempt := 0; attempt < attempts; attempt++ {
+			if grant, ok := grants[req.Model]; ok {
+				chosen := candidateOrgRoutes[candidate.ID]
+				if chosen == nil {
+					return orgModelError(c, orgmodel.ErrForbidden)
+				}
+				sourcePrice, _, priceErr := g.resolvePrice(c.Context(), &chosen.Model)
+				if priceErr != nil {
+					return orgModelError(c, priceErr)
+				}
+				estimate := entities.CalculateCost(&sourcePrice, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
+				hold, reserveErr := g.OrgModels.Reserve(c.Context(), key.Actor.UserID, grant, *chosen, estimate.USD, started)
+				if errors.Is(reserveErr, orgmodel.ErrBudget) {
+					lastStatus = 429
+					budgetBlocked = true
+					break
+				}
+				if reserveErr != nil {
+					return orgModelError(c, reserveErr)
+				}
+				key.ModelBudget = hold
+			}
+
 			sent, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
 			if rerr != nil {
 				result, transportErr = nil, true
@@ -489,6 +574,12 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 				continue
 			}
 			transportErr = false
+			if sent.StatusCode >= 400 && sent.StatusCode < 500 {
+				if err := g.settleOrganization(c.Context(), key, 0); err != nil {
+					drainAndClose(sent.Body)
+					return orgModelError(c, err)
+				}
+			}
 			if sent.StatusCode == fiber.StatusTooManyRequests || sent.StatusCode == fiber.StatusPaymentRequired {
 				lastStatus = sent.StatusCode
 				wait := retryAfter(sent.Header)
@@ -565,7 +656,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 			// credential is unhealthy. Do not ban the account after three busy
 			// responses; otherwise a burst of 502s makes the whole ring disappear
 			// for a minute and later requests stop before trying the ring again.
-			if !accountLocal && (!exhausted || transportErr) && !transientQuotaProviderFailure(runtime.Provider, transientStatus) {
+			if !budgetBlocked && !accountLocal && (!exhausted || transportErr) && !transientQuotaProviderFailure(runtime.Provider, transientStatus) {
 				g.Health.Report(credentialID, false)
 			}
 			continue
@@ -582,6 +673,14 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		}
 		routedModel.Metadata.Provider = runtime.Provider
 		selectedPrice := pricePtr
+		if chosen := candidateOrgRoutes[candidate.ID]; chosen != nil {
+			p, _, err := g.resolvePrice(c.Context(), &chosen.Model)
+			if err != nil {
+				return orgModelError(c, err)
+			}
+			selectedPrice = &p
+		}
+
 		if autoRequested {
 			if resolved, ok, e := g.resolvePrice(c.Context(), selectedModel); e == nil && ok {
 				selectedPrice = &resolved
@@ -624,6 +723,9 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation)
 	}
 	c.Set("X-Cache", "bypass")
+	if organizationRequest && lastStatus == 429 {
+		return orgModelError(c, orgmodel.ErrBudget)
+	}
 	if onlyQuotaFailures && quotaFailures > 0 {
 		g.recordError(key, model, lastCredential, fiber.StatusTooManyRequests, started, "provider account quota exhausted")
 		return responseapi.For(c).Error(fiber.StatusTooManyRequests, "all provider accounts are out of quota", "rate_limit_error", "provider_quota_exhausted").Send()
@@ -798,6 +900,13 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load models").Send()
 	}
+	userPrimary := g.OrgModels != nil && !key.Master && key.Actor.UserID != ""
+	if userPrimary {
+		models, _, err = g.userModels(c.Context(), key, models)
+		if err != nil {
+			return orgModelError(c, err)
+		}
+	}
 	credentials, err := g.Creds.List(c.Context())
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load models").Send()
@@ -814,7 +923,7 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	}
 	out := llm.ModelList{Object: "list", Data: []llm.ModelInfo{}, Models: []llm.CodexModelInfo{}}
 	for _, model := range models {
-		if !model.Enabled || !key.Master && !contains(key.Models, "auto") && !contains(key.Models, model.Name) || !hasCallableRoute(model.Routes, callableCredentials) {
+		if !model.Enabled || !userPrimary && (!key.Master && !contains(key.Models, "auto") && !contains(key.Models, model.Name) || !hasCallableRoute(model.Routes, callableCredentials)) {
 			continue
 		}
 		var price *entities.Price
@@ -1052,6 +1161,10 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 		usage.CompletionTokens = estimateResponseTokens(body)
 	}
 	cost := entities.CalculateCost(price, usage.TokenUsage())
+	if err := g.settleOrganization(c.Context(), key, cost.USD); err != nil {
+		g.recordCostConversation(key, model, runtime.ID, usage, false, 503, started, cost, raw, body)
+		return orgModelError(c, err)
+	}
 	if err := g.settle(c.Context(), reservation, cost.USD); err != nil {
 		g.recordCostConversation(key, model, runtime.ID, usage, false, fiber.StatusServiceUnavailable, started, cost, raw, body)
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "quota settlement is unavailable", "service_unavailable", "redis_unavailable").Send()
@@ -1063,7 +1176,9 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 		cacheStatus = "miss"
 	}
 	c.Set("X-Cache", cacheStatus)
-	c.Set("X-Upstream-Credential", runtime.ID)
+	if key.Actor.OrganizationID == "" {
+		c.Set("X-Upstream-Credential", runtime.ID)
+	}
 	c.Set("Content-Type", "application/json")
 	return c.Send(body)
 }
@@ -1072,7 +1187,9 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
-	c.Set("X-Upstream-Credential", runtime.ID)
+	if key.Actor.OrganizationID == "" {
+		c.Set("X-Upstream-Credential", runtime.ID)
+	}
 	if deterministic && g.cacheEnabled() {
 		c.Set("X-Cache", "miss")
 	} else {
@@ -1206,6 +1323,11 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 		}
 		cost := entities.CalculateCost(price, usage.TokenUsage())
 		if streamStatus == fiber.StatusOK {
+			if err := g.settleOrganization(context.Background(), key, cost.USD); err != nil {
+				streamStatus = 503
+			}
+		}
+		if streamStatus == fiber.StatusOK {
 			if err := g.settle(context.Background(), reservation, cost.USD); err != nil {
 				streamStatus = fiber.StatusServiceUnavailable
 			}
@@ -1291,6 +1413,9 @@ func (g *Gateway) recordConversation(key *GatewayAccessContext, model *entities.
 }
 
 func (g *Gateway) resolvePrice(ctx context.Context, model *entities.ModelDef) (entities.Price, bool, error) {
+	if model.Price != nil {
+		return *model.Price, true, nil
+	}
 	if g.Pricing != nil {
 		price, ok := g.Pricing.Resolve(model.Name, model.UpstreamModel)
 		return price, ok, nil

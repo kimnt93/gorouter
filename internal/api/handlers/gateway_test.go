@@ -1410,6 +1410,7 @@ func TestGatewayCorrelationUsesAuthenticatedWorkloadBinding(t *testing.T) {
 	})
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
 	request.Header.Set("Content-Type", fiber.MIMEApplicationJSON)
+	request.Header.Set(headerAgentID, "agent-1")
 	request.Header.Set(headerConversationID, "conversation-1")
 	request.Header.Set(headerRunID, "run-1")
 	request.Header.Set(headerLogicalRequestID, "logical-1")

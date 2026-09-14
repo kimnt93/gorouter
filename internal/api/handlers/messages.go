@@ -86,6 +86,7 @@ type MessagesUsage struct {
 // @Security BearerAuth
 // @Accept json
 // @Produce json
+// @Param X-GoRouter-Agent-Id header string false "Agent correlation under authenticated user; never grants permissions"
 // @Param X-GoRouter-Conversation-Id header string false "Application conversation/session ID; opaque ID, maximum 128 bytes"
 // @Param X-GoRouter-Run-Id header string false "Run correlation ID; opaque ID, maximum 128 bytes"
 // @Param X-GoRouter-Parent-Run-Id header string false "Parent run correlation ID; opaque ID, maximum 128 bytes"
