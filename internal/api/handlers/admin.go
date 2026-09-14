@@ -876,6 +876,25 @@ func (a *Admin) ModelsList(c fiber.Ctx) error {
 	if sess == nil {
 		return responseapi.For(c).Response().Status(fiber.StatusOK).Data([]entities.ModelDef{}).Send()
 	}
+	if a.OrgModels != nil && sess.PrincipalType == entities.PrincipalUser {
+		gateway := &Gateway{OrgModels: a.OrgModels, Creds: a.CredsSvc}
+		access := &GatewayAccessContext{Actor: entities.UsageActor{UserID: sess.UserID}}
+		visible, aliases, err := gateway.userModels(c.Context(), access, v)
+		if err != nil {
+			return orgModelError(c, err)
+		}
+		visible = listedUserModels(visible, aliases)
+		for i := range visible {
+			if alias, ok := aliases[visible[i].Name]; ok && alias.Granted {
+				visible[i].Routes = []entities.ModelRoute{}
+				visible[i].Metadata = cloneModelMetadata(visible[i].Metadata)
+				if visible[i].Metadata != nil {
+					visible[i].Metadata.SourceCredentialID = ""
+				}
+			}
+		}
+		return responseapi.For(c).Response().Status(200).Data(visible).Send()
+	}
 	credentials, err := a.CredsSvc.List(c.Context())
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to filter model routes").Send()

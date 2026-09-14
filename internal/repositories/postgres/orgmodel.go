@@ -27,7 +27,7 @@ func (r *OrganizationModelRepo) Grants(ctx context.Context, org, user string) ([
 	return out, err
 }
 func orgRecords[T any](ctx context.Context, db *DB, org, kind string) ([]T, error) {
-	rows, err := db.Pool.Query(ctx, `SELECT payload FROM organization_model_records WHERE organization_id=$1 AND kind=$2 ORDER BY id`, org, kind)
+	rows, err := db.Pool.Query(ctx, `SELECT payload FROM organization_model_records WHERE ($1='' OR organization_id=$1) AND kind=$2 ORDER BY id`, org, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -55,8 +55,56 @@ func (r *OrganizationModelRepo) put(ctx context.Context, org, kind, id string, v
 	return err
 }
 func (r *OrganizationModelRepo) Put(ctx context.Context, v entities.OrganizationModel) error {
-	return r.put(ctx, v.OrganizationID, "model", v.Name, v)
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('model-alias-namespace',0))`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT payload FROM organization_model_records WHERE kind='model'`)
+	if err != nil {
+		return err
+	}
+	prior := []entities.OrganizationModel{}
+	for rows.Next() {
+		var raw []byte
+		var o entities.OrganizationModel
+		if err = rows.Scan(&raw); err != nil {
+			rows.Close()
+			return err
+		}
+		if err = json.Unmarshal(raw, &o); err != nil {
+			rows.Close()
+			return err
+		}
+		prior = append(prior, o)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if err = orgmodel.CheckAliasWrite(v, prior); err != nil {
+		return err
+	}
+	for _, o := range prior {
+		if o.Name == v.Name {
+			v.CreatedAt = o.CreatedAt
+		}
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO organization_model_records(organization_id,kind,id,payload) VALUES($1,'model',$2,$3) ON CONFLICT(organization_id,kind,id) DO UPDATE SET payload=EXCLUDED.payload`, v.OrganizationID, v.Name, raw)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
+
 func (r *OrganizationModelRepo) PutGrant(ctx context.Context, v entities.OrganizationModelGrant) error {
 	return r.put(ctx, v.OrganizationID, "grant", v.UserID+":"+v.Model, v)
 }

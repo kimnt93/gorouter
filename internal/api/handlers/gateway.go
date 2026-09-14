@@ -68,12 +68,13 @@ type ProviderQuotaRouter interface {
 // request policy, cache isolation, credential visibility, and actor snapshot.
 type GatewayAccessContext struct {
 	*entities.ApiKey
-	StoredKey   *entities.ApiKey
-	Actor       entities.UsageActor
-	Master      bool
-	Workload    entities.WorkloadBinding
-	Correlation UsageCorrelation
-	ModelBudget *entities.ModelBudgetReservation
+	StoredKey     *entities.ApiKey
+	Actor         entities.UsageActor
+	Master        bool
+	Workload      entities.WorkloadBinding
+	Correlation   UsageCorrelation
+	ModelBudget   *entities.ModelBudgetReservation
+	AssignedModel bool
 }
 
 type UsageCorrelation struct {
@@ -206,8 +207,11 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		key.ApiKey = &copyKey
 		key.Actor.OrganizationID = ""
 		if grant, ok := grants[req.Model]; ok {
-			key.TenantID = grant.OrganizationID
-			key.Actor.OrganizationID = grant.OrganizationID
+			key.AssignedModel = grant.Granted
+			if strings.HasPrefix(grant.Name, "org/") {
+				key.TenantID = grant.OrganizationID
+				key.Actor.OrganizationID = grant.OrganizationID
+			}
 		}
 	}
 	var model *entities.ModelDef
@@ -902,7 +906,9 @@ func (g *Gateway) ListModels(c fiber.Ctx) error {
 	}
 	userPrimary := g.OrgModels != nil && !key.Master && key.Actor.UserID != ""
 	if userPrimary {
-		models, _, err = g.userModels(c.Context(), key, models)
+		var aliases map[string]orgmodel.Resolution
+		models, aliases, err = g.userModels(c.Context(), key, models)
+		models = listedUserModels(models, aliases)
 		if err != nil {
 			return orgModelError(c, err)
 		}
@@ -1176,7 +1182,7 @@ func (g *Gateway) nonStream(c fiber.Ctx, key *GatewayAccessContext, model *entit
 		cacheStatus = "miss"
 	}
 	c.Set("X-Cache", cacheStatus)
-	if key.Actor.OrganizationID == "" {
+	if key.Actor.OrganizationID == "" && !key.AssignedModel {
 		c.Set("X-Upstream-Credential", runtime.ID)
 	}
 	c.Set("Content-Type", "application/json")
@@ -1187,7 +1193,7 @@ func (g *Gateway) stream(c fiber.Ctx, key *GatewayAccessContext, model *entities
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
-	if key.Actor.OrganizationID == "" {
+	if key.Actor.OrganizationID == "" && !key.AssignedModel {
 		c.Set("X-Upstream-Credential", runtime.ID)
 	}
 	if deterministic && g.cacheEnabled() {

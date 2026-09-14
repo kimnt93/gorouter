@@ -38,7 +38,7 @@ func (s *Store) budgetMutation(ctx context.Context, org string, fn func() error)
 	}
 	err := fn()
 	// Keep the fence after any uncertain storage error. Quota denial made no write.
-	if err != nil && !errors.Is(err, orgmodel.ErrBudget) && !errors.Is(err, orgmodel.ErrInvalid) {
+	if err != nil && !errors.Is(err, orgmodel.ErrBudget) && !errors.Is(err, orgmodel.ErrInvalid) && !errors.Is(err, entities.ErrConflict) {
 		return err
 	}
 	releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)

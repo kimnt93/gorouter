@@ -73,7 +73,7 @@ func TestUserKeyPersonalAndOrganizationGroups(t *testing.T) {
 				svc := &orgmodel.Service{Repo: local.NewOrganizationModelRepo(store), Identity: idRepo, Models: models, Credentials: creds}
 				admin := entities.Principal{Type: entities.PrincipalUser, UserID: "admin", Scopes: []string{entities.ScopeModelsManage}}
 				limit := .000012
-				alias, err := svc.Publish(ctx, admin, "org", "lite", "alias", []string{"cx/org-source"}, &limit, true)
+				alias, err := svc.Publish(ctx, admin, "org", "lite", "alias", []string{"cx/org-source"}, nil, true)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -81,7 +81,7 @@ func TestUserKeyPersonalAndOrganizationGroups(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err = svc.Assign(ctx, admin, "org", group.Name, "user", nil, true); err != nil {
+				if _, err = svc.AssignPackage(ctx, admin, "org", group.Name, "user", &limit, true); err != nil {
 					t.Fatal(err)
 				}
 				keys := apikey.NewService(keyRepo, local.HashSecret, local.GenerateSecret)
@@ -111,6 +111,11 @@ func TestUserKeyPersonalAndOrganizationGroups(t *testing.T) {
 						return gw.Chat(c)
 					}
 				})
+				personalActor := entities.Principal{Type: entities.PrincipalUser, UserID: "user", Scopes: []string{entities.ScopeModelsManage, entities.ScopeChat}}
+				personalAlias, err := svc.PublishPersonal(ctx, personalActor, "my-model", "cx/personal", true)
+				if err != nil {
+					t.Fatal(err)
+				}
 				res, err := app.Test(httptest.NewRequest("GET", "/models", nil))
 				if err != nil {
 					t.Fatal(err)
@@ -122,7 +127,7 @@ func TestUserKeyPersonalAndOrganizationGroups(t *testing.T) {
 				for _, m := range catalog.Data {
 					ids[m.ID] = true
 				}
-				if !ids["cx/personal"] || !ids[group.Name] || ids["cx/foreign"] || ids[alias.Name] || ids["cx/org-source"] {
+				if !ids[personalAlias.Name] || ids["cx/personal"] || !ids[alias.Name] || ids["cx/foreign"] || ids[group.Name] || ids["cx/org-source"] {
 					t.Fatalf("catalog=%v", ids)
 				}
 				send := func(model, agent string) int {
@@ -146,16 +151,16 @@ func TestUserKeyPersonalAndOrganizationGroups(t *testing.T) {
 					res.Body.Close()
 					return res.StatusCode
 				}
-				if status := send(group.Name, "agent-a"); status != 200 {
+				if status := send(alias.Name, "agent-a"); status != 200 {
 					t.Fatalf("first group=%d", status)
 				}
-				if status := send(group.Name, "agent-b"); status != 429 {
+				if status := send(alias.Name, "agent-b"); status != 429 {
 					t.Fatalf("agent switched to bypass budget: %d", status)
 				}
 				if status := send("cx/personal", "agent-b"); status != 200 {
 					t.Fatalf("personal=%d", status)
 				}
-				if status := send(alias.Name, "agent-a"); status != 404 {
+				if status := send(group.Name, "agent-a"); status != 404 {
 					t.Fatalf("unassigned alias=%d", status)
 				}
 				page, err := ledger.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalUser, UserID: "user"}})
@@ -169,12 +174,54 @@ func TestUserKeyPersonalAndOrganizationGroups(t *testing.T) {
 					if e.Model == "cx/personal" && e.OrganizationID != "" {
 						t.Fatal("personal leaked into org")
 					}
-					if e.Model == group.Name && (e.OrganizationID != "org" || e.UserID != "user" || e.AgentID != "agent-a") {
+					if e.Model == alias.Name && (e.OrganizationID != "org" || e.UserID != "user" || e.AgentID != "agent-a") {
 						t.Fatal("org attribution invalid")
 					}
 				}
+				if status := send(personalAlias.Name, "agent-personal"); status != 200 {
+					t.Fatalf("personal alias=%d", status)
+				}
+				zero := 0.0
+				if _, err = svc.Assign(ctx, admin, "org", alias.Name, "user", &zero, true); err != nil {
+					t.Fatal(err)
+				}
+				if status := send(alias.Name, "agent-unlimited"); status != 200 {
+					t.Fatalf("zero must mean unlimited=%d", status)
+				}
+				selfLimit := .000001
+				if err = svc.SetSelfLimit(ctx, personalActor, alias.Name, &selfLimit); err != nil {
+					t.Fatal(err)
+				}
+				if status := send(alias.Name, "agent-self"); status != 429 {
+					t.Fatalf("self limit=%d", status)
+				}
+				if err = svc.SetSelfLimit(ctx, personalActor, alias.Name, &zero); err != nil {
+					t.Fatal(err)
+				}
+				// Setting self limit to unlimited must not remove the org's lower cap.
+				if _, err = svc.Assign(ctx, admin, "org", alias.Name, "user", &limit, true); err != nil {
+					t.Fatal(err)
+				}
+				if status := send(alias.Name, "agent-self-zero"); status != 429 {
+					t.Fatalf("org cap bypassed=%d", status)
+				}
+				// A personal owner can grant an alias; recipient cannot call its raw source.
+				if _, err = svc.AssignPersonal(ctx, personalActor, personalAlias.Name, "foreign", &zero, true); err != nil {
+					t.Fatal(err)
+				}
+				shared, err := svc.Available(ctx, "foreign")
+				if err != nil || len(shared) != 1 || shared[0].Name != personalAlias.Name || !shared[0].Granted {
+					t.Fatalf("personal share=%+v err=%v", shared, err)
+				}
+				foreign := entities.Principal{Type: entities.PrincipalUser, UserID: "foreign", Scopes: []string{entities.ScopeModelsManage, entities.ScopeChat}}
+				if _, err = svc.PublishPersonal(ctx, foreign, "stolen", "cx/personal", true); err == nil {
+					t.Fatal("recipient republished private source")
+				}
+				if _, err = svc.AssignPersonal(ctx, foreign, personalAlias.Name, "admin", &zero, true); err == nil {
+					t.Fatal("recipient regranted private alias")
+				}
 				// Revocation takes effect without rotating or creating a new user key.
-				if _, err = svc.Assign(ctx, admin, "org", group.Name, "user", nil, false); err != nil {
+				if _, err = svc.Assign(ctx, admin, "org", alias.Name, "user", nil, false); err != nil {
 					t.Fatal(err)
 				}
 				if status := send(group.Name, "agent-a"); status != 404 {

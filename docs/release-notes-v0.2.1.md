@@ -1,30 +1,24 @@
 # GoRouter v0.2.1 — User access, organization models and tracking
 
-## User-first access and organization limits
+## User-first aliases and assignment limits (final contract)
 
-- One canonical key per user; new duplicate-key creation returns 409. Rotation
-  retains user ownership. Legacy secondary keys stop authenticating without
-  deleting historical rows (see upgrade guide).
-- `X-GoRouter-Agent-Id` tracks agents beneath the authenticated user; no agent
-  binding or separate agent key is required.
-- Organization aliases rename existing sources, for example `xno/xno-lite`.
-- Organization `/g/` groups provide ordered fallback packages such as
-  `xno/g/default`; grant access to existing users without changing their key.
-- Optional shared weekly USD limits on groups/aliases and per-user assignment
-  limits. Applicable limits are checked together; agent changes do not reset them.
-- Durable same-backend budget reservations with serialized multi-node admission.
-  Unknown failed work retains its estimate; budget exhaustion returns 429,
-  storage/coordination failures return 503. These are admission limits, not an
-  exact invoice/spending ceiling.
-- Dashboard: Organizations → Models and limits, with editable model/group and
-  per-user limits, assignment and revocation.
-- Existing weekly usage path is now user-scoped (`gorouter-user-usage-v1`), with
-  optional agent filters.
+- One canonical key per user; agent IDs are request correlation, not principals.
+- One-to-one unique aliases: `org/<org>/<alias>` and `<username>/<alias>`.
+- A personal alias replaces its source in listings; both remain callable by the
+  owner. Recipients can call only their assigned public aliases.
+- Groups are bulk-assignment packages only: no group entries in `/v1/models`,
+  no group inference route and no shared group spending limit.
+- Per-recipient, per-model weekly limits: **0 = unlimited (default)**.
+  Different users can have different limits on the same model.
+- Recipients may add a separate personal cap, never override their assigner's cap.
+- Org admins and personal model owners can grant/revoke access without creating
+  additional user keys. Dashboard includes organization assignment packages,
+  personal aliases/sharing and self-limit controls.
+- Serialized alias/source uniqueness and durable assignment budget reservations
+  across PostgreSQL, ClickHouse/Redis and local SQLite.
 
-**Upgrade:** review users with multiple existing keys, migrate them to the
-canonical key, and apply PostgreSQL migration 0030 along with 0028/0029.
-ClickHouse/SQLite reuse existing config stores. No provider credentials or
-historical usage are deleted. See [user model access](user-model-access.md).
+See [user model access and REST examples](user-model-access.md). The earlier
+callable-group draft was replaced before deployment to the target server.
 
 ## Added
 
@@ -102,4 +96,17 @@ application/database containers and their volumes were not modified.
   and Redis outage fail-closed behavior tested.
 - Desktop Chrome 1440×900: organization models/limits modal, displayed shared and
   per-user limits, revocation request, no horizontal overflow or JS errors.
-- Frontend: 16 files / 51 tests. Go/vet/race and Swagger checks run for this update.
+- Frontend: 17 files / 52 tests. Go/vet/race and Swagger checks run for this update.
+
+### Final one-to-one alias clarification — verification
+
+- `/v1/models` lists assigned aliases and unrenamed personal sources, never
+  package names. Own raw and aliased names both work; grantees cannot use raw
+  private sources or republish received aliases.
+- All three inference protocols tested streaming/non-streaming with assignment
+  limits, zero/unlimited, self caps, revocation, and agent-ID changes.
+- Shared backend tests cover concurrent alias/source uniqueness, globally
+  conflicting public names, separate user budgets, and adding a limit after
+  unlimited spend. PostgreSQL, ClickHouse and SQLite suites passed.
+- Final frontend: **17 test files, 52 tests**; regenerated SPA and Swagger.
+- Desktop browser smoke verified the assignment-package display and revoke API.

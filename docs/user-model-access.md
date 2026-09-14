@@ -1,26 +1,51 @@
-# v0.2.1: user-first access, aliases, groups and organization limits
+# v0.2.1 — User keys, one-to-one aliases and assignment limits
 
-The **user** is the top-level authenticated identity. A user has one canonical
-API key, personal provider connections, and memberships in zero or more
-organizations. An organization grants access to model aliases/groups without
-creating another user/agent key. This supersedes the earlier workload-bound-key
-proposal in v0.2.0 and the draft v0.2.1 tracking documentation.
+**Final contract:** the user is the authenticated owner. Agents are request
+tracking beneath that user. One canonical API key accesses personal models and
+models assigned by users or organizations. Groups are only bulk-assignment
+packages: they never appear in inference model listings and are not callable.
+This replaces the earlier callable-group/shared-limit draft.
 
-## Identity and tracking
+## Names and one-to-one mappings
 
-New user keys are personal (no fixed organization context). A second user key
-creation returns `409 user_key_exists`; rotate the existing key instead. Legacy
-secondary keys remain stored for historical attribution, but only the canonical
-key authenticates: prefer a personal key, then earliest creation timestamp and
-ID. Disabled canonical keys do not cause automatic failover to another secret.
-Legacy organization-owned keys retain their old compatibility path.
+| Resource | Public name | Example |
+|---|---|---|
+| Original personal model | Existing provider ID | `cx/gpt-6-astra` |
+| Personal alias | `<username>/<alias>` | `kimnt93/gpt-5.5` |
+| Organization alias | `org/<organization-slug>/<alias>` | `org/xno/gpt-5.6-luna` |
+| Assignment package | Internal `org/<organization-slug>/g/<package>` | Not listed/callable |
 
-No existing secrets or historical usage rows are deleted. Review users with
-multiple existing keys before upgrading: secondary secrets stop authenticating.
-Use master administration to select/rotate the canonical personal key and remove
-obsolete keys explicitly; do not rely on a secondary key for continued access.
+Each alias points to exactly one original model, which may have several provider
+accounts serving that same model. The public alias is unique, and each owner can
+publish only one alias for a source. Conflicting names, retargeting an existing
+alias, or adding a second alias for the same source return `409 alias_conflict`.
+Disabled aliases retain their mapping. These checks are serialized across
+replicas (PostgreSQL transactional lock, ClickHouse Redis lock) and in local mode.
+Do not treat aliases as independent routing blends or rename a provider model ID.
 
-The caller uses the same user key with:
+For email-based Router usernames, the personal prefix uses the normalized local
+account name (`kimnt93@example.test` → `kimnt93`); namespace collisions are
+rejected, not silently reassigned. Provider-reserved prefixes and `org` cannot
+be personal alias namespaces.
+
+When the owner aliases `cx/gpt-5.5` as `kimnt93/gpt-5.5`, **both IDs remain callable
+by that owner**, but the alias replaces the original in `/v1/models` and the
+user's dashboard model catalog. Grantees can call only the assigned alias, not
+its private raw source. A typical user's list is:
+
+```json
+["cx/gpt-6-astra", "org/xno/gpt-5.6-luna", "kimnt93/gpt-5.5"]
+```
+
+## Canonical user key and tracking
+
+New user keys are personal, not fixed to one organization or agent. Duplicate
+creation returns `409 user_key_exists`; rotate instead. Legacy secondary keys
+remain stored for history but no longer authenticate. Canonical selection prefers
+an existing personal key, then earliest creation timestamp and ID; disabling the
+canonical key does not activate another secret. Review existing multi-key users
+before upgrading. No secret or retained usage is deleted by this migration.
+Legacy organization-owned keys retain their compatibility path.
 
 ```yaml
 X-GoRouter-Agent-Id: agent_a
@@ -31,163 +56,187 @@ X-GoRouter-Request-Id: request_123
 X-GoRouter-Trace-Id: trace_123
 ```
 
-`agent_id` is caller-provided correlation **under that user**, not a principal or
-quota owner. It has the same 128-byte opaque-ID validation as the other headers.
-Changing it does not change permissions, provider ownership, or reset limits.
-`user_id` is always obtained from authentication; no user-ID header can forge it.
-Missing agent/run/trace/conversation fields remain empty. Missing request IDs are
-Router-generated. New key creation rejects nonempty `workload` bindings; old
-bindings are legacy metadata, not authorization. All tracking headers stay local
-to Router and are not forwarded upstream.
+Use these on Chat Completions, Responses, or Messages, streaming or non-streaming.
+`user_id` is always authenticated. Agent IDs and other correlation headers cannot
+change grants, ownership, or quotas. Each optional ID is limited to 128 bytes and
+ASCII letters/digits plus `-_.:/`. Missing agent/run/trace/conversation IDs remain
+empty; missing request ID is generated and echoed. New key creation rejects
+workload bindings. Old binding fields are metadata, not authority.
 
-## Publish an alias (rename a model)
+## Publish organization aliases and assignment packages
 
-Org admins with `models:manage`, or master, can publish sources they own. Sources
-must be real enabled model IDs from `/admin/models`, backed by the publisher's
-provider connections. A master can publish global provider sources. Member
-private connections cannot be appropriated by an org admin.
+The caller must be an active org admin with `models:manage`, or master. Only
+sources backed by the publisher's own connections may be published (master can
+publish global sources). Org admins cannot appropriate members' personal keys.
 
 ```http
 POST /admin/organizations/org_xno/models
+Authorization: Bearer <org-admin-user-key>
 Content-Type: application/json
-Authorization: Bearer <organization-admin-user-key>
 ```
 
 ```json
 {
-  "name": "xno-lite",
+  "name": "gpt-5.6-luna",
   "kind": "alias",
-  "targets": ["xno/cx/gpt-5.6-luna"],
+  "targets": ["cx/gpt-5.6-luna"],
   "enabled": true,
-  "weekly_limit_usd": 20
+  "weekly_limit_usd": 0
 }
 ```
 
-Returns `name: "xno/xno-lite"`. The organization slug is generated server-side
-from the organization name; the input `name` is only the short alias. If the
-publisher's source is registered as `cx/gpt-5.6-luna`, use that exact source ID.
-Renaming does not rename the actual upstream model or invent its price.
+Returns `name: "org/xno/gpt-5.6-luna"`. Use the actual configured source ID from
+your connection catalog. No org/global cap is set here: nonzero definition limits
+are rejected; budgets belong to user assignments only.
 
-## Publish an ordered fallback group
+A package is created at the same endpoint:
 
 ```json
 {
   "name": "default",
   "kind": "group",
-  "targets": ["xno/xno-lite-01", "xno/xno-lite-02", "cx/gpt-6-astra"],
+  "targets": ["org/xno/gpt-5.6-luna", "org/xno/gpt-6-astra"],
   "enabled": true,
-  "weekly_limit_usd": 100
+  "weekly_limit_usd": 0
 }
 ```
 
-POST to the same endpoint. Returns `name: "xno/g/default"`; `/g/` is reserved for
-groups. Targets are evaluated in supplied order. A group can contain enabled
-aliases from the same organization and concrete models backed by the publisher's
-own connections. It cannot contain other groups, itself, foreign aliases,
-arbitrary member-private models, or `/auto` routes. At most 32 targets and 512
-resolved routes. Existing account retries precede fallback to the next route.
-Grouping does not grant direct access to every underlying alias/source.
+Packages contain up to 32 enabled aliases from the same organization, not nested
+packages, raw sources or aliases owned by someone else. Applying a package
+creates individual grants. Existing grants retain their individual limits;
+editing a package later does not silently change earlier grants. Bulk assignment
+is sequential and idempotent, not a cross-record transaction: on partial failure,
+retry or inspect the resulting grants. Package names are never sent upstream.
 
-Repeat POST with the same short name and kind to update targets, weekly limit,
-or enabled state. Disable with `enabled:false`. Names are stable: changing a
-name creates another resource rather than silently resetting the old identity.
-
-## Assign a model/group to a user
+## Assign a model to different users with different limits
 
 ```http
 POST /admin/organizations/org_xno/model-grants
+Authorization: Bearer <org-admin-user-key>
 Content-Type: application/json
-Authorization: Bearer <organization-admin-user-key>
 ```
 
 ```json
 {
-  "model": "xno/g/default",
-  "user_id": "usr_member",
+  "model": "org/xno/gpt-5.6-luna",
+  "user_id": "usr_a",
   "enabled": true,
-  "weekly_limit_usd": 10
+  "weekly_limit_usd": 500
 }
 ```
 
-The user must be active and belong to that organization. This grant is keyed by
-organization + model/group + user, independent of their API-key ID and agent IDs.
-Repeat POST to change the per-user limit or revoke with `enabled:false`.
-`GET /admin/organizations/{id}/models` and `/model-grants` list definitions and
-assignments for authorized org administrators. A grant takes effect on the next
-request with the existing user key; membership removal, disabled org/source,
-revocation, or publisher losing admin membership removes access.
+Repeat for `usr_b` with a different amount. Each organization + alias + user has
+its own budget. `0`, omitted, or `null` means **unlimited**, not disabled. Revoke
+with `enabled:false`; setting zero is not revocation. Repeat POST to edit that
+user's limit. A package name applies its member aliases individually, using the
+provided limit only for new assignments. The response is an array of affected
+grants, even when assigning a single alias. Users must be active org members.
 
-The dashboard offers **Organizations → Models and limits** for publishing,
-editing limits, enabling/disabling models, and assigning/revoking members.
+Read definitions and grants through:
 
-## Calling and listing models
+```http
+GET /admin/organizations/org_xno/models
+GET /admin/organizations/org_xno/model-grants
+```
 
-`GET /v1/models` with the user key returns personal models plus enabled assigned
-aliases/groups. Calls to all three inference protocols accept the published
-name, for example `model: "xno/g/default"`. No organization or agent header is
-required to authorize it. Unassigned names return 404. Personal requests have no
-organization usage attribution. Organization requests record both the user and
-the granting organization, the public alias/group, and actual upstream model.
-Raw credential identifiers are not exposed in response headers for org calls.
-Organization calls bypass Router response caching so grants/limits cannot be
-bypassed through cached results. Provider-side prompt caching is unchanged.
+These lists require org administration. Dashboard:
+**Organizations → Models and limits**. No additional user API key is created.
 
-## Limit rules
+## Personal aliases and user-to-user sharing
 
-`weekly_limit_usd` is optional (`null`/blank means unlimited; `0` blocks calls).
-Limits are Router-priced USD, **not** request counts or token limits. The window
-uses the existing UTC `WEEK_START` policy (Sunday by default).
+Users with `models:manage` can rename their own models:
 
-Each provider attempt reserves an estimated cost against all applicable scopes:
+```http
+POST /admin/model-aliases
+Authorization: Bearer <personal-user-key>
+Content-Type: application/json
+```
 
-1. The group's shared organization limit.
-2. The selected alias's shared organization limit.
-3. The directly assigned public alias/group's per-user limit.
+```json
+{"name":"gpt-5.5","kind":"alias","targets":["cx/gpt-5.5"],"enabled":true,"weekly_limit_usd":0}
+```
 
-Limits are ANDed: every scope must permit the request. Unlimited scopes are
-also recorded, so adding a limit later includes earlier current-week spend. Shared alias limits also
-apply when it is reached through different groups. A group grant's per-user
-limit is independent of a separate direct alias grant. Direct raw source calls
-by the source owner are personal and not charged to the organization grant.
-The existing key-wide quota/RPM checks still apply.
+List owned aliases with `GET /admin/model-aliases`. No user ID is accepted as an
+owner override. The username comes from the authenticated Router user. Share
+that alias with an active Router user:
 
-Consumed, successfully reported work settles to calculated cost; the total may
-exceed the estimate because output is not a guaranteed upper bound. This is a
-conservative admission limit, not a dollar-exact provider spending cap. Completed
-HTTP 4xx rejections release that attempt's estimate. Network/5xx failures,
-interrupted streams, or process crashes leave the estimate reserved because
-consumption is unknown. No automatic release at midnight or agent/key rotation.
-Reservations belong to their admission week even if settled in the next week.
-If an alias budget is exhausted, its route is skipped; later group routes can
-still succeed if all their limits permit. Exhaustion returns HTTP 429. Storage or
-coordination failure returns 503, never unlimited/zero spend.
+```http
+POST /admin/model-grants
+Authorization: Bearer <alias-owner-user-key>
+Content-Type: application/json
+```
 
-Budget facts live in the **selected** backend, separate from the asynchronous
-usage log queue. PostgreSQL uses a transaction and organization-scoped advisory
-lock. ClickHouse uses durable config records and a shared Redis lock; local mode
-uses the SQLite repository's single-process mutation lock. No dual-write database
-architecture is introduced. ClickHouse budget locks have no expiry: an uncertain
-write or dead worker must fail closed, not let the next node reopen capacity.
-An orphaned `gorouter:budget-lock:<organization-id>` requires an operator to
-verify no writer remains, reconcile durable holds, and then explicitly clear
-that lock. Never clear it automatically on an error. Ordinary user APIs do not
-expose an unsafe “reset spend” operation.
+```json
+{"model":"kimnt93/gpt-5.5","user_id":"usr_recipient","enabled":true,"weekly_limit_usd":25}
+```
 
-## Queries
+This response is one grant object. The original owner always retains their own
+raw/alias access. Recipients cannot republish someone else's assigned source.
+Shared personal usage is attributed to the recipient, not an organization.
 
-The existing `recent`, `summary`, `activity` endpoints retain their v0.2.1
-multi-select filters. Agent IDs now select within user/organization visibility,
-not within a key-bound agent authority. Omitted filters mean all authorized user
-records. `/admin/usage/workloads/weekly` is retained for compatibility but now
-queries the authorized user/org scope; `agent_id` is optional and supports
-multiple IDs. Its capability marker is `gorouter-user-usage-v1`.
+## Additional personal limit on an assigned model
 
-## Deployment and compatibility
+```http
+POST /admin/model-limits
+Authorization: Bearer <recipient-user-key>
+Content-Type: application/json
+```
 
-PostgreSQL adds `0030_organization_models.sql` (definitions, grants, and budget
-records). ClickHouse/SQLite reuse their existing durable JSON config stores; no
-additional database is needed. The v0.2.1 trace/workload repair migrations remain
-required. Org aliases/grants are additive: no existing provider/model records are
-renamed or deleted by migration. Existing multiple-key integrations must move to
-the canonical user key before upgrading. This version does not claim exact
-provider invoice reconciliation or complete durable inference usage logging.
+```json
+{"model":"org/xno/gpt-5.6-luna","weekly_limit_usd":100}
+```
+
+Requires `chat` and access to that assigned model. The assigning org's $500 and
+the user's $100 caps both apply. Setting personal cap to 0 removes only the
+personal cap; it never changes the org's $500 cap. The assigner cannot overwrite
+this separate self-limit through the assignment endpoint. Dashboard:
+**Models → Aliases and my limits**.
+
+## Accounting and failure behavior
+
+Only **assigned models** get assignment/self budgets. Own raw models and aliases
+have no new model cap (existing key quota/RPM checks remain). The week follows
+UTC `WEEK_START`, Sunday by default. Unlimited assignment scopes still record
+spend, so adding a cap later includes earlier current-week consumption. Changing
+agent IDs, rotating keys, reassigning packages, or editing caps cannot reset it.
+
+Before each attempt, estimated cost is durably reserved against that recipient's
+assignment and optional self cap together. Successful work settles to Router
+model-priced cost. Output can exceed the estimate, so this is conservative
+admission—not a guarantee of an exact dollar ceiling or provider invoice total.
+Model limits follow original upstream pricing, not the alias spelling.
+
+- Exhaustion: **429** `organization_model_quota_exceeded`.
+- Backend/coordination failure: **503**, never unlimited access.
+- Completed HTTP 4xx rejection releases that attempt's estimate.
+- Network/5xx failures, interrupted streams, or process loss leave estimates
+  reserved because consumption is unknown; operators must reconcile them.
+- Holds belong to their admission week, including after a week boundary.
+- Aliased requests bypass Router response caching; provider-side caching remains.
+
+Budget records use the selected durable backend only. PostgreSQL uses a
+transactional advisory lock. ClickHouse uses durable config records plus a shared
+nonexpiring Redis fence; after a dead writer/uncertain acknowledgement an operator
+must reconcile holds and verify no writer remains before clearing
+`gorouter:budget-lock:<owner-scope>`. Never auto-clear on errors. Namespace locks
+use the same fail-closed mechanism. Local mode uses SQLite's single-process
+mutation serialization. No extra database architecture is introduced.
+
+## Usage queries and permissions
+
+Existing multi-select usage filters remain: user, agent, request, run, parent
+run, trace and conversation; absent means all **authorized** records. Personal
+calls stay personal; org-assigned calls record recipient and organization plus
+alias and original upstream model. `/admin/usage/workloads/weekly` remains as a
+user/org-scoped compatibility path (`gorouter-user-usage-v1`). It does not restore
+per-agent key authority. Ordinary logs still have the documented persistence and
+unknown-usage limits; do not treat successful inference as a durable log receipt.
+
+## Deployment
+
+PostgreSQL requires 0030 plus v0.2.1 repair/trace migrations 0028/0029.
+ClickHouse/SQLite reuse their durable config stores for definitions/grants/budgets.
+No schema rewrite is needed for this clarification. The previous callable-group
+commit was **not deployed** to the target server; its staged binary was replaced
+before service recreation. Existing legacy group records, if any elsewhere,
+are not callable and must be reapplied as individual assignments.

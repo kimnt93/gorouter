@@ -1,4 +1,4 @@
-// Package orgmodel owns organization-published aliases, ordered model groups,
+// Package orgmodel owns one-to-one aliases and bulk-assignment packages,
 // user assignments, and durable budget reservations. Agents are not principals.
 package orgmodel
 
@@ -90,7 +90,13 @@ func (s *Service) Publish(ctx context.Context, actor entities.Principal, orgID, 
 	if err != nil {
 		return nil, err
 	}
+	if limit != nil && *limit != 0 {
+		return nil, ErrInvalid
+	}
 	if !validName(slug) || !validLimit(limit) || len(targets) == 0 || len(targets) > 32 || (kind != "alias" && kind != "group") || kind == "alias" && len(targets) != 1 {
+		return nil, ErrInvalid
+	}
+	if provider.OrganizationSlug(org.Name) == "" {
 		return nil, ErrInvalid
 	}
 	name := provider.OrganizationAliasID(org.Name, slug)
@@ -115,6 +121,11 @@ func (s *Service) Publish(ctx context.Context, actor entities.Principal, orgID, 
 	if err != nil {
 		return nil, err
 	}
+	for _, m := range models {
+		if m.Name == name {
+			return nil, entities.ErrConflict
+		}
+	}
 	owned := map[string]bool{}
 	for _, c := range creds {
 		if c.Status == entities.StatusActive && (actor.Type == entities.PrincipalMaster && c.OwnerUserID == "" && c.OwnerTenantID == nil || actor.Type == entities.PrincipalUser && c.OwnerUserID == actor.UserID) {
@@ -132,6 +143,9 @@ func (s *Service) Publish(ctx context.Context, actor entities.Principal, orgID, 
 				return nil, ErrInvalid
 			}
 			continue
+		}
+		if kind == "group" {
+			return nil, ErrInvalid
 		}
 		found := false
 		for _, m := range models {
@@ -166,11 +180,14 @@ func (s *Service) Publish(ctx context.Context, actor entities.Principal, orgID, 
 	return &record, nil
 }
 func (s *Service) Assign(ctx context.Context, actor entities.Principal, orgID, name, userID string, limit *float64, enabled bool) (*entities.OrganizationModelGrant, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	if _, err := s.Manage(ctx, actor, orgID); err != nil {
 		return nil, err
 	}
+	return s.assign(ctx, actor, orgID, name, userID, limit, enabled)
+}
+func (s *Service) assign(ctx context.Context, actor entities.Principal, orgID, name, userID string, limit *float64, enabled bool) (*entities.OrganizationModelGrant, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if !validLimit(limit) {
 		return nil, ErrInvalid
 	}
@@ -178,8 +195,10 @@ func (s *Service) Assign(ctx context.Context, actor entities.Principal, orgID, n
 	if err != nil || user.Status != entities.StatusActive {
 		return nil, ErrForbidden
 	}
-	if _, err = s.Identity.Membership(ctx, orgID, userID); err != nil {
-		return nil, ErrForbidden
+	if _, personal := personalOwner(orgID); !personal {
+		if _, err = s.Identity.Membership(ctx, orgID, userID); err != nil {
+			return nil, ErrForbidden
+		}
 	}
 	offers, err := s.Repo.List(ctx, orgID)
 	if err != nil {
@@ -187,10 +206,14 @@ func (s *Service) Assign(ctx context.Context, actor entities.Principal, orgID, n
 	}
 	found := false
 	for _, o := range offers {
-		found = found || o.Name == name
+		found = found || o.Name == name && o.Kind == "alias"
 	}
 	if !found {
 		return nil, entities.ErrNotFound
+	}
+	zero := 0.0
+	if limit == nil {
+		limit = &zero
 	}
 	grant := entities.OrganizationModelGrant{OrganizationID: orgID, Model: name, UserID: userID, Enabled: enabled, WeeklyLimitUSD: limit, UpdatedAt: time.Now().UTC()}
 	if err = s.Repo.PutGrant(ctx, grant); err != nil {
@@ -213,16 +236,18 @@ type Resolution struct {
 	Name           string
 	OrganizationID string
 	Routes         []Route
+	Granted        bool
+	PersonalAlias  bool
+	SourceName     string
 }
 
 func (s *Service) Available(ctx context.Context, userID string) ([]Resolution, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	memberships, err := s.Identity.ListMembershipsForUser(ctx, userID)
-	if err != nil {
-		return nil, err
+	user, err := s.Identity.UserByID(ctx, userID)
+	if err != nil || user.Status != entities.StatusActive {
+		return nil, ErrForbidden
 	}
-	out := []Resolution{}
 	models, err := s.Models.List(ctx)
 	if err != nil {
 		return nil, err
@@ -231,82 +256,105 @@ func (s *Service) Available(ctx context.Context, userID string) ([]Resolution, e
 	if err != nil {
 		return nil, err
 	}
-	for _, membership := range memberships {
-		org, err := s.Identity.OrganizationByID(ctx, membership.OrganizationID)
-		if err != nil {
-			return nil, err
-		}
-		if org.Status != entities.StatusActive {
+	grants, err := s.Repo.Grants(ctx, "", userID)
+	if err != nil {
+		return nil, err
+	}
+	own, err := s.Repo.List(ctx, personalScope(userID))
+	if err != nil {
+		return nil, err
+	}
+	selfLimits, err := s.Repo.Grants(ctx, "self:"+userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	type offerGrant struct {
+		offer    entities.OrganizationModel
+		grant    *entities.OrganizationModelGrant
+		personal bool
+	}
+	candidates := []offerGrant{}
+	for _, o := range own {
+		candidates = append(candidates, offerGrant{offer: o, personal: true})
+	}
+	for i := range grants {
+		g := &grants[i]
+		if !g.Enabled || strings.HasPrefix(g.OrganizationID, "self:") {
 			continue
 		}
-		offers, err := s.Repo.List(ctx, org.ID)
+		if owner, personal := personalOwner(g.OrganizationID); personal {
+			if owner == userID {
+				continue
+			}
+		} else {
+			org, err := s.Identity.OrganizationByID(ctx, g.OrganizationID)
+			if err != nil || org.Status != entities.StatusActive {
+				continue
+			}
+			if _, err = s.Identity.Membership(ctx, g.OrganizationID, userID); err != nil {
+				continue
+			}
+		}
+		offers, err := s.Repo.List(ctx, g.OrganizationID)
 		if err != nil {
 			return nil, err
 		}
-		byName := map[string]entities.OrganizationModel{}
 		for _, o := range offers {
-			byName[o.Name] = o
+			if o.Name == g.Model {
+				candidates = append(candidates, offerGrant{offer: o, grant: g})
+			}
 		}
-		grants, err := s.Repo.Grants(ctx, org.ID, userID)
-		if err != nil {
-			return nil, err
+	}
+	out := []Resolution{}
+	for _, candidate := range candidates {
+		o := candidate.offer
+		if !o.Enabled || o.Kind != "alias" || len(o.Targets) != 1 {
+			continue
 		}
-		for _, grant := range grants {
-			if !grant.Enabled {
+		if o.SourceOwnerID != "" {
+			owner, err := s.Identity.UserByID(ctx, o.SourceOwnerID)
+			if err != nil || owner.Status != entities.StatusActive {
 				continue
 			}
-			offer, ok := byName[grant.Model]
-			if !ok || !offer.Enabled {
-				continue
-			}
-			result := Resolution{Name: offer.Name, OrganizationID: org.ID}
-			base := []entities.ModelBudgetCharge{{Scope: "user:" + userID + ":" + offer.Name, LimitUSD: budgetValue(grant.WeeklyLimitUSD)}}
-			var expand func(entities.OrganizationModel, []entities.ModelBudgetCharge)
-			expand = func(current entities.OrganizationModel, charges []entities.ModelBudgetCharge) {
-				if current.SourceOwnerID != "" {
-					owner, err := s.Identity.UserByID(ctx, current.SourceOwnerID)
-					if err != nil || owner.Status != entities.StatusActive {
-						return
-					}
-					member, err := s.Identity.Membership(ctx, current.OrganizationID, current.SourceOwnerID)
-					if err != nil || member.Role != entities.MembershipAdmin {
-						return
-					}
+			if _, personal := personalOwner(o.OrganizationID); !personal {
+				m, err := s.Identity.Membership(ctx, o.OrganizationID, o.SourceOwnerID)
+				if err != nil || m.Role != entities.MembershipAdmin {
+					continue
 				}
-
-				charges = append([]entities.ModelBudgetCharge(nil), charges...)
-				charges = append(charges, entities.ModelBudgetCharge{Scope: "model:" + current.Name, LimitUSD: budgetValue(current.WeeklyLimitUSD)})
-				for _, target := range current.Targets {
-					if alias, ok := byName[target]; ok {
-						if current.Kind == "group" && alias.Kind == "alias" && alias.Enabled {
-							expand(alias, charges)
-						}
-						continue
-					}
-					for _, model := range models {
-						if model.Name != target || !model.Enabled {
-							continue
-						}
-						for _, route := range model.Routes {
-							if !route.Enabled {
-								continue
-							}
-							for _, c := range creds {
-								if c.ID == route.CredentialID && c.Status == entities.StatusActive && c.OwnerUserID == current.SourceOwnerID && (current.SourceOwnerID != "" || c.OwnerTenantID == nil) {
-									result.Routes = append(result.Routes, Route{Model: model, Route: route, Charges: charges})
-								}
-							}
-						}
+			}
+		}
+		result := Resolution{Name: o.Name, OrganizationID: o.OrganizationID, Granted: candidate.grant != nil, PersonalAlias: candidate.personal, SourceName: o.Targets[0]}
+		charges := []entities.ModelBudgetCharge{}
+		if candidate.grant != nil {
+			charges = append(charges, entities.ModelBudgetCharge{Scope: "user:" + userID + ":" + o.Name, LimitUSD: budgetValue(candidate.grant.WeeklyLimitUSD)})
+			ownLimit := 0.0
+			for _, g := range selfLimits {
+				if g.Model == o.Name && g.Enabled && g.WeeklyLimitUSD != nil {
+					ownLimit = *g.WeeklyLimitUSD
+				}
+			}
+			charges = append(charges, entities.ModelBudgetCharge{Scope: "self:" + userID + ":" + o.Name, LimitUSD: ownLimit})
+		}
+		for _, model := range models {
+			if model.Name != o.Targets[0] || !model.Enabled {
+				continue
+			}
+			for _, r := range model.Routes {
+				if !r.Enabled {
+					continue
+				}
+				for _, c := range creds {
+					if c.ID == r.CredentialID && c.Status == entities.StatusActive && c.OwnerUserID == o.SourceOwnerID && (o.SourceOwnerID != "" || c.OwnerTenantID == nil) {
+						result.Routes = append(result.Routes, Route{Model: model, Route: r, Charges: charges})
 					}
 				}
 			}
-			expand(offer, base)
-			if len(result.Routes) > 512 {
-				return nil, ErrInvalid
-			}
-			if len(result.Routes) > 0 {
-				out = append(out, result)
-			}
+		}
+		if len(result.Routes) > 512 {
+			return nil, ErrInvalid
+		}
+		if len(result.Routes) > 0 {
+			out = append(out, result)
 		}
 	}
 	return out, nil
@@ -347,7 +395,7 @@ func CheckBudget(hold entities.ModelBudgetReservation, prior []entities.ModelBud
 		}
 	}
 	for _, charge := range hold.Charges {
-		if charge.LimitUSD < 0 {
+		if charge.LimitUSD <= 0 {
 			continue
 		}
 		spent := 0.0
@@ -370,10 +418,10 @@ func CheckBudget(hold entities.ModelBudgetReservation, prior []entities.ModelBud
 }
 
 // Unlimited scopes are still recorded, so imposing a limit later cannot erase
-// spend already incurred during the current week. -1 is internal-only unlimited.
+// spend already incurred during the current week. Zero means unlimited.
 func budgetValue(value *float64) float64 {
 	if value == nil {
-		return -1
+		return 0
 	}
 	return *value
 }

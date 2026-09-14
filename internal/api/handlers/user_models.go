@@ -55,6 +55,7 @@ func (g *Gateway) userModels(ctx context.Context, key *GatewayAccessContext, mod
 			if m.Metadata == nil {
 				m.Metadata = r.Model.Metadata
 				m.UpstreamModel = route.UpstreamModel
+				m.Price = r.Model.Price
 			}
 		}
 		out = append(out, m)
@@ -73,4 +74,20 @@ func (g *Gateway) settleOrganization(ctx context.Context, key *GatewayAccessCont
 	}
 	key.ModelBudget = nil
 	return nil
+}
+
+func listedUserModels(models []entities.ModelDef, aliases map[string]orgmodel.Resolution) []entities.ModelDef {
+	hidden := map[string]bool{}
+	for _, r := range aliases {
+		if r.PersonalAlias {
+			hidden[r.SourceName] = true
+		}
+	}
+	out := []entities.ModelDef{}
+	for _, m := range models {
+		if !hidden[m.Name] {
+			out = append(out, m)
+		}
+	}
+	return out
 }

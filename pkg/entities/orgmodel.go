@@ -2,7 +2,7 @@ package entities
 
 import "time"
 
-// OrganizationModel publishes an alias or an ordered group, not credentials.
+// OrganizationModel publishes a one-to-one alias or a bulk-assignment package.
 // SourceOwnerID is server-derived when publishing a personal provider source.
 type OrganizationModel struct {
 	OrganizationID string    `json:"organization_id"`

@@ -12,17 +12,23 @@ type memoryRepo struct {
 	grants []entities.OrganizationModelGrant
 }
 
-func (r *memoryRepo) List(context.Context, string) ([]entities.OrganizationModel, error) {
-	return r.offers, nil
+func (r *memoryRepo) List(_ context.Context, scope string) ([]entities.OrganizationModel, error) {
+	out := []entities.OrganizationModel{}
+	for _, o := range r.offers {
+		if scope == "" || o.OrganizationID == scope {
+			out = append(out, o)
+		}
+	}
+	return out, nil
 }
 func (r *memoryRepo) Put(_ context.Context, v entities.OrganizationModel) error {
 	r.offers = append(r.offers, v)
 	return nil
 }
-func (r *memoryRepo) Grants(_ context.Context, _ string, user string) ([]entities.OrganizationModelGrant, error) {
+func (r *memoryRepo) Grants(_ context.Context, scope string, user string) ([]entities.OrganizationModelGrant, error) {
 	out := []entities.OrganizationModelGrant{}
 	for _, g := range r.grants {
-		if g.UserID == user {
+		if g.UserID == user && (scope == "" || g.OrganizationID == scope) {
 			out = append(out, g)
 		}
 	}
@@ -80,19 +86,19 @@ func TestAliasGroupAssignmentsAndAuthority(t *testing.T) {
 	svc := &Service{Repo: repo, Identity: identities{}, Models: models{}, Credentials: credentials{}}
 	admin := entities.Principal{Type: entities.PrincipalUser, UserID: "admin", Scopes: []string{entities.ScopeModelsManage}}
 	limit := 2.0
-	alias, err := svc.Publish(ctx, admin, "org", "xno-lite", "alias", []string{"cx/base"}, &limit, true)
-	if err != nil || alias.Name != "xno/xno-lite" {
+	alias, err := svc.Publish(ctx, admin, "org", "xno-lite", "alias", []string{"cx/base"}, nil, true)
+	if err != nil || alias.Name != "org/xno/xno-lite" {
 		t.Fatalf("alias=%+v %v", alias, err)
 	}
-	group, err := svc.Publish(ctx, admin, "org", "default", "group", []string{alias.Name}, &limit, true)
-	if err != nil || group.Name != "xno/g/default" {
+	group, err := svc.Publish(ctx, admin, "org", "default", "group", []string{alias.Name}, nil, true)
+	if err != nil || group.Name != "org/xno/g/default" {
 		t.Fatalf("group=%+v %v", group, err)
 	}
-	if _, err = svc.Assign(ctx, admin, "org", group.Name, "user", &limit, true); err != nil {
+	if _, err = svc.AssignPackage(ctx, admin, "org", group.Name, "user", &limit, true); err != nil {
 		t.Fatal(err)
 	}
 	available, err := svc.Available(ctx, "user")
-	if err != nil || len(available) != 1 || len(available[0].Routes) != 1 || len(available[0].Routes[0].Charges) != 3 {
+	if err != nil || len(available) != 1 || len(available[0].Routes) != 1 || len(available[0].Routes[0].Charges) != 2 || available[0].Name != alias.Name {
 		t.Fatalf("resolution=%+v err=%v", available, err)
 	}
 	if available, err = svc.Available(ctx, "foreign"); err != nil || len(available) != 0 {

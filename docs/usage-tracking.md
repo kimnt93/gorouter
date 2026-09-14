@@ -12,8 +12,8 @@ key bindings. See [User model access](user-model-access.md) for canonical-key
 migration, organization aliases/groups, assignment APIs and limits.
 
 Send `X-GoRouter-Agent-Id` to track an agent. `user_id` comes from authentication;
-caller headers cannot replace it. A different agent ID cannot bypass shared
-model, group, or user limits. New API keys reject workload binding configuration;
+caller headers cannot replace it. A different agent ID cannot bypass assigned
+model or personal limits. New API keys reject workload binding configuration;
 old bindings remain historical metadata, not authorization.
 
 ## 2. Request headers and defaults

@@ -62,8 +62,10 @@ domain names and types; do not copy hypothetical identifiers literally.
 The user is the top-level authority and has one canonical API key. Agent IDs are
 request tracking (`X-GoRouter-Agent-Id`), never principals or per-agent keys.
 User keys access personal provider models plus explicit organization grants.
-Organizations publish aliases (`<org>/<alias>`) and ordered groups
-(`<org>/g/<group>`) and apply weekly USD shared/per-user limits. Use
+Organizations publish one-to-one aliases (`org/<org>/<alias>`); users publish
+`<username>/<alias>`. Groups only bulk-assign individual models: they are not
+listed/callable. Weekly USD limits are per model/user assignment; 0 is unlimited.
+Recipients can add a stricter independent personal limit. Use
 `pkg/orgmodel` for publication, ownership, assignment and budget policy; read
 `docs/user-model-access.md`. Earlier references to per-agent key bindings or
 creating extra org-scoped user keys are superseded by this contract. Preserve

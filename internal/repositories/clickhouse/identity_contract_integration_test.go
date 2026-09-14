@@ -28,6 +28,7 @@ func TestIdentityBackendContract(t *testing.T) {
 	contract.RunIdentityBackendContract(t, contract.IdentityBackend{Identity: NewIdentityRepo(store), Keys: NewApiKeyRepo(store), Usage: NewUsageRepo(store), Audit: NewAuditRepo(store)})
 	contract.RunUsageTrackingContract(t, NewUsageRepo(store))
 	contract.RunOrganizationModelsContract(t, NewOrganizationModelRepo(store))
+	contract.RunAliasUniquenessContract(t, NewOrganizationModelRepo(store))
 	user := entities.User{ID: entities.NewID("usr"), Username: entities.NewID("person") + "@example.test", NormalizedUsername: entities.NewID("person") + "@example.test", Status: entities.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := NewIdentityRepo(store).CreateUser(context.Background(), user); err != nil {
 		t.Fatal(err)

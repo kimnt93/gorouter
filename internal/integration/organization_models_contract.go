@@ -17,7 +17,7 @@ func RunOrganizationModelsContract(t *testing.T, repo orgmodel.Repository) {
 	org := entities.NewID("org")
 	at := time.Now().UTC()
 	limit := 1.0
-	offer := entities.OrganizationModel{OrganizationID: org, Name: "example/g/default", Kind: "group", Targets: []string{"example/small", "cx/model"}, Enabled: true, WeeklyLimitUSD: &limit, CreatedAt: at, UpdatedAt: at}
+	offer := entities.OrganizationModel{OrganizationID: org, Name: "org/" + org + "/g/default", Kind: "group", Targets: []string{"example/small", "cx/model"}, Enabled: true, WeeklyLimitUSD: &limit, CreatedAt: at, UpdatedAt: at}
 	if err := repo.Put(ctx, offer); err != nil {
 		t.Fatal(err)
 	}
@@ -131,5 +131,68 @@ func RunPrimaryKeyContract(t *testing.T, repo PrimaryKeyRepo, userID string) {
 	}
 	if _, err = repo.CreatePrimary(ctx, entities.ApiKey{Name: "second", OwnerType: entities.OwnerUser, OwnerUserID: userID}); !errors.Is(err, entities.ErrConflict) {
 		t.Fatalf("second key accepted: %v", err)
+	}
+}
+
+func RunAliasUniquenessContract(t *testing.T, repo orgmodel.Repository) {
+	ctx := context.Background()
+	owner := entities.NewID("alias-owner")
+	at := time.Now().UTC()
+	base := entities.OrganizationModel{OrganizationID: owner, Name: owner + "/a", Kind: "alias", Targets: []string{"cx/model"}, Enabled: true, CreatedAt: at, UpdatedAt: at}
+	if err := repo.Put(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	second := base
+	second.Name = owner + "/b"
+	if err := repo.Put(ctx, second); !errors.Is(err, entities.ErrConflict) {
+		t.Fatalf("second alias for source: %v", err)
+	}
+	second = base
+	second.Targets = []string{"cx/different"}
+	if err := repo.Put(ctx, second); !errors.Is(err, entities.ErrConflict) {
+		t.Fatalf("retargeted same alias: %v", err)
+	}
+	second = base
+	second.OrganizationID = "foreign"
+	if err := repo.Put(ctx, second); !errors.Is(err, entities.ErrConflict) {
+		t.Fatalf("foreign public name: %v", err)
+	}
+	// Under concurrent publication, only one name can win for another source.
+	var accepted atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v := base
+			v.Targets = []string{"cx/raced"}
+			v.Name = entities.NewID("alias")
+			err := repo.Put(ctx, v)
+			if err == nil {
+				accepted.Add(1)
+			} else if !errors.Is(err, entities.ErrConflict) {
+				t.Errorf("alias race: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if accepted.Load() != 1 {
+		t.Fatalf("alias publication winners=%d", accepted.Load())
+	}
+	// Default zero budget must allow work, but imposing a cap later includes spend.
+	hold := entities.ModelBudgetReservation{ID: entities.NewID("hold"), OrganizationID: owner, UserID: "a", WindowStart: at.Truncate(24 * time.Hour), WindowEnd: at.AddDate(0, 0, 7), Charges: []entities.ModelBudgetCharge{{Scope: "assigned:a", LimitUSD: 0}}, AmountUSD: 10, CreatedAt: at}
+	if err := repo.Reserve(ctx, hold); err != nil {
+		t.Fatal(err)
+	}
+	hold.ID = entities.NewID("hold")
+	hold.Charges[0].LimitUSD = 5
+	if err := repo.Reserve(ctx, hold); !errors.Is(err, orgmodel.ErrBudget) {
+		t.Fatal("adding cap reset spend")
+	}
+	hold.ID = entities.NewID("hold")
+	hold.UserID = "b"
+	hold.Charges[0] = entities.ModelBudgetCharge{Scope: "assigned:b", LimitUSD: 50}
+	if err := repo.Reserve(ctx, hold); err != nil {
+		t.Fatalf("other user's budget affected: %v", err)
 	}
 }

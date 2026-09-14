@@ -197,4 +197,11 @@ function applyTrackingFilters(params: URLSearchParams, filters: UsageFilters) {
 export const getOrganizationModels = (id: string): Promise<import('./contracts').OrganizationModel[]> => request(`/admin/organizations/${encodeURIComponent(id)}/models`)
 export const getOrganizationGrants = (id: string): Promise<import('./contracts').OrganizationModelGrant[]> => request(`/admin/organizations/${encodeURIComponent(id)}/model-grants`)
 export const publishOrganizationModel = (id: string, body: Pick<import('./contracts').OrganizationModel, 'name' | 'kind' | 'targets' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModel> => request(`/admin/organizations/${encodeURIComponent(id)}/models`, { method: 'POST', body: JSON.stringify(body) })
-export const assignOrganizationModel = (id: string, body: Pick<import('./contracts').OrganizationModelGrant, 'model' | 'user_id' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModelGrant> => request(`/admin/organizations/${encodeURIComponent(id)}/model-grants`, { method: 'POST', body: JSON.stringify(body) })
+export const assignOrganizationModel = (id: string, body: Pick<import('./contracts').OrganizationModelGrant, 'model' | 'user_id' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModelGrant[]> => request(`/admin/organizations/${encodeURIComponent(id)}/model-grants`, { method: 'POST', body: JSON.stringify(body) })
+
+export const getPersonalAliases = (): Promise<import('./contracts').OrganizationModel[]> => request('/admin/model-aliases')
+export const publishPersonalAlias = (body: Pick<import('./contracts').OrganizationModel, 'name' | 'kind' | 'targets' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModel> => request('/admin/model-aliases', { method: 'POST', body: JSON.stringify(body) })
+export const assignPersonalAlias = (body: Pick<import('./contracts').OrganizationModelGrant, 'model' | 'user_id' | 'enabled' | 'weekly_limit_usd'>): Promise<import('./contracts').OrganizationModelGrant> => request('/admin/model-grants', { method: 'POST', body: JSON.stringify(body) })
+export const setAssignedModelLimit = (body: { model: string; weekly_limit_usd: number }): Promise<{ok: boolean}> => request('/admin/model-limits', { method: 'POST', body: JSON.stringify(body) })
+
+export const getCallableModels = (): Promise<{object: 'list'; data: {id: string; upstream_model?: string; pricing?: import('./contracts').Price}[]}> => request('/v1/models')

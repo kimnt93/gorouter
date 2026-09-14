@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
@@ -12,13 +13,36 @@ type OrganizationModelRepo struct{ s *Store }
 
 func NewOrganizationModelRepo(s *Store) *OrganizationModelRepo { return &OrganizationModelRepo{s} }
 func (r *OrganizationModelRepo) List(ctx context.Context, org string) ([]entities.OrganizationModel, error) {
+	if org == "" {
+		return aliasRecords[entities.OrganizationModel](ctx, r.s, "org-model:")
+	}
 	return list[entities.OrganizationModel](ctx, r.s, "org-model:"+org)
 }
 func (r *OrganizationModelRepo) Put(ctx context.Context, v entities.OrganizationModel) error {
-	return r.s.put(ctx, "org-model:"+v.OrganizationID, v.Name, v)
+	return r.s.budgetMutation(ctx, "model-alias-namespace", func() error {
+		all, err := r.List(ctx, "")
+		if err != nil {
+			return err
+		}
+		if err = orgmodel.CheckAliasWrite(v, all); err != nil {
+			return err
+		}
+		for _, o := range all {
+			if o.Name == v.Name {
+				v.CreatedAt = o.CreatedAt
+			}
+		}
+		return r.s.put(ctx, "org-model:"+v.OrganizationID, v.Name, v)
+	})
 }
 func (r *OrganizationModelRepo) Grants(ctx context.Context, org, user string) ([]entities.OrganizationModelGrant, error) {
-	all, err := list[entities.OrganizationModelGrant](ctx, r.s, "org-grant:"+org)
+	var all []entities.OrganizationModelGrant
+	var err error
+	if org == "" {
+		all, err = aliasRecords[entities.OrganizationModelGrant](ctx, r.s, "org-grant:")
+	} else {
+		all, err = list[entities.OrganizationModelGrant](ctx, r.s, "org-grant:"+org)
+	}
 	out := []entities.OrganizationModelGrant{}
 	for _, g := range all {
 		if user == "" || g.UserID == user {
@@ -63,4 +87,25 @@ func (r *OrganizationModelRepo) Settle(ctx context.Context, org, id string, actu
 		hold.AmountUSD = actual
 		return r.s.put(ctx, "org-budget:"+org, id, hold)
 	})
+}
+
+func aliasRecords[T any](ctx context.Context, s *Store, prefix string) ([]T, error) {
+	rows, err := s.Conn.Query(ctx, `SELECT payload FROM config_records FINAL WHERE startsWith(entity,?) AND deleted=0 ORDER BY entity,key`, prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []T{}
+	for rows.Next() {
+		var raw string
+		var v T
+		if err = rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(raw), &v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }

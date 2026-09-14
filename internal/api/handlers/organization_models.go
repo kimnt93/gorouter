@@ -36,7 +36,7 @@ type OrganizationGrantRequest struct {
 // @Param request body OrganizationModelRequest false "Alias or group; POST"
 // @Success 200 {array} entities.OrganizationModel
 // @Success 201 {object} entities.OrganizationModel
-// @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,404,409,503 {object} responseapi.ErrorResponse
 // @Router /admin/organizations/{id}/models [get]
 // @Router /admin/organizations/{id}/models [post]
 func (a *Admin) OrganizationModels(c fiber.Ctx) error {
@@ -84,7 +84,7 @@ func (a *Admin) OrganizationModels(c fiber.Ctx) error {
 // @Param id path string true "Organization ID"
 // @Param request body OrganizationGrantRequest false "Assignment; POST"
 // @Success 200 {array} entities.OrganizationModelGrant
-// @Success 201 {object} entities.OrganizationModelGrant
+// @Success 201 {array} entities.OrganizationModelGrant
 // @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
 // @Router /admin/organizations/{id}/model-grants [get]
 // @Router /admin/organizations/{id}/model-grants [post]
@@ -117,7 +117,7 @@ func (a *Admin) OrganizationModelGrants(c fiber.Ctx) error {
 	if err := c.Bind().Body(&input); err != nil {
 		return orgModelError(c, orgmodel.ErrInvalid)
 	}
-	record, err := a.OrgModels.Assign(ctx, actor, org, input.Model, input.UserID, input.WeeklyLimitUSD, input.Enabled)
+	record, err := a.OrgModels.AssignPackage(ctx, actor, org, input.Model, input.UserID, input.WeeklyLimitUSD, input.Enabled)
 	if err != nil {
 		return orgModelError(c, err)
 	}
@@ -125,6 +125,8 @@ func (a *Admin) OrganizationModelGrants(c fiber.Ctx) error {
 }
 func orgModelError(c fiber.Ctx, err error) error {
 	switch {
+	case errors.Is(err, entities.ErrConflict):
+		return responseapi.For(c).Conflict("alias name or source already has a mapping", "alias_conflict").Send()
 	case errors.Is(err, orgmodel.ErrForbidden):
 		return responseapi.For(c).Forbidden("organization model access denied").Send()
 	case errors.Is(err, entities.ErrNotFound):
@@ -136,4 +138,90 @@ func orgModelError(c fiber.Ctx, err error) error {
 	default:
 		return responseapi.For(c).Error(503, "organization model service unavailable", "service_unavailable", "organization_model_unavailable").Send()
 	}
+}
+
+// PersonalModelAliases lists or creates the current user's one-to-one aliases.
+// @Summary List or create personal model aliases
+// @Tags model-aliases
+// @Security BearerAuth
+// @Param request body OrganizationModelRequest false "Alias; POST"
+// @Success 200 {array} entities.OrganizationModel
+// @Success 201 {object} entities.OrganizationModel
+// @Failure 400,401,403,409,503 {object} responseapi.ErrorResponse
+// @Router /admin/model-aliases [get]
+// @Router /admin/model-aliases [post]
+func (a *Admin) PersonalModelAliases(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if a.OrgModels == nil {
+		return orgModelError(c, errors.New("unavailable"))
+	}
+	actor := principalFromSession(SessionFrom(c))
+	if c.Method() == fiber.MethodGet {
+		all, err := a.OrgModels.PersonalAliases(c.Context(), actor)
+		if err != nil {
+			return orgModelError(c, err)
+		}
+		return responseapi.For(c).Response().Status(200).Data(all).Send()
+	}
+	var input OrganizationModelRequest
+	if err := c.Bind().Body(&input); err != nil || len(input.Targets) != 1 || input.Kind != "alias" || input.WeeklyLimitUSD != nil && *input.WeeklyLimitUSD != 0 {
+		return orgModelError(c, orgmodel.ErrInvalid)
+	}
+	v, err := a.OrgModels.PublishPersonal(c.Context(), actor, input.Name, input.Targets[0], input.Enabled)
+	if err != nil {
+		return orgModelError(c, err)
+	}
+	return responseapi.For(c).Response().Status(201).Data(v).Send()
+}
+
+// PersonalModelGrants assigns a personally owned alias to another user.
+// @Summary Assign a personal model alias
+// @Tags model-aliases
+// @Security BearerAuth
+// @Param request body OrganizationGrantRequest true "User assignment and weekly limit; zero unlimited"
+// @Success 201 {object} entities.OrganizationModelGrant
+// @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
+// @Router /admin/model-grants [post]
+func (a *Admin) PersonalModelGrants(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if a.OrgModels == nil {
+		return orgModelError(c, errors.New("unavailable"))
+	}
+	var input OrganizationGrantRequest
+	if err := c.Bind().Body(&input); err != nil {
+		return orgModelError(c, orgmodel.ErrInvalid)
+	}
+	v, err := a.OrgModels.AssignPersonal(c.Context(), principalFromSession(SessionFrom(c)), input.Model, input.UserID, input.WeeklyLimitUSD, input.Enabled)
+	if err != nil {
+		return orgModelError(c, err)
+	}
+	return responseapi.For(c).Response().Status(201).Data(v).Send()
+}
+
+type SelfModelLimitRequest struct {
+	Model          string   `json:"model"`
+	WeeklyLimitUSD *float64 `json:"weekly_limit_usd"`
+}
+
+// SelfModelLimit sets an additional limit without overriding the grantor limit.
+// @Summary Set personal limit on an assigned model
+// @Tags model-aliases
+// @Security BearerAuth
+// @Param request body SelfModelLimitRequest true "Assigned model; zero removes personal cap only"
+// @Success 200 {object} OKResponse
+// @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
+// @Router /admin/model-limits [post]
+func (a *Admin) SelfModelLimit(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if a.OrgModels == nil {
+		return orgModelError(c, errors.New("unavailable"))
+	}
+	var input SelfModelLimitRequest
+	if err := c.Bind().Body(&input); err != nil {
+		return orgModelError(c, orgmodel.ErrInvalid)
+	}
+	if err := a.OrgModels.SetSelfLimit(c.Context(), principalFromSession(SessionFrom(c)), input.Model, input.WeeklyLimitUSD); err != nil {
+		return orgModelError(c, err)
+	}
+	return responseapi.For(c).Response().Status(200).Data(OKResponse{OK: true}).Send()
 }

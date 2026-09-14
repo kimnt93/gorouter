@@ -169,6 +169,10 @@ func New(d Dependencies) *fiber.App {
 	admin := &handlers.Admin{OrgModels: d.OrgModels, Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit, OAuthAvailable: d.OAuthAvailable}
 	mgmt := app.Group("/admin", handlers.Require(d.Auth, ""))
 	mgmt.Get("/session", admin.Session)
+	mgmt.Get("/model-aliases", admin.PersonalModelAliases)
+	mgmt.Post("/model-aliases", admin.PersonalModelAliases)
+	mgmt.Post("/model-grants", admin.PersonalModelGrants)
+	mgmt.Post("/model-limits", admin.SelfModelLimit)
 	mgmt.Get("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
 	mgmt.Post("/tenants", handlers.Require(d.Auth, entities.ScopeKeysManage), admin.Tenants)
 	mgmt.Get("/organizations", admin.Organizations)

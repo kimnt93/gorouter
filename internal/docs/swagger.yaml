@@ -1817,6 +1817,13 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  internal_api_handlers.SelfModelLimitRequest:
+    properties:
+      model:
+        type: string
+      weekly_limit_usd:
+        type: number
+    type: object
   internal_api_handlers.UsageActivityResponse:
     properties:
       data:
@@ -2943,6 +2950,171 @@ paths:
       summary: Test credential connectivity
       tags:
       - credentials
+  /admin/model-aliases:
+    get:
+      parameters:
+      - description: Alias; POST
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationModelRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+            type: array
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List or create personal model aliases
+      tags:
+      - model-aliases
+    post:
+      parameters:
+      - description: Alias; POST
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationModelRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+            type: array
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModel'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List or create personal model aliases
+      tags:
+      - model-aliases
+  /admin/model-grants:
+    post:
+      parameters:
+      - description: User assignment and weekly limit; zero unlimited
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_handlers.OrganizationGrantRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Assign a personal model alias
+      tags:
+      - model-aliases
+  /admin/model-limits:
+    post:
+      parameters:
+      - description: Assigned model; zero removes personal cap only
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_handlers.SelfModelLimitRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Set personal limit on an assigned model
+      tags:
+      - model-aliases
   /admin/models:
     get:
       description: Lists configured model routes visible in the current organization
@@ -3616,7 +3788,9 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+            type: array
         "400":
           description: Bad Request
           schema:
@@ -3668,7 +3842,9 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+            items:
+              $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.OrganizationModelGrant'
+            type: array
         "400":
           description: Bad Request
           schema:
@@ -3738,6 +3914,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
         "503":
           description: Service Unavailable
           schema:
@@ -3788,6 +3968,10 @@ paths:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
         "503":

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { deleteModel, deletePrice, discoverModels, getCredentials, getModels, getPricingCatalog, saveModel, savePrice } from '../api/client'
+import { deleteModel, deletePrice, discoverModels, getCredentials, getModels, getPricingCatalog, getCallableModels, saveModel, savePrice } from '../api/client'
 import type { CatalogPrice, Credential, ModelDefinition, ModelRoute, Price, ProviderModel } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field } from '../components/Management'
+import { PersonalModelAliasesModal } from '../components/PersonalModelAliasesModal'
 import { Modal } from '../components/Modal'
 import { ModelUsageModal } from '../components/ModelUsageModal'
 import { PageLoading } from '../components/PageState'
@@ -48,9 +49,10 @@ function PriceStrip({ price, source }: { price?: Price; source: string }) {
 }
 
 export function ModelsPage() {
-  const { isMaster, isMasterView: sessionMasterView } = useSession()
+  const { session, isMaster, isMasterView: sessionMasterView } = useSession()
   const isMasterView = sessionMasterView ?? isMaster
   const [tab, setTab] = useState<Tab>('catalog')
+ const [aliasesOpen, setAliasesOpen] = useState(false)
   const [models, setModels] = useState<ModelDefinition[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [catalog, setCatalog] = useState<CatalogPrice[]>([])
@@ -67,6 +69,13 @@ export function ModelsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
+      if (session?.principal_type === 'user') {
+        const result = await getCallableModels()
+        setModels(result.data.map(m => ({ name: m.id, upstream_model: m.upstream_model || m.id, enabled: true, strategy: 'priority', routes: [], price: m.pricing })))
+        setConnected(result.data.map(m => ({ credential: { id: 'user-catalog', name: 'Accessible with your user key', provider: m.id.startsWith('org/') ? 'organization' : 'personal', kind: 'api_key', base_url: '', status: 'active', label: '', created_at: '' }, model: { id: m.id, public_id: m.id, name: m.id }, price: m.pricing ? { model: m.id, name: m.id, provider: '', price: m.pricing, cache_supported: false, source: 'router', updated_at: '' } : undefined })))
+        setCredentials([]); setDiscoveryErrors([]); setCatalog([])
+        return
+      }
       const [modelData, credentialData, catalogData] = await Promise.all([getModels(), getCredentials(), getPricingCatalog()])
       setModels(modelData); setCredentials(credentialData); setCatalog(catalogData)
       const active = credentialData.filter((credential) => credential.status === 'active')
@@ -86,7 +95,7 @@ export function ModelsPage() {
       available.sort((a, b) => a.model.public_id.localeCompare(b.model.public_id) || a.credential.name.localeCompare(b.credential.name))
       setConnected(Array.from(new Map(available.map((item) => [item.model.public_id, item])).values())); setDiscoveryErrors(failures)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
-  }, [])
+  }, [session?.principal_type])
   useEffect(() => { void load() }, [load])
 
   const visibleConnected = useMemo(() => {
@@ -102,7 +111,8 @@ export function ModelsPage() {
   const addConnected = (item: ConnectedModel) => setDraft({ name: item.model.public_id, upstream_model: item.model.id, strategy: 'priority', enabled: true, routes: [{ credential_id: item.credential.id, priority: 0, weight: 1, enabled: true }] })
 
   return <>
-    <header className="page-header"><div><span className="eyebrow">Manage / Models</span><h1>Models</h1><p>Browse every model exposed by connected providers, then create stable public model blends with stacked routes.</p></div>{isMasterView && <button className="button" onClick={() => setDraft({ name: '', upstream_model: '', strategy: 'priority', enabled: true, routes: [] })}>Create blend</button>}</header>
+ {aliasesOpen && <PersonalModelAliasesModal onClose={() => setAliasesOpen(false)} />}
+    <header className="page-header"><div><span className="eyebrow">Manage / Models</span><h1>Models</h1><p>Browse every model exposed by connected providers, then create stable public model blends with stacked routes.</p></div>{session?.principal_type === 'user' && <button className="button secondary" onClick={() => setAliasesOpen(true)}>Aliases and my limits</button>}{isMasterView && <button className="button" onClick={() => setDraft({ name: '', upstream_model: '', strategy: 'priority', enabled: true, routes: [] })}>Create blend</button>}</header>
     <ErrorBanner message={error} />
     <div className="page-tabs" role="tablist"><button className={tab === 'catalog' ? 'active' : ''} onClick={() => setTab('catalog')}>Available models <span>{connected.length}</span></button><button className={tab === 'blends' ? 'active' : ''} onClick={() => setTab('blends')}>Model blends <span>{models.length}</span></button></div>
     {loading ? <PageLoading /> : tab === 'catalog' ? <>

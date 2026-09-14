@@ -140,8 +140,16 @@ func OrganizationSlug(name string) string {
 
 // OrganizationAliasID and OrganizationGroupID reserve /g/ for model groups.
 func OrganizationAliasID(organizationName, alias string) string {
-	return OrganizationSlug(organizationName) + "/" + alias
+	return "org/" + OrganizationSlug(organizationName) + "/" + alias
 }
 func OrganizationGroupID(organizationName, group string) string {
-	return OrganizationSlug(organizationName) + "/g/" + group
+	return "org/" + OrganizationSlug(organizationName) + "/g/" + group
 }
+
+// UserAliasNamespace uses the username's account name for email-based logins.
+// Repository uniqueness checks reject colliding public aliases across accounts.
+func UserAliasNamespace(username string) string {
+	local, _, _ := strings.Cut(username, "@")
+	return OrganizationSlug(local)
+}
+func UserAliasID(username, alias string) string { return UserAliasNamespace(username) + "/" + alias }
