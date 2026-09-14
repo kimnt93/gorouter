@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -38,14 +39,14 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		}
 		b.Queue(`INSERT INTO usage_events (event_id,ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 			prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,input_cost_usd,output_cost_usd,cache_read_cost_usd,cache_write_cost_usd,priced,cache_hit,status_code,duration_ms,error,
-			actor_type,user_id,username,organization_id,conversation_enc,content_truncated,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)
+			actor_type,user_id,username,organization_id,conversation_enc,content_truncated,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,trace_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41)
 			ON CONFLICT (event_id) DO NOTHING`,
 			ev.ID, ev.TS, ev.TenantID, ev.ApiKeyID, ev.CredentialID, ev.Provider, ev.Model, ev.UpstreamModel,
 			ev.PromptTokens, ev.CompletionTokens, ev.CacheReadTokens, ev.CacheWriteTokens,
 			ev.CostUSD, ev.InputCostUSD, ev.OutputCostUSD, ev.CacheReadCostUSD, ev.CacheWriteCostUSD, ev.Priced, ev.CacheHit, ev.StatusCode, ev.DurationMS, ev.Error,
 			ev.ActorType, ev.UserID, ev.Username, ev.OrganizationID, nullableBytes(ev.ConversationEnc), ev.ContentTruncated,
-			ev.Application, ev.Environment, ev.WorkspaceID, ev.AgentID, ev.ConversationID, ev.RunID, ev.ParentRunID, ev.LogicalRequestID, ev.ProviderAttemptID, ev.AccountingTS, ev.UsageMeasurement, ev.AccountingState)
+			ev.Application, ev.Environment, ev.WorkspaceID, ev.AgentID, ev.ConversationID, ev.RunID, ev.ParentRunID, ev.TraceID, ev.LogicalRequestID, ev.ProviderAttemptID, ev.AccountingTS, ev.UsageMeasurement, ev.AccountingState)
 	}
 	return r.db.Pool.SendBatch(ctx, b).Close()
 }
@@ -99,61 +100,26 @@ func (r *UsageRepo) SummaryForTenant(ctx context.Context, tenantID string, since
 }
 
 func (r *UsageRepo) RecentForTenant(ctx context.Context, tenantID string, limit int) ([]entities.RecentEvent, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	rows, err := r.db.Pool.Query(ctx, `
-		SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,prompt_tokens,completion_tokens,
-		       cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-		       actor_type,user_id,username,organization_id
-		FROM usage_events WHERE tenant_id=$1 ORDER BY ts DESC,event_id DESC LIMIT $2`, tenantID, limit)
+	page, err := r.QueryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, OrganizationID: tenantID, Limit: limit})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []entities.RecentEvent
-	for rows.Next() {
-		var ev entities.RecentEvent
-		if err := rows.Scan(&ev.ID, &ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Provider, &ev.Model, &ev.UpstreamModel,
-			&ev.PromptTokens, &ev.CompletionTokens, &ev.CacheReadTokens, &ev.CacheWriteTokens,
-			&ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error,
-			&ev.ActorType, &ev.UserID, &ev.Username, &ev.OrganizationID); err != nil {
-			return nil, err
-		}
-		out = append(out, ev)
-	}
-	return out, rows.Err()
+	return page.Data, nil
 }
 
 func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsagePage, error) {
 	limit := boundedLimit(query.Limit)
 	cursor := decodeAuditCursor(query.Cursor)
-	var since, until time.Time
-	if query.Since != nil {
-		since = query.Since.UTC()
+	filter, args := postgresUsageFilter(query)
+	if !cursor.TS.IsZero() {
+		n := len(args)
+		filter += fmt.Sprintf(" AND (ts,COALESCE(event_id,'legacy_' || seq::text)) < ($%d,$%d)", n+1, n+2)
+		args = append(args, cursor.TS, cursor.ID)
 	}
-	if query.Until != nil {
-		until = query.Until.UTC()
-	}
-	master := query.Visibility.PrincipalType == entities.PrincipalMaster
-	organizationWide := query.Visibility.OrganizationWide && query.Visibility.OrganizationID != ""
-	var status int
-	hasStatus := query.StatusCode != nil
-	if hasStatus {
-		status = *query.StatusCode
-	}
+	args = append(args, limit+1)
 	rows, err := r.db.Pool.Query(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-		actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state FROM usage_events WHERE
-		($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND
-		($5='' OR organization_id=ANY(string_to_array($5,','))) AND ($6='' OR user_id=ANY(string_to_array($6,','))) AND
-		($7='' OR model=$7) AND ($8='' OR api_key_id=ANY(string_to_array($8,','))) AND (NOT $9 OR status_code=$10) AND
-		($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND
-		($12::timestamptz='0001-01-01 00:00:00+00' OR ts < $12) AND
-		($13='' OR provider=$13) AND ($14='' OR credential_id=$14) AND ($15='' OR workload_application=$15) AND ($16='' OR workload_environment=$16) AND ($17='' OR workload_workspace_id=$17) AND (($18='' AND cardinality($19::text[])=0) OR workload_agent_id=$18 OR workload_agent_id=ANY($19::text[])) AND ($20='' OR conversation_id=$20) AND ($21='' OR run_id=$21) AND ($22='' OR logical_request_id=$22) AND
-		($23::timestamptz='0001-01-01 00:00:00+00' OR (ts,COALESCE(event_id,'legacy_' || seq::text)) < ($23,$24))
-		ORDER BY ts DESC,event_id DESC LIMIT $25`, master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID,
-		query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until, query.Provider, query.CredentialID, query.Application, query.Environment, query.WorkspaceID, query.AgentID, query.AgentIDs, query.ConversationID, query.RunID, query.LogicalRequestID, cursor.TS, cursor.ID, limit+1)
+		actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,trace_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state FROM usage_events WHERE `+filter+fmt.Sprintf(` ORDER BY ts DESC,event_id DESC LIMIT $%d`, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +129,7 @@ func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (
 		var event entities.RecentEvent
 		if err := rows.Scan(&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
 			&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-			&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState); err != nil {
+			&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.TraceID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState); err != nil {
 			return nil, err
 		}
 		page.Data = append(page.Data, event)
@@ -273,21 +239,50 @@ func (r *UsageRepo) HealthUsage(ctx context.Context, query entities.UsageQuery) 
 }
 
 func postgresUsageFilter(query entities.UsageQuery) (string, []any) {
-	var since, until time.Time
+	clauses := []string{}
+	args := []any{}
+	add := func(column string, value any, op string) {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("%s %s $%d", column, op, len(args)))
+	}
+	v := query.Visibility
+	switch {
+	case v.PrincipalType == entities.PrincipalMaster:
+		if v.OrganizationID != "" {
+			add("organization_id", v.OrganizationID, "=")
+		}
+	case v.OrganizationWide && v.OrganizationID != "":
+		add("organization_id", v.OrganizationID, "=")
+	case !v.OrganizationWide && v.UserID != "":
+		add("user_id", v.UserID, "=")
+		if v.OrganizationID != "" || v.Workload != nil {
+			add("organization_id", v.OrganizationID, "=")
+		}
+	default:
+		clauses = append(clauses, "FALSE")
+	}
+	for _, filter := range query.Filters() {
+		column := filter.Field
+		switch column {
+		case "application", "environment", "workspace_id", "agent_id":
+			column = "workload_" + column
+		}
+		args = append(args, filter.Values)
+		clauses = append(clauses, fmt.Sprintf("%s=ANY($%d::text[])", column, len(args)))
+	}
+	if query.StatusCode != nil {
+		add("status_code", *query.StatusCode, "=")
+	}
 	if query.Since != nil {
-		since = query.Since.UTC()
+		add("ts", query.Since.UTC(), ">=")
 	}
 	if query.Until != nil {
-		until = query.Until.UTC()
+		add("ts", query.Until.UTC(), "<")
 	}
-	master := query.Visibility.PrincipalType == entities.PrincipalMaster
-	organizationWide := query.Visibility.OrganizationWide && query.Visibility.OrganizationID != ""
-	status := 0
-	hasStatus := query.StatusCode != nil
-	if hasStatus {
-		status = *query.StatusCode
+	if len(clauses) == 0 {
+		clauses = append(clauses, "TRUE")
 	}
-	return `($1 OR ($2 AND organization_id=$3) OR (NOT $2 AND user_id=$4)) AND ($5='' OR organization_id=ANY(string_to_array($5,','))) AND ($6='' OR user_id=ANY(string_to_array($6,','))) AND ($7='' OR model=$7) AND ($8='' OR api_key_id=ANY(string_to_array($8,','))) AND (NOT $9 OR status_code=$10) AND ($11::timestamptz='0001-01-01 00:00:00+00' OR ts >= $11) AND ($12::timestamptz='0001-01-01 00:00:00+00' OR ts < $12) AND ($13='' OR provider=$13) AND ($14='' OR credential_id=$14) AND ($15='' OR workload_application=$15) AND ($16='' OR workload_environment=$16) AND ($17='' OR workload_workspace_id=$17) AND (($18='' AND cardinality($19::text[])=0) OR workload_agent_id=$18 OR workload_agent_id=ANY($19::text[])) AND ($20='' OR conversation_id=$20) AND ($21='' OR run_id=$21) AND ($22='' OR logical_request_id=$22)`, []any{master, organizationWide, query.Visibility.OrganizationID, query.Visibility.UserID, query.OrganizationID, query.UserID, query.Model, query.APIKeyID, hasStatus, status, since, until, query.Provider, query.CredentialID, query.Application, query.Environment, query.WorkspaceID, query.AgentID, query.AgentIDs, query.ConversationID, query.RunID, query.LogicalRequestID}
+	return strings.Join(clauses, " AND "), args
 }
 
 func nullableBytes(value []byte) any {
@@ -298,18 +293,17 @@ func nullableBytes(value []byte) any {
 }
 
 func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
-	master := visibility.PrincipalType == entities.PrincipalMaster
-	organizationWide := visibility.OrganizationWide && visibility.OrganizationID != ""
+	filter, args := postgresUsageFilter(entities.UsageQuery{Visibility: visibility})
+	args = append(args, id)
 	var event entities.UsageDetail
 	var encrypted []byte
 	err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,provider,model,upstream_model,
 		prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error,
-		actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state,COALESCE(conversation_enc,''::bytea),content_truncated
-		FROM usage_events WHERE COALESCE(event_id,'legacy_' || seq::text)=$1 AND
-		($2 OR ($3 AND organization_id=$4) OR (NOT $3 AND user_id=$5))`, id, master, organizationWide, visibility.OrganizationID, visibility.UserID).Scan(
+		actor_type,user_id,username,organization_id,workload_application,workload_environment,workload_workspace_id,workload_agent_id,conversation_id,run_id,parent_run_id,trace_id,logical_request_id,provider_attempt_id,accounting_ts,usage_measurement,accounting_state,COALESCE(conversation_enc,''::bytea),content_truncated
+		FROM usage_events WHERE `+filter+fmt.Sprintf(` AND COALESCE(event_id,'legacy_' || seq::text)=$%d`, len(args)), args...).Scan(
 		&event.ID, &event.TS, &event.TenantID, &event.KeyID, &event.CredentialID, &event.Provider, &event.Model, &event.UpstreamModel,
 		&event.PromptTokens, &event.CompletionTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CostUSD, &event.Priced,
-		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState,
+		&event.CacheHit, &event.StatusCode, &event.DurationMS, &event.Error, &event.ActorType, &event.UserID, &event.Username, &event.OrganizationID, &event.Application, &event.Environment, &event.WorkspaceID, &event.AgentID, &event.ConversationID, &event.RunID, &event.ParentRunID, &event.TraceID, &event.LogicalRequestID, &event.ProviderAttemptID, &event.AccountingTS, &event.UsageMeasurement, &event.AccountingState,
 		&encrypted, &event.ContentTruncated)
 	if err == pgx.ErrNoRows {
 		return nil, entities.ErrNotFound

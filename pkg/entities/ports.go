@@ -129,6 +129,7 @@ type UsageVisibility struct {
 	UserID           string
 	OrganizationID   string
 	OrganizationWide bool
+	Workload         *WorkloadBinding
 }
 
 type UsageQuery struct {
@@ -152,6 +153,9 @@ type UsageQuery struct {
 	ConversationID   string
 	RunID            string
 	LogicalRequestID string
+	ParentRunID      string
+	TraceID          string
+	Workload         *WorkloadBinding
 }
 
 type UsagePage struct {

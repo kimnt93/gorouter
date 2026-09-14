@@ -24,4 +24,5 @@ func TestIdentityBackendContract(t *testing.T) {
 	}
 	store := New(db.Pool)
 	contract.RunIdentityBackendContract(t, contract.IdentityBackend{Identity: NewIdentityRepo(store), Keys: NewApiKeyRepo(store), Usage: NewUsageRepo(store), Audit: NewAuditRepo(store)})
+	contract.RunUsageTrackingContract(t, NewUsageRepo(store))
 }

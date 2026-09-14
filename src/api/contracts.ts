@@ -1,4 +1,20 @@
-export interface UsageEvent {
+export interface UsageTracking {
+  application?: string
+  environment?: string
+  workspace_id?: string
+  agent_id?: string
+  conversation_id?: string
+  run_id?: string
+  parent_run_id?: string
+  logical_request_id?: string
+  trace_id?: string
+  provider_attempt_id?: string
+  accounting_ts?: string
+  usage_measurement?: string
+  accounting_state?: string
+}
+
+export interface UsageEvent extends UsageTracking {
   id: string
   ts: string
   tenant_id: string
@@ -193,4 +209,15 @@ export interface UsageFilters {
   until: string
   model?: string
   status?: string
+  applicationIds?: string[]
+  environmentIds?: string[]
+  workspaceIds?: string[]
+  agentIds?: string[]
+  conversationIds?: string[]
+  runIds?: string[]
+  parentRunIds?: string[]
+  requestIds?: string[]
+  traceIds?: string[]
+  providerIds?: string[]
+  credentialIds?: string[]
 }

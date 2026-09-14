@@ -3058,7 +3058,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "User filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "user_id",
                         "in": "query"
                     },
@@ -3094,25 +3094,25 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Workload agent filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "agent_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Conversation filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "conversation_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Run filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "run_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Logical request filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "logical_request_id",
                         "in": "query"
                     },
@@ -3126,6 +3126,18 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Credential filter",
                         "name": "credential_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "parent_run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trace IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "trace_id",
                         "in": "query"
                     }
                 ],
@@ -3156,6 +3168,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
@@ -3283,7 +3301,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "User filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "user_id",
                         "in": "query"
                     },
@@ -3331,25 +3349,25 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Workload agent filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "agent_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Conversation filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "conversation_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Run filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "run_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Logical request filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "logical_request_id",
                         "in": "query"
                     },
@@ -3363,6 +3381,18 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Credential filter",
                         "name": "credential_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "parent_run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trace IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "trace_id",
                         "in": "query"
                     }
                 ],
@@ -3396,6 +3426,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -3415,8 +3451,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "24h, 7d, or 30d",
+                        "description": "24h, 7d, 30d, or all; default 24h",
                         "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 inclusive lower bound (overrides range)",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 exclusive upper bound",
+                        "name": "until",
                         "in": "query"
                     },
                     {
@@ -3427,7 +3475,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "User filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "user_id",
                         "in": "query"
                     },
@@ -3457,25 +3505,25 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Workload agent filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "agent_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Conversation filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "conversation_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Run filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "run_id",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Logical request filter",
+                        "description": "Comma-separated or repeated IDs; omitted means all authorized",
                         "name": "logical_request_id",
                         "in": "query"
                     },
@@ -3489,6 +3537,18 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Credential filter",
                         "name": "credential_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "parent_run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trace IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "trace_id",
                         "in": "query"
                     }
                 ],
@@ -3519,6 +3579,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
@@ -3560,6 +3626,42 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Comma-separated agent identities",
                         "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "parent_run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trace IDs: comma-separated or repeated; omitted means all authorized",
+                        "name": "trace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Conversation/session IDs: CSV or repeated",
+                        "name": "conversation_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run IDs: CSV or repeated",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request IDs: CSV or repeated",
+                        "name": "logical_request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "User IDs: CSV or repeated, restricted to authorized scope",
+                        "name": "user_id",
                         "in": "query"
                     }
                 ],
@@ -4107,6 +4209,36 @@ const docTemplate = `{
                 "summary": "Create a chat completion",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Application conversation/session ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Conversation-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Run-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Parent-Run-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request correlation ID; generated if omitted; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Request-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Application trace correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Trace-Id",
+                        "in": "header"
+                    },
+                    {
                         "description": "Chat request",
                         "name": "request",
                         "in": "body",
@@ -4193,6 +4325,36 @@ const docTemplate = `{
                 ],
                 "summary": "Create an Anthropic message",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application conversation/session ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Conversation-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Run-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Parent-Run-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request correlation ID; generated if omitted; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Request-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Application trace correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Trace-Id",
+                        "in": "header"
+                    },
                     {
                         "description": "Messages request",
                         "name": "request",
@@ -4315,6 +4477,36 @@ const docTemplate = `{
                 ],
                 "summary": "Create a response",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application conversation/session ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Conversation-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Run-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent run correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Parent-Run-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Logical request correlation ID; generated if omitted; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Request-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Application trace correlation ID; opaque ID, maximum 128 bytes",
+                        "name": "X-GoRouter-Trace-Id",
+                        "in": "header"
+                    },
                     {
                         "description": "Responses request",
                         "name": "request",
@@ -5430,6 +5622,9 @@ const docTemplate = `{
                 "tenant_id": {
                     "type": "string"
                 },
+                "trace_id": {
+                    "type": "string"
+                },
                 "ts": {
                     "type": "string"
                 },
@@ -5591,6 +5786,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "tenant_id": {
+                    "type": "string"
+                },
+                "trace_id": {
                     "type": "string"
                 },
                 "ts": {

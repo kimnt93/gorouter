@@ -218,6 +218,7 @@ type UsageEvent struct {
 	ConversationID    string    `json:"conversation_id,omitempty"`
 	RunID             string    `json:"run_id,omitempty"`
 	ParentRunID       string    `json:"parent_run_id,omitempty"`
+	TraceID           string    `json:"trace_id,omitempty"`
 	LogicalRequestID  string    `json:"logical_request_id,omitempty"`
 	ProviderAttemptID string    `json:"provider_attempt_id,omitempty"`
 	AccountingTS      time.Time `json:"accounting_ts"`
@@ -257,6 +258,7 @@ type RecentEvent struct {
 	ConversationID    string    `json:"conversation_id,omitempty"`
 	RunID             string    `json:"run_id,omitempty"`
 	ParentRunID       string    `json:"parent_run_id,omitempty"`
+	TraceID           string    `json:"trace_id,omitempty"`
 	LogicalRequestID  string    `json:"logical_request_id,omitempty"`
 	ProviderAttemptID string    `json:"provider_attempt_id,omitempty"`
 	AccountingTS      time.Time `json:"accounting_ts"`

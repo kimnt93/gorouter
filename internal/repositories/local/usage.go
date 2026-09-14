@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/entities"
@@ -93,35 +93,44 @@ func (r *UsageRepo) all(ctx context.Context) ([]entities.UsageEvent, error) {
 }
 
 func usageMatches(event entities.UsageEvent, query entities.UsageQuery, cursor auditCursor) bool {
-	if query.Visibility.PrincipalType != entities.PrincipalMaster {
-		if query.Visibility.OrganizationWide {
-			if event.OrganizationID != query.Visibility.OrganizationID {
-				return false
-			}
-		} else if event.UserID != query.Visibility.UserID {
-			return false
-		}
-	}
-	contains := func(filter, value string) bool {
-		if filter == "" {
-			return true
-		}
-		for _, item := range strings.Split(filter, ",") {
-			if item == value {
-				return true
-			}
-		}
+	if !query.Visibility.Allows(event.UserID, event.OrganizationID) {
 		return false
 	}
-	if !contains(query.OrganizationID, event.OrganizationID) || !contains(query.UserID, event.UserID) || !contains(query.Model, event.Model) || !contains(query.APIKeyID, event.ApiKeyID) || !contains(query.Provider, event.Provider) || !contains(query.CredentialID, event.CredentialID) || !contains(query.Application, event.Application) || !contains(query.Environment, event.Environment) || !contains(query.WorkspaceID, event.WorkspaceID) || !contains(query.AgentID, event.AgentID) || !contains(query.ConversationID, event.ConversationID) || !contains(query.RunID, event.RunID) || !contains(query.LogicalRequestID, event.LogicalRequestID) {
-		return false
-	}
-	if len(query.AgentIDs) > 0 {
-		matched := false
-		for _, agentID := range query.AgentIDs {
-			matched = matched || agentID == event.AgentID
+	for _, filter := range query.Filters() {
+		var value string
+		switch filter.Field {
+		case "organization_id":
+			value = event.OrganizationID
+		case "user_id":
+			value = event.UserID
+		case "model":
+			value = event.Model
+		case "api_key_id":
+			value = event.ApiKeyID
+		case "provider":
+			value = event.Provider
+		case "credential_id":
+			value = event.CredentialID
+		case "application":
+			value = event.Application
+		case "environment":
+			value = event.Environment
+		case "workspace_id":
+			value = event.WorkspaceID
+		case "agent_id":
+			value = event.AgentID
+		case "conversation_id":
+			value = event.ConversationID
+		case "run_id":
+			value = event.RunID
+		case "parent_run_id":
+			value = event.ParentRunID
+		case "trace_id":
+			value = event.TraceID
+		case "logical_request_id":
+			value = event.LogicalRequestID
 		}
-		if !matched {
+		if !slices.Contains(filter.Values, value) {
 			return false
 		}
 	}
@@ -132,7 +141,7 @@ func usageMatches(event entities.UsageEvent, query entities.UsageQuery, cursor a
 }
 
 func recent(event entities.UsageEvent) entities.RecentEvent {
-	return entities.RecentEvent{ID: event.ID, TS: event.TS, TenantID: event.TenantID, KeyID: event.ApiKeyID, CredentialID: event.CredentialID, Provider: event.Provider, Model: event.Model, UpstreamModel: event.UpstreamModel, PromptTokens: event.PromptTokens, CompletionTokens: event.CompletionTokens, CacheReadTokens: event.CacheReadTokens, CacheWriteTokens: event.CacheWriteTokens, CostUSD: event.CostUSD, Priced: event.Priced, CacheHit: event.CacheHit, StatusCode: event.StatusCode, DurationMS: event.DurationMS, Error: event.Error, ActorType: event.ActorType, UserID: event.UserID, Username: event.Username, OrganizationID: event.OrganizationID, Application: event.Application, Environment: event.Environment, WorkspaceID: event.WorkspaceID, AgentID: event.AgentID, ConversationID: event.ConversationID, RunID: event.RunID, ParentRunID: event.ParentRunID, LogicalRequestID: event.LogicalRequestID, ProviderAttemptID: event.ProviderAttemptID, AccountingTS: event.AccountingTS, UsageMeasurement: event.UsageMeasurement, AccountingState: event.AccountingState}
+	return entities.RecentEvent{ID: event.ID, TS: event.TS, TenantID: event.TenantID, KeyID: event.ApiKeyID, CredentialID: event.CredentialID, Provider: event.Provider, Model: event.Model, UpstreamModel: event.UpstreamModel, PromptTokens: event.PromptTokens, CompletionTokens: event.CompletionTokens, CacheReadTokens: event.CacheReadTokens, CacheWriteTokens: event.CacheWriteTokens, CostUSD: event.CostUSD, Priced: event.Priced, CacheHit: event.CacheHit, StatusCode: event.StatusCode, DurationMS: event.DurationMS, Error: event.Error, ActorType: event.ActorType, UserID: event.UserID, Username: event.Username, OrganizationID: event.OrganizationID, Application: event.Application, Environment: event.Environment, WorkspaceID: event.WorkspaceID, AgentID: event.AgentID, ConversationID: event.ConversationID, RunID: event.RunID, ParentRunID: event.ParentRunID, TraceID: event.TraceID, LogicalRequestID: event.LogicalRequestID, ProviderAttemptID: event.ProviderAttemptID, AccountingTS: event.AccountingTS, UsageMeasurement: event.UsageMeasurement, AccountingState: event.AccountingState}
 }
 
 func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsagePage, error) {

@@ -86,6 +86,11 @@ type MessagesUsage struct {
 // @Security BearerAuth
 // @Accept json
 // @Produce json
+// @Param X-GoRouter-Conversation-Id header string false "Application conversation/session ID; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Run-Id header string false "Run correlation ID; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Parent-Run-Id header string false "Parent run correlation ID; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Request-Id header string false "Logical request correlation ID; generated if omitted; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Trace-Id header string false "Application trace correlation ID; opaque ID, maximum 128 bytes"
 // @Param request body MessagesRequest true "Messages request"
 // @Success 200 {object} MessagesResponse
 // @Failure 400,401,403,404,429,500,502,503 {object} responseapi.ErrorResponse

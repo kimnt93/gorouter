@@ -70,6 +70,7 @@ export async function requestStream(path: string, body: object, onText: (text: s
 }
 
 function applyFilters(params: URLSearchParams, filters: UsageFilters): void {
+  applyTrackingFilters(params, filters)
   params.set('range', filters.range)
   params.set('group_by', groupByForUsageRange(filters))
   if (filters.userIds.length) params.set('user_id', filters.userIds.join(','))
@@ -89,6 +90,7 @@ export function getActivity(filters: UsageFilters): Promise<UsageActivityRespons
 
 export function getRecent(filters: UsageFilters, cursor = ''): Promise<UsageRecentResponse> {
   const params = new URLSearchParams({ limit: '100' })
+  applyTrackingFilters(params, filters)
   if (filters.userIds.length) params.set('user_id', filters.userIds.join(','))
   if (filters.apiKeyIds.length) params.set('api_key_id', filters.apiKeyIds.join(','))
   if (filters.organizationIds.length) params.set('organization_id', filters.organizationIds.join(','))
@@ -180,3 +182,14 @@ export const flushRouterCache = (): Promise<{ ok: boolean }> => request('/admin/
 
 export const getCodexResetCredits = (id: string): Promise<import("./contracts").CodexResetCreditList> => request(`/admin/credentials/${encodeURIComponent(id)}/reset-credits`, { cache: "no-store" })
 export const redeemCodexResetCredit = (id: string, selectionToken: string, requestId: string): Promise<import("./contracts").CodexResetCreditResult> => request(`/admin/credentials/${encodeURIComponent(id)}/reset-credits`, { method: "POST", body: JSON.stringify({ selection_token: selectionToken, request_id: requestId }) })
+
+function applyTrackingFilters(params: URLSearchParams, filters: UsageFilters) {
+  const selections: [string, string[] | undefined][] = [
+    ['application', filters.applicationIds], ['environment', filters.environmentIds],
+    ['workspace_id', filters.workspaceIds], ['agent_id', filters.agentIds],
+    ['conversation_id', filters.conversationIds], ['run_id', filters.runIds],
+    ['parent_run_id', filters.parentRunIds], ['logical_request_id', filters.requestIds],
+    ['trace_id', filters.traceIds], ['provider', filters.providerIds], ['credential_id', filters.credentialIds],
+  ]
+  for (const [key, values] of selections) if (values?.length) params.set(key, values.join(','))
+}

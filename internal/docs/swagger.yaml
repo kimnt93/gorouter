@@ -684,6 +684,8 @@ definitions:
         type: integer
       tenant_id:
         type: string
+      trace_id:
+        type: string
       ts:
         type: string
       upstream_model:
@@ -791,6 +793,8 @@ definitions:
       status_code:
         type: integer
       tenant_id:
+        type: string
+      trace_id:
         type: string
       ts:
         type: string
@@ -3871,7 +3875,7 @@ paths:
         in: query
         name: organization_id
         type: string
-      - description: User filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: user_id
         type: string
@@ -3895,19 +3899,19 @@ paths:
         in: query
         name: workspace_id
         type: string
-      - description: Workload agent filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: agent_id
         type: string
-      - description: Conversation filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: conversation_id
         type: string
-      - description: Run filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: run_id
         type: string
-      - description: Logical request filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: logical_request_id
         type: string
@@ -3918,6 +3922,15 @@ paths:
       - description: Credential filter
         in: query
         name: credential_id
+        type: string
+      - description: 'Parent run IDs: comma-separated or repeated; omitted means all
+          authorized'
+        in: query
+        name: parent_run_id
+        type: string
+      - description: 'Trace IDs: comma-separated or repeated; omitted means all authorized'
+        in: query
+        name: trace_id
         type: string
       responses:
         "200":
@@ -3938,6 +3951,10 @@ paths:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
       security:
@@ -4020,7 +4037,7 @@ paths:
         in: query
         name: organization_id
         type: string
-      - description: User filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: user_id
         type: string
@@ -4052,19 +4069,19 @@ paths:
         in: query
         name: workspace_id
         type: string
-      - description: Workload agent filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: agent_id
         type: string
-      - description: Conversation filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: conversation_id
         type: string
-      - description: Run filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: run_id
         type: string
-      - description: Logical request filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: logical_request_id
         type: string
@@ -4075,6 +4092,15 @@ paths:
       - description: Credential filter
         in: query
         name: credential_id
+        type: string
+      - description: 'Parent run IDs: comma-separated or repeated; omitted means all
+          authorized'
+        in: query
+        name: parent_run_id
+        type: string
+      - description: 'Trace IDs: comma-separated or repeated; omitted means all authorized'
+        in: query
+        name: trace_id
         type: string
       responses:
         "200":
@@ -4097,6 +4123,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: List recent usage
@@ -4107,15 +4137,23 @@ paths:
       description: Returns policy-constrained aggregate request, token, cache, and
         cost metrics.
       parameters:
-      - description: 24h, 7d, or 30d
+      - description: 24h, 7d, 30d, or all; default 24h
         in: query
         name: range
+        type: string
+      - description: RFC3339 inclusive lower bound (overrides range)
+        in: query
+        name: since
+        type: string
+      - description: RFC3339 exclusive upper bound
+        in: query
+        name: until
         type: string
       - description: Organization filter
         in: query
         name: organization_id
         type: string
-      - description: User filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: user_id
         type: string
@@ -4135,19 +4173,19 @@ paths:
         in: query
         name: workspace_id
         type: string
-      - description: Workload agent filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: agent_id
         type: string
-      - description: Conversation filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: conversation_id
         type: string
-      - description: Run filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: run_id
         type: string
-      - description: Logical request filter
+      - description: Comma-separated or repeated IDs; omitted means all authorized
         in: query
         name: logical_request_id
         type: string
@@ -4158,6 +4196,15 @@ paths:
       - description: Credential filter
         in: query
         name: credential_id
+        type: string
+      - description: 'Parent run IDs: comma-separated or repeated; omitted means all
+          authorized'
+        in: query
+        name: parent_run_id
+        type: string
+      - description: 'Trace IDs: comma-separated or repeated; omitted means all authorized'
+        in: query
+        name: trace_id
         type: string
       responses:
         "200":
@@ -4178,6 +4225,10 @@ paths:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
       security:
@@ -4203,6 +4254,31 @@ paths:
       - description: Comma-separated agent identities
         in: query
         name: agent_id
+        type: string
+      - description: 'Parent run IDs: comma-separated or repeated; omitted means all
+          authorized'
+        in: query
+        name: parent_run_id
+        type: string
+      - description: 'Trace IDs: comma-separated or repeated; omitted means all authorized'
+        in: query
+        name: trace_id
+        type: string
+      - description: 'Conversation/session IDs: CSV or repeated'
+        in: query
+        name: conversation_id
+        type: string
+      - description: 'Run IDs: CSV or repeated'
+        in: query
+        name: run_id
+        type: string
+      - description: 'Logical request IDs: CSV or repeated'
+        in: query
+        name: logical_request_id
+        type: string
+      - description: 'User IDs: CSV or repeated, restricted to authorized scope'
+        in: query
+        name: user_id
         type: string
       responses:
         "200":
@@ -4560,6 +4636,27 @@ paths:
         model policy, quota, cache, routing, and usage accounting, then returns a
         provider response or stream.
       parameters:
+      - description: Application conversation/session ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Conversation-Id
+        type: string
+      - description: Run correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Run-Id
+        type: string
+      - description: Parent run correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Parent-Run-Id
+        type: string
+      - description: Logical request correlation ID; generated if omitted; opaque
+          ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Request-Id
+        type: string
+      - description: Application trace correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Trace-Id
+        type: string
       - description: Chat request
         in: body
         name: request
@@ -4617,6 +4714,27 @@ paths:
       description: Accepts an Anthropic Messages request and translates it through
         the gateway chat pipeline.
       parameters:
+      - description: Application conversation/session ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Conversation-Id
+        type: string
+      - description: Run correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Run-Id
+        type: string
+      - description: Parent run correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Parent-Run-Id
+        type: string
+      - description: Logical request correlation ID; generated if omitted; opaque
+          ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Request-Id
+        type: string
+      - description: Application trace correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Trace-Id
+        type: string
       - description: Messages request
         in: body
         name: request
@@ -4699,6 +4817,27 @@ paths:
       description: Accepts an OpenAI Responses API request and translates it through
         the gateway chat pipeline.
       parameters:
+      - description: Application conversation/session ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Conversation-Id
+        type: string
+      - description: Run correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Run-Id
+        type: string
+      - description: Parent run correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Parent-Run-Id
+        type: string
+      - description: Logical request correlation ID; generated if omitted; opaque
+          ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Request-Id
+        type: string
+      - description: Application trace correlation ID; opaque ID, maximum 128 bytes
+        in: header
+        name: X-GoRouter-Trace-Id
+        type: string
       - description: Responses request
         in: body
         name: request

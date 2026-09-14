@@ -1007,23 +1007,28 @@ func (a *Admin) Prices(c fiber.Ctx) error {
 // @Description Returns policy-constrained aggregate request, token, cache, and cost metrics.
 // @Tags usage
 // @Security BearerAuth
-// @Param range query string false "24h, 7d, or 30d"
+// @Param range query string false "24h, 7d, 30d, or all; default 24h"
+// @Param since query string false "RFC3339 inclusive lower bound (overrides range)"
+// @Param until query string false "RFC3339 exclusive upper bound"
 // @Param organization_id query string false "Organization filter"
-// @Param user_id query string false "User filter"
+// @Param user_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
 // @Param view_user_id query string false "Master-only user View As filter"
 // @Param application query string false "Workload application filter"
 // @Param environment query string false "Workload environment filter"
 // @Param workspace_id query string false "Workload workspace filter"
-// @Param agent_id query string false "Workload agent filter"
-// @Param conversation_id query string false "Conversation filter"
-// @Param run_id query string false "Run filter"
-// @Param logical_request_id query string false "Logical request filter"
+// @Param agent_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param conversation_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param run_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param logical_request_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
 // @Param provider query string false "Provider filter"
 // @Param credential_id query string false "Credential filter"
+// @Param parent_run_id query string false "Parent run IDs: comma-separated or repeated; omitted means all authorized"
+// @Param trace_id query string false "Trace IDs: comma-separated or repeated; omitted means all authorized"
 // @Success 200 {object} entities.UsageSummary
-// @Failure 400,401,403,500 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,503,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/summary [get]
 func (a *Admin) UsageSummary(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	since := time.Now().Add(-24 * time.Hour)
 	switch c.Query("range") {
 	case "7d":
@@ -1031,26 +1036,22 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	case "30d":
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	actor, readErr := a.principalForRead(c)
+	visibility, readErr := a.usageReadVisibility(c)
 	if readErr != nil {
-		return principalReadError(c, readErr)
+		return usageReadFailure(c, readErr)
 	}
-	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
-		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
-	}
-	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
-		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
-			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
-		}
-	}
-	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
-	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
-	if policyErr != nil {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
-	}
+	requestedOrganization, _ := readUsageSelection(c, "organization_id")
+
 	query := entities.UsageQuery{Visibility: visibility, Since: &since, OrganizationID: requestedOrganization, UserID: c.Query("user_id")}
-	applyUsageFilters(c, &query)
+	if err := applyUsageFilters(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
+	if c.Query("range") == "all" {
+		query.Since = nil
+	}
+	if err := applyUsageTimes(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
 	v, err := a.UsageSvc.SummaryQuery(c.Context(), query)
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load usage summary").Send()
@@ -1068,7 +1069,7 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 // @Param since query string false "RFC3339 lower bound"
 // @Param until query string false "RFC3339 upper bound"
 // @Param organization_id query string false "Organization filter"
-// @Param user_id query string false "User filter"
+// @Param user_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
 // @Param model query string false "Model filter"
 // @Param api_key_id query string false "API-key filter"
 // @Param status query int false "HTTP status filter"
@@ -1076,37 +1077,33 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 // @Param application query string false "Workload application filter"
 // @Param environment query string false "Workload environment filter"
 // @Param workspace_id query string false "Workload workspace filter"
-// @Param agent_id query string false "Workload agent filter"
-// @Param conversation_id query string false "Conversation filter"
-// @Param run_id query string false "Run filter"
-// @Param logical_request_id query string false "Logical request filter"
+// @Param agent_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param conversation_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param run_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param logical_request_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
 // @Param provider query string false "Provider filter"
 // @Param credential_id query string false "Credential filter"
+// @Param parent_run_id query string false "Parent run IDs: comma-separated or repeated; omitted means all authorized"
+// @Param trace_id query string false "Trace IDs: comma-separated or repeated; omitted means all authorized"
 // @Success 200 {object} UsageRecentResponse
-// @Failure 400,401,403,500 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,503,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/recent [get]
 func (a *Admin) UsageRecent(c fiber.Ctx) error {
-	actor, readErr := a.principalForRead(c)
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	visibility, readErr := a.usageReadVisibility(c)
 	if readErr != nil {
-		return principalReadError(c, readErr)
+		return usageReadFailure(c, readErr)
 	}
-	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
-		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
+	requestedOrganization, _ := readUsageSelection(c, "organization_id")
+
+	limit, parseErr := strconv.Atoi(c.Query("limit", "100"))
+	if parseErr != nil || limit < 1 || limit > 500 {
+		return responseapi.For(c).BadRequest("limit must be between 1 and 500").Send()
 	}
-	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" {
-		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
-			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
-		}
-	}
-	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
-	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
-	if policyErr != nil {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
-	}
-	limit, _ := strconv.Atoi(c.Query("limit", "100"))
 	query := entities.UsageQuery{Visibility: visibility, Cursor: c.Query("cursor"), Limit: limit, OrganizationID: requestedOrganization, UserID: c.Query("user_id"), Model: c.Query("model"), APIKeyID: c.Query("api_key_id")}
-	applyUsageFilters(c, &query)
+	if err := applyUsageFilters(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
 	if value := c.Query("status"); value != "" {
 		status, parseErr := strconv.Atoi(value)
 		if parseErr != nil {
@@ -1114,19 +1111,8 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 		}
 		query.StatusCode = &status
 	}
-	if value := c.Query("since"); value != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, value)
-		if parseErr != nil {
-			return responseapi.For(c).BadRequest("since must be RFC3339").Send()
-		}
-		query.Since = &parsed
-	}
-	if value := c.Query("until"); value != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, value)
-		if parseErr != nil {
-			return responseapi.For(c).BadRequest("until must be RFC3339").Send()
-		}
-		query.Until = &parsed
+	if err := applyUsageTimes(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
 	page, err := a.UsageSvc.Query(c.Context(), query)
 	if err != nil {
@@ -1153,23 +1139,14 @@ func (a *Admin) UsageRecent(c fiber.Ctx) error {
 // @Router /admin/usage/events/{id} [get]
 func (a *Admin) UsageDetail(c fiber.Ctx) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
-	actor, readErr := a.principalForRead(c)
+	visibility, readErr := a.usageReadVisibility(c)
 	if readErr != nil {
-		return principalReadError(c, readErr)
+		return usageReadFailure(c, readErr)
 	}
-	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
-		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
-	}
-	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
-		if membership, err := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); err == nil {
-			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
-		}
-	}
-	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
-	visibility, err := policy.UsageVisibility(actor, organizationWide)
-	if err != nil {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
+
+	organization, selectionErr := readUsageSelection(c, "organization_id")
+	if selectionErr != nil || strings.Contains(organization, ",") {
+		return responseapi.For(c).BadRequest("detail requires one organization context").Send()
 	}
 	detail, err := a.UsageSvc.Detail(c.Context(), c.Params("id"), visibility)
 	if errors.Is(err, entities.ErrNotFound) {
@@ -1191,47 +1168,40 @@ func (a *Admin) UsageDetail(c fiber.Ctx) error {
 // @Param until query string false "RFC3339 upper bound for a custom range"
 // @Param group_by query string false "hour, day, or week" default(day)
 // @Param organization_id query string false "Organization filter"
-// @Param user_id query string false "User filter"
+// @Param user_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
 // @Param api_key_id query string false "API-key filter"
 // @Param view_user_id query string false "Master-only user View As filter"
 // @Param application query string false "Workload application filter"
 // @Param environment query string false "Workload environment filter"
 // @Param workspace_id query string false "Workload workspace filter"
-// @Param agent_id query string false "Workload agent filter"
-// @Param conversation_id query string false "Conversation filter"
-// @Param run_id query string false "Run filter"
-// @Param logical_request_id query string false "Logical request filter"
+// @Param agent_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param conversation_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param run_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
+// @Param logical_request_id query string false "Comma-separated or repeated IDs; omitted means all authorized"
 // @Param provider query string false "Provider filter"
 // @Param credential_id query string false "Credential filter"
+// @Param parent_run_id query string false "Parent run IDs: comma-separated or repeated; omitted means all authorized"
+// @Param trace_id query string false "Trace IDs: comma-separated or repeated; omitted means all authorized"
 // @Success 200 {object} UsageActivityResponse
-// @Failure 400,401,403,500 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,503,500 {object} responseapi.ErrorResponse
 // @Router /admin/usage/activity [get]
 func (a *Admin) UsageActivity(c fiber.Ctx) error {
-	actor, readErr := a.principalForRead(c)
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	visibility, readErr := a.usageReadVisibility(c)
 	if readErr != nil {
-		return principalReadError(c, readErr)
+		return usageReadFailure(c, readErr)
 	}
-	requestedOrganization := strings.TrimSpace(c.Query("organization_id"))
-	if actor.Type != entities.PrincipalMaster && len(splitCSV(requestedOrganization)) > 1 {
-		return responseapi.For(c).BadRequest("multiple organization filters require the master session").Send()
-	}
-	if actor.Type == entities.PrincipalUser && requestedOrganization != "" && actor.OrganizationID == "" && a.IdentityRepo != nil {
-		if membership, membershipErr := a.IdentityRepo.Membership(c.Context(), requestedOrganization, actor.UserID); membershipErr == nil {
-			actor.OrganizationID, actor.MembershipRole = requestedOrganization, membership.Role
-		}
-	}
-	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
-	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
-	if policyErr != nil {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
-	}
+	requestedOrganization, _ := readUsageSelection(c, "organization_id")
+
 	groupBy := strings.ToLower(strings.TrimSpace(c.Query("group_by", "day")))
 	if groupBy != "hour" && groupBy != "day" && groupBy != "week" {
 		return responseapi.For(c).BadRequest("group_by must be hour, day, or week").Send()
 	}
 	now := time.Now().UTC()
 	query := entities.UsageQuery{Visibility: visibility, OrganizationID: requestedOrganization, UserID: strings.TrimSpace(c.Query("user_id")), APIKeyID: strings.TrimSpace(c.Query("api_key_id"))}
-	applyUsageFilters(c, &query)
+	if err := applyUsageFilters(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
 	switch strings.ToLower(strings.TrimSpace(c.Query("range", "7d"))) {
 	case "1d":
 		since := now.Add(-24 * time.Hour)
@@ -1265,6 +1235,9 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 	default:
 		return responseapi.For(c).BadRequest("range must be 1d, 7d, 30d, 90d, ytd, all, or custom").Send()
 	}
+	if err := applyUsageTimes(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
 	buckets, err := a.UsageSvc.Activity(c.Context(), query, groupBy)
 	if err != nil {
 		return responseapi.For(c).InternalError("failed to load usage activity").Send()
@@ -1278,18 +1251,6 @@ func (a *Admin) UsageActivity(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load provider health").Send()
 	}
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(UsageActivityResponse{GroupBy: groupBy, Data: buckets, Summary: summary, Health: health}).Send()
-}
-
-func applyUsageFilters(c fiber.Ctx, query *entities.UsageQuery) {
-	query.Provider = strings.TrimSpace(c.Query("provider"))
-	query.CredentialID = strings.TrimSpace(c.Query("credential_id"))
-	query.Application = strings.TrimSpace(c.Query("application"))
-	query.Environment = strings.TrimSpace(c.Query("environment"))
-	query.WorkspaceID = strings.TrimSpace(c.Query("workspace_id"))
-	query.AgentID = strings.TrimSpace(c.Query("agent_id"))
-	query.ConversationID = strings.TrimSpace(c.Query("conversation_id"))
-	query.RunID = strings.TrimSpace(c.Query("run_id"))
-	query.LogicalRequestID = strings.TrimSpace(c.Query("logical_request_id"))
 }
 
 type WorkloadWeeklyUsageResponse struct {
@@ -1319,51 +1280,69 @@ type WorkloadWeeklyUsageResponse struct {
 // @Param environment query string false "Environment namespace"
 // @Param workspace_id query string false "Workspace identity"
 // @Param agent_id query string false "Comma-separated agent identities"
+// @Param parent_run_id query string false "Parent run IDs: comma-separated or repeated; omitted means all authorized"
+// @Param trace_id query string false "Trace IDs: comma-separated or repeated; omitted means all authorized"
+// @Param conversation_id query string false "Conversation/session IDs: CSV or repeated"
+// @Param run_id query string false "Run IDs: CSV or repeated"
+// @Param logical_request_id query string false "Logical request IDs: CSV or repeated"
+// @Param user_id query string false "User IDs: CSV or repeated, restricted to authorized scope"
 // @Success 200 {object} WorkloadWeeklyUsageResponse
 // @Failure 400,401,403,404,503 {object} responseapi.ErrorResponse
 // @Router /admin/usage/workloads/weekly [get]
 func (a *Admin) WorkloadWeeklyUsage(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	sess := SessionFrom(c)
 	if sess == nil {
 		return responseapi.For(c).Unauthorized("authentication required").Send()
+	}
+	if !sess.Has(entities.ScopeUsageRead) {
+		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
+	}
+	if a.KeysSvc == nil {
+		return usageReadFailure(c, errUsageUnavailable)
 	}
 	if sess.IsMaster() {
 		return responseapi.For(c).BadRequest("master must use a workload-bound integration key").Send()
 	}
 	key, err := a.KeysSvc.GetByID(c.Context(), sess.KeyID)
-	if err != nil || !key.Workload.Bound() {
+	if err != nil || key == nil {
+		return usageReadFailure(c, errUsageUnavailable)
+	}
+	if !key.Workload.Bound() {
 		return responseapi.For(c).NotFound("workload binding not found").Send()
 	}
-	application := strings.TrimSpace(c.Query("application", key.Workload.Application))
-	environment := strings.TrimSpace(c.Query("environment", key.Workload.Environment))
-	workspaceID := strings.TrimSpace(c.Query("workspace_id", key.Workload.WorkspaceID))
-	if application != key.Workload.Application || environment != key.Workload.Environment || workspaceID != key.Workload.WorkspaceID {
-		return responseapi.For(c).Forbidden("workload binding cannot be broadened").Send()
+	query := entities.UsageQuery{}
+	if err := applyUsageFilters(c, &query); err != nil {
+		return responseapi.For(c).BadRequest(err.Error()).Send()
 	}
-	agentIDs := splitCSV(strings.TrimSpace(c.Query("agent_id", key.Workload.AgentID)))
-	if len(agentIDs) == 0 || len(agentIDs) > 100 {
-		return responseapi.For(c).BadRequest("agent_id must contain between 1 and 100 identities").Send()
-	}
-	for _, agentID := range agentIDs {
-		if agentID != key.Workload.AgentID {
-			return responseapi.For(c).Forbidden("agent filter exceeds the authenticated binding").Send()
+	for _, pair := range []struct{ selected, bound string }{
+		{query.Application, key.Workload.Application}, {query.Environment, key.Workload.Environment},
+		{query.WorkspaceID, key.Workload.WorkspaceID}, {query.AgentID, key.Workload.AgentID},
+	} {
+		if pair.selected != "" {
+			for _, value := range strings.Split(pair.selected, ",") {
+				if value != pair.bound {
+					return responseapi.For(c).Forbidden("workload binding cannot be broadened").Send()
+				}
+			}
 		}
 	}
-	actor, readErr := a.principalForRead(c)
+	application, environment, workspaceID := key.Workload.Application, key.Workload.Environment, key.Workload.WorkspaceID
+	agentIDs := []string{key.Workload.AgentID}
+	visibility, readErr := a.usageReadVisibility(c)
 	if readErr != nil {
-		return principalReadError(c, readErr)
-	}
-	organizationWide := actor.Type == entities.PrincipalOrganization || actor.MembershipRole == entities.MembershipAdmin
-	visibility, policyErr := policy.UsageVisibility(actor, organizationWide)
-	if policyErr != nil {
-		return responseapi.For(c).Forbidden("usage access is not allowed").Send()
+		return usageReadFailure(c, readErr)
 	}
 	now := time.Now().UTC()
 	start, end, _, windowErr := quota.Window(entities.QuotaPeriodWeek, now)
 	if windowErr != nil {
 		return responseapi.For(c).InternalError("failed to resolve quota week").Send()
 	}
-	query := entities.UsageQuery{Visibility: visibility, Since: &start, Until: &end, Application: application, Environment: environment, WorkspaceID: workspaceID, AgentIDs: agentIDs}
+	query.Visibility, query.Since, query.Until = visibility, &start, &end
+	query.Workload = &key.Workload
+	if a.UsageSvc == nil {
+		return usageReadFailure(c, errUsageUnavailable)
+	}
 	summary, aggregateErr := a.UsageSvc.WorkloadAggregate(c.Context(), query)
 	if aggregateErr != nil {
 		return responseapi.For(c).Error(fiber.StatusServiceUnavailable, "authoritative usage is unavailable", "service_unavailable", "usage_unavailable").Send()

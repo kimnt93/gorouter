@@ -402,3 +402,9 @@ protocol requirements.
   `http://127.0.0.1:8090` instead of a base URL ending in `/v1` for that client.
 - A remote or containerized agent cannot connect: `127.0.0.1` points to the
   agent itself. Use the GoRouter host's reachable address and port.
+
+## Usage tracking for applications
+
+See [Usage tracking API (v0.2.1)](usage-tracking.md) for trusted agent/user
+bindings, request/run/parent-run/trace/conversation headers, and permission-scoped
+multi-select REST queries. Prompt/completion storage is not required.

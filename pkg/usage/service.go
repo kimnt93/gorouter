@@ -200,6 +200,8 @@ func (s *Service) RecentForTenant(ctx context.Context, id string, limit int) ([]
 	return s.repo.RecentForTenant(ctx, id, limit)
 }
 func (s *Service) Query(ctx context.Context, query entities.UsageQuery) (*entities.UsagePage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	repo, ok := s.repo.(principalRepository)
 	if !ok {
 		return nil, errors.New("principal usage queries unavailable")
@@ -207,6 +209,8 @@ func (s *Service) Query(ctx context.Context, query entities.UsageQuery) (*entiti
 	return repo.QueryUsage(ctx, query)
 }
 func (s *Service) SummaryQuery(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	repo, ok := s.repo.(principalRepository)
 	if !ok {
 		return nil, errors.New("principal usage queries unavailable")
@@ -215,6 +219,8 @@ func (s *Service) SummaryQuery(ctx context.Context, query entities.UsageQuery) (
 }
 
 func (s *Service) Activity(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	repo, ok := s.repo.(entities.UsageActivityRepository)
 	if !ok {
 		return nil, errors.New("usage activity queries unavailable")
@@ -223,6 +229,8 @@ func (s *Service) Activity(ctx context.Context, query entities.UsageQuery, group
 }
 
 func (s *Service) Health(ctx context.Context, query entities.UsageQuery) ([]entities.UsageHealthMetric, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	repo, ok := s.repo.(entities.UsageHealthRepository)
 	if !ok {
 		return nil, errors.New("usage health queries unavailable")
@@ -271,6 +279,8 @@ func (s *Service) CaptureConversation(request, response []byte) ([]byte, bool) {
 }
 
 func (s *Service) Detail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	repo, ok := s.repo.(entities.UsageDetailRepository)
 	if !ok {
 		return nil, errors.New("usage detail unavailable")
@@ -298,6 +308,8 @@ func (s *Service) Detail(ctx context.Context, id string, visibility entities.Usa
 }
 
 func (s *Service) WorkloadAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	repo, ok := s.repo.(entities.WorkloadUsageAggregateRepository)
 	if !ok {
 		return nil, errors.New("workload usage aggregation unavailable")

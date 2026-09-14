@@ -2,11 +2,14 @@
 
 Implemented from GoRouter source revision `1a237fe`; initial implementation revision `ea9b0fd`.
 
+For v0.2.1 header defaults, multi-select queries, permissions, and current
+accounting limitations, see [Usage tracking API](usage-tracking.md).
+
 ## Capability
 
 Capability marker: `gorouter-workload-usage-v1`.
 
-GoRouter is authoritative for Router-accounted request, token, provider-cache,
+GoRouter stores Router-accounted request, token, provider-cache,
 Router-cache, and model-priced cost facts for any application using workload-bound
 API keys. Applications remain authoritative for their editable budget preferences.
 The weekly API supports soft admission checks; it is not an atomic workload-budget
@@ -53,6 +56,7 @@ X-GoRouter-Conversation-Id: conversation_123
 X-GoRouter-Run-Id: run_123
 X-GoRouter-Parent-Run-Id: run_parent_123
 X-GoRouter-Request-Id: request_123
+X-GoRouter-Trace-Id: trace_123
 ```
 
 The values use the same bounded opaque-ID character set. They do not authorize,
@@ -99,13 +103,14 @@ its admission week. Explicit `until` filters are half-open (`timestamp < until`)
 - Accounting does not require prompt or completion capture.
 - Workload-bound event IDs are idempotent in SQLite and PostgreSQL. ClickHouse
   serializes each workload-bound event ID through its configured distributed
-  mutation lock and checks durable presence before insertion.
+  mutation lock and checks durable presence before insertion. This is not an
+  exactly-once guarantee after uncertain acknowledgements or lock expiry.
 - Workload-bound records bypass the volatile queue and are synchronously handed
   to the selected durable backend.
 - The weekly endpoint aggregates durable settled rows only. It does not merge a
   process-local pending map, so it cannot double count queued events.
-- Backend failure returns `503 usage_unavailable`; it never becomes a complete
-  zero. An authorized empty aggregate is a valid zero with
+- A weekly database-read failure returns `503 usage_unavailable`, not zero.
+  An authorized empty aggregate is zero *persisted rows*, with
   `attribution_coverage: no_usage`.
 
 ## Errors
@@ -137,3 +142,6 @@ display names in workload or correlation IDs.
 - ClickHouse live integration-tested: no (`TEST_CLICKHOUSE_URL` not configured)
 - Released: no
 - Deployed: no
+
+The v0.2.1 guide clarifies known reliability limits; earlier durable-handoff
+wording here is not a guarantee of complete or crash-safe accounting.

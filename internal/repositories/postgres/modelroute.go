@@ -279,26 +279,5 @@ func (r *UsageRepo) Summary(ctx context.Context, since time.Time) (*entities.Usa
 }
 
 func (r *UsageRepo) Recent(ctx context.Context, limit int) ([]entities.RecentEvent, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	rows, err := r.db.Pool.Query(ctx, `
-		SELECT COALESCE(event_id,'legacy_' || seq::text),ts,tenant_id,api_key_id,credential_id,model,upstream_model,prompt_tokens,completion_tokens,
-		       cache_read_tokens,cache_write_tokens,cost_usd,priced,cache_hit,status_code,duration_ms,error
-		FROM usage_events ORDER BY ts DESC,event_id DESC LIMIT $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []entities.RecentEvent
-	for rows.Next() {
-		var ev entities.RecentEvent
-		if err := rows.Scan(&ev.ID, &ev.TS, &ev.TenantID, &ev.KeyID, &ev.CredentialID, &ev.Model, &ev.UpstreamModel,
-			&ev.PromptTokens, &ev.CompletionTokens, &ev.CacheReadTokens, &ev.CacheWriteTokens,
-			&ev.CostUSD, &ev.Priced, &ev.CacheHit, &ev.StatusCode, &ev.DurationMS, &ev.Error); err != nil {
-			return nil, err
-		}
-		out = append(out, ev)
-	}
-	return out, rows.Err()
+	return r.RecentForTenant(ctx, "", limit)
 }

@@ -77,11 +77,13 @@ type UsageCorrelation struct {
 	ConversationID   string
 	RunID            string
 	ParentRunID      string
+	TraceID          string
 	LogicalRequestID string
 }
 
 const (
 	headerConversationID   = "X-GoRouter-Conversation-Id"
+	headerTraceID          = "X-GoRouter-Trace-Id"
 	headerRunID            = "X-GoRouter-Run-Id"
 	headerParentRunID      = "X-GoRouter-Parent-Run-Id"
 	headerLogicalRequestID = "X-GoRouter-Request-Id"
@@ -89,12 +91,13 @@ const (
 
 func correlationFromRequest(c fiber.Ctx) (UsageCorrelation, error) {
 	correlation := UsageCorrelation{
-		ConversationID:   strings.TrimSpace(c.Get(headerConversationID)),
-		RunID:            strings.TrimSpace(c.Get(headerRunID)),
-		ParentRunID:      strings.TrimSpace(c.Get(headerParentRunID)),
-		LogicalRequestID: strings.TrimSpace(c.Get(headerLogicalRequestID)),
+		ConversationID:   strings.TrimSpace(strings.Clone(c.Get(headerConversationID))),
+		RunID:            strings.TrimSpace(strings.Clone(c.Get(headerRunID))),
+		TraceID:          strings.TrimSpace(strings.Clone(c.Get(headerTraceID))),
+		ParentRunID:      strings.TrimSpace(strings.Clone(c.Get(headerParentRunID))),
+		LogicalRequestID: strings.TrimSpace(strings.Clone(c.Get(headerLogicalRequestID))),
 	}
-	for _, value := range []string{correlation.ConversationID, correlation.RunID, correlation.ParentRunID, correlation.LogicalRequestID} {
+	for _, value := range []string{correlation.ConversationID, correlation.RunID, correlation.ParentRunID, correlation.LogicalRequestID, correlation.TraceID} {
 		if len(value) > 128 {
 			return UsageCorrelation{}, errors.New("correlation fields must not exceed 128 bytes")
 		}
@@ -138,6 +141,11 @@ type PriceCatalog interface {
 // @Security BearerAuth
 // @Accept json
 // @Produce json
+// @Param X-GoRouter-Conversation-Id header string false "Application conversation/session ID; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Run-Id header string false "Run correlation ID; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Parent-Run-Id header string false "Parent run correlation ID; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Request-Id header string false "Logical request correlation ID; generated if omitted; opaque ID, maximum 128 bytes"
+// @Param X-GoRouter-Trace-Id header string false "Application trace correlation ID; opaque ID, maximum 128 bytes"
 // @Param request body llm.ChatRequest true "Chat request"
 // @Success 200 {object} llm.Response
 // @Failure 400,401,403,404,429,500,502,503 {object} responseapi.ErrorResponse
@@ -162,6 +170,7 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 		return responseapi.For(c).BadRequest(correlationErr.Error()).Send()
 	}
 	key.Correlation = correlation
+	c.Set(headerLogicalRequestID, correlation.LogicalRequestID)
 	if key.StoredKey != nil {
 		key.Workload = key.StoredKey.Workload
 	}
@@ -1326,7 +1335,7 @@ func (g *Gateway) recordCostErrorConversation(key *GatewayAccessContext, model *
 		providerID = model.Metadata.Provider
 	}
 	conversation, truncated := g.Usage.CaptureConversation(requestBody, responseBody)
-	_ = g.Usage.RecordContext(context.Background(), entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, Application: key.Workload.Application, Environment: key.Workload.Environment, WorkspaceID: key.Workload.WorkspaceID, AgentID: key.Workload.AgentID, ConversationID: key.Correlation.ConversationID, RunID: key.Correlation.RunID, ParentRunID: key.Correlation.ParentRunID, LogicalRequestID: key.Correlation.LogicalRequestID, ProviderAttemptID: entities.NewID("attempt"), AccountingTS: started.UTC(), UsageMeasurement: usageMeasurement(u, hit), AccountingState: "settled", ConversationEnc: conversation, ContentTruncated: truncated})
+	_ = g.Usage.RecordContext(context.Background(), entities.UsageEvent{TS: time.Now(), TenantID: key.TenantID, ApiKeyID: apiKeyID, CredentialID: cred, Provider: providerID, Model: model.Name, UpstreamModel: model.UpstreamModel, PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, CostUSD: cost.USD, InputCostUSD: cost.InputUSD, OutputCostUSD: cost.OutputUSD, CacheReadCostUSD: cost.CacheReadUSD, CacheWriteCostUSD: cost.CacheWriteUSD, Priced: cost.Priced, CacheHit: hit, StatusCode: status, DurationMS: time.Since(started).Milliseconds(), Error: summary, ActorType: key.Actor.Type, UserID: key.Actor.UserID, Username: key.Actor.Username, OrganizationID: key.Actor.OrganizationID, Application: key.Workload.Application, Environment: key.Workload.Environment, WorkspaceID: key.Workload.WorkspaceID, AgentID: key.Workload.AgentID, ConversationID: key.Correlation.ConversationID, RunID: key.Correlation.RunID, ParentRunID: key.Correlation.ParentRunID, TraceID: key.Correlation.TraceID, LogicalRequestID: key.Correlation.LogicalRequestID, ProviderAttemptID: entities.NewID("attempt"), AccountingTS: started.UTC(), UsageMeasurement: usageMeasurement(u, hit), AccountingState: "settled", ConversationEnc: conversation, ContentTruncated: truncated})
 }
 
 func (g *Gateway) settle(ctx context.Context, reservation *quota.Reservation, actualUSD float64) error {

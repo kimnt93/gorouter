@@ -29,6 +29,19 @@ func TestLocalIdentityBackendContract(t *testing.T) {
 	})
 }
 
+func TestLocalUsageTracking(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.ConnectSQLite(ctx, t.TempDir()+"/tracking.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	integration.RunUsageTrackingContract(t, NewUsageRepo(New(db.DB)))
+}
+
 func TestLocalGlobalCredentialRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.ConnectSQLite(ctx, t.TempDir()+"/gorouter.db")
