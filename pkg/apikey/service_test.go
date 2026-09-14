@@ -251,8 +251,16 @@ type primarySelectionRepo struct {
 	keys []entities.ApiKey
 }
 
-func (r *primarySelectionRepo) List(context.Context) ([]entities.ApiKey, error) { return r.keys, nil }
-func TestPrimaryKeySelectionIsStable(t *testing.T) {
+func (r *primarySelectionRepo) List(context.Context) ([]entities.ApiKey, error) {
+	panic("authentication must not list keys")
+}
+func (r *primarySelectionRepo) PrimaryForUser(_ context.Context, userID string) (*entities.ApiKey, error) {
+	if userID != "u" {
+		return nil, entities.ErrNotFound
+	}
+	return &r.keys[2], nil
+}
+func TestPrimaryKeyLookupDelegatesWithoutListing(t *testing.T) {
 	repo := &primarySelectionRepo{keys: []entities.ApiKey{{ID: "org-key", OwnerType: entities.OwnerUser, OwnerUserID: "u", ContextOrganizationID: "org"}, {ID: "z", OwnerType: entities.OwnerUser, OwnerUserID: "u"}, {ID: "a", OwnerType: entities.OwnerUser, OwnerUserID: "u", Enabled: false}, {ID: "foreign", OwnerType: entities.OwnerUser, OwnerUserID: "other"}}}
 	svc := NewService(repo, nil, nil)
 	key, err := svc.PrimaryForUser(context.Background(), "u")

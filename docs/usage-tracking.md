@@ -4,6 +4,18 @@ This is an application-neutral integration contract for coding clients, services
 and agent runtimes. It tracks **agent, user, request, run, parent run, trace, and
 session/conversation** without requiring prompt/completion capture.
 
+### v0.2.2 development additions
+
+The v0.2.1 inference tracking contract below remains compatible. The
+`0.2.2-dev` source adds capability discovery, totals-only summaries, bounded
+multi-agent reports and safe canonical-key metadata reads. See the
+[v0.2.2 release notes and usage examples](release-notes-v0.2.2.md) and
+[report contract](accounting-v0.2.2/README.md).
+
+Reports expose stored-only freshness and unknown coverage. Durable acceptance,
+accounting-ID receipts and member allocation counters are **not implemented**;
+a successful inference or a zero report is not a durable accounting receipt.
+
 ## 1. User-first authority
 
 The authenticated user is the top-level owner and uses one canonical API key.

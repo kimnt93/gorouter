@@ -550,3 +550,9 @@ h2 { font-size: 19px; }
 .provider-bulk-actions > div { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
 .page-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.accounting-report-controls { display: grid; gap: 16px; }
+.accounting-report-controls .identity-filter-row { flex-wrap: wrap; align-items: end; gap: 12px; }
+.accounting-report-controls form label { display: grid; gap: 8px; flex: 1 1 240px; min-width: 0; }
+.accounting-report-controls .select-field { min-width: 180px; }
+.accounting-report-controls .filter-chips { flex-wrap: wrap; }

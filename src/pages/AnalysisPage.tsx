@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { AccountingReport } from '../components/AccountingReport'
+import { useMemo, useState } from 'react'
 import { VerticalUsageChart } from '../components/VerticalUsageChart'
 import { PageError, PageLoading } from '../components/PageState'
 import { RangeSelector } from '../components/RangeSelector'
@@ -9,15 +10,23 @@ import { formatInteger, formatUSD } from '../lib/format'
 
 export function AnalysisPage() {
   const filterState = useUsageFilters()
-  const activity = useActivity(filterState.filters)
-  const total = useMemo(() => activity.summary ? ({ requests: activity.summary.requests, tokens: activity.summary.prompt_tokens + activity.summary.completion_tokens + activity.summary.cache_read_tokens + activity.summary.cache_write_tokens, cache: activity.summary.cache_read_tokens, cost: activity.summary.cost_usd }) : ({ requests: 0, tokens: 0, cache: 0, cost: 0 }), [activity.summary])
+  const [mode, setMode] = useState<'activity' | 'accounting'>('accounting')
   return <>
     <header className="page-header"><div><span className="eyebrow">Operations / Analysis</span><h1>Activity trend</h1><p>Explore request and token volume across the users and API keys you can see.</p></div><a className="button secondary" href="/dashboard/logs">View request logs</a></header>
     <RangeSelector {...filterState} onChange={filterState.setFilters} />
+    <div className="segmented" aria-label="Analysis mode"><button className={mode === 'accounting' ? 'selected' : ''} onClick={() => setMode('accounting')}>Accounting report</button><button className={mode === 'activity' ? 'selected' : ''} onClick={() => setMode('activity')}>Legacy activity and health</button></div>
+    {mode === 'accounting' ? <AccountingReport filters={filterState.filters} /> : <LegacyAnalysis filters={filterState.filters} />}
+  </>
+}
+
+function LegacyAnalysis({ filters }: { filters: import('../api/contracts').UsageFilters }) {
+  const activity = useActivity(filters)
+  const total = useMemo(() => activity.summary ? ({ requests: activity.summary.requests, tokens: activity.summary.prompt_tokens + activity.summary.completion_tokens + activity.summary.cache_read_tokens + activity.summary.cache_write_tokens, cache: activity.summary.cache_read_tokens, cost: activity.summary.cost_usd }) : ({ requests: 0, tokens: 0, cache: 0, cost: 0 }), [activity.summary])
+  return <>
     {activity.loading ? <PageLoading /> : activity.error ? <PageError message={activity.error} retry={activity.retry} /> : <>
       <section className="stat-grid"><StatCard label="Requests" value={formatInteger(total.requests)} detail="completed gateway requests" accent="purple" /><StatCard label="Tokens" value={formatInteger(total.tokens)} detail="input + output + provider cache" accent="blue" /><StatCard label="Cache reads" value={formatInteger(total.cache)} detail="tokens reported by providers" accent="green" /><StatCard label="Estimated cost" value={formatUSD(total.cost)} detail="priced request total" accent="amber" /></section>
-      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Throughput · input, output, cache read, and cache write</span><h2>Token trend</h2></div></div><VerticalUsageChart data={activity.data} metric="tokens" groupBy={filterState.filters.groupBy} range={filterState.filters} /></section>
-      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Estimated spend</span><h2>Cost trend</h2></div></div><VerticalUsageChart data={activity.data} metric="cost" groupBy={filterState.filters.groupBy} range={filterState.filters} /></section>
+      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Throughput · input, output, cache read, and cache write</span><h2>Token trend</h2></div></div><VerticalUsageChart data={activity.data} metric="tokens" groupBy={filters.groupBy} range={filters} /></section>
+      <section className="panel"><div className="panel-header"><div><span className="eyebrow">Estimated spend</span><h2>Cost trend</h2></div></div><VerticalUsageChart data={activity.data} metric="cost" groupBy={filters.groupBy} range={filters} /></section>
       <ModelBreakdown summary={activity.summary?.by_model ?? {}} />
       <HealthTable health={activity.health} />
     </>}

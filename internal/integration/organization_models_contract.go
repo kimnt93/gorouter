@@ -125,9 +125,33 @@ func RunPrimaryKeyContract(t *testing.T, repo PrimaryKeyRepo, userID string) {
 	if accepted.Load() != 1 {
 		t.Fatalf("created primary keys=%d", accepted.Load())
 	}
+	lookup, ok := repo.(interface {
+		PrimaryForUser(context.Context, string) (*entities.ApiKey, error)
+	})
+	if !ok {
+		t.Fatal("missing targeted canonical lookup")
+	}
+	primary, err := lookup.PrimaryForUser(ctx, userID)
+	if err != nil || primary.ID != key.ID {
+		t.Fatalf("canonical lookup: %v", err)
+	}
 	rotated, err := repo.Rotate(ctx, key.ID)
 	if err != nil || rotated.ID != key.ID || rotated.OwnerUserID != userID {
 		t.Fatalf("rotation=%v", err)
+	}
+	mutation, ok := repo.(interface {
+		Patch(context.Context, string, *bool, *[]string, *[]string, **float64, **int) error
+	})
+	if !ok {
+		t.Fatal("missing key mutation")
+	}
+	disabled := false
+	if err = mutation.Patch(ctx, key.ID, &disabled, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	primary, err = lookup.PrimaryForUser(ctx, userID)
+	if err != nil || primary.ID != key.ID || primary.Enabled {
+		t.Fatalf("disabled canonical changed: %v", err)
 	}
 	if _, err = repo.CreatePrimary(ctx, entities.ApiKey{Name: "second", OwnerType: entities.OwnerUser, OwnerUserID: userID}); !errors.Is(err, entities.ErrConflict) {
 		t.Fatalf("second key accepted: %v", err)

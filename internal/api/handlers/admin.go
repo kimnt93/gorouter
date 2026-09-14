@@ -54,19 +54,20 @@ type loginResponse = LoginResponse
 type createdAPIKeyResponse = CreatedAPIKeyResponse
 
 type Admin struct {
-	OrgModels      *orgmodel.Service
-	Auth           *auth.Service
-	TenantSvc      *tenant.Service
-	CredsSvc       *credential.Service
-	KeysSvc        *apikey.Service
-	ModelsSvc      *modelroute.Service
-	UsageSvc       *usage.Service
-	Cache          chat.PromptCache
-	Pricing        PriceCatalog
-	IdentitySvc    *identity.Service
-	IdentityRepo   identity.Repository
-	AuditRepo      entities.AuditRepository
-	OAuthAvailable func(string) bool
+	DatabaseBackend string
+	OrgModels       *orgmodel.Service
+	Auth            *auth.Service
+	TenantSvc       *tenant.Service
+	CredsSvc        *credential.Service
+	KeysSvc         *apikey.Service
+	ModelsSvc       *modelroute.Service
+	UsageSvc        *usage.Service
+	Cache           chat.PromptCache
+	Pricing         PriceCatalog
+	IdentitySvc     *identity.Service
+	IdentityRepo    identity.Repository
+	AuditRepo       entities.AuditRepository
+	OAuthAvailable  func(string) bool
 }
 
 type priceEstimateResponse = PricingEstimateResponse
@@ -1028,6 +1029,7 @@ func (a *Admin) Prices(c fiber.Ctx) error {
 
 // UsageSummary returns a policy-constrained usage aggregate.
 // @Summary Get usage summary
+// @Param breakdown query string false "all (default) or none (totals only)"
 // @Description Returns policy-constrained aggregate request, token, cache, and cost metrics.
 // @Tags usage
 // @Security BearerAuth
@@ -1075,6 +1077,13 @@ func (a *Admin) UsageSummary(c fiber.Ctx) error {
 	}
 	if err := applyUsageTimes(c, &query); err != nil {
 		return responseapi.For(c).BadRequest(err.Error()).Send()
+	}
+	switch c.Query("breakdown", "all") {
+	case "none":
+		query.TotalsOnly = true
+	case "all":
+	default:
+		return responseapi.For(c).BadRequest("breakdown must be all or none").Send()
 	}
 	v, err := a.UsageSvc.SummaryQuery(c.Context(), query)
 	if err != nil {

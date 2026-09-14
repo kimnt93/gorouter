@@ -205,3 +205,24 @@ export const assignPersonalAlias = (body: Pick<import('./contracts').Organizatio
 export const setAssignedModelLimit = (body: { model: string; weekly_limit_usd: number }): Promise<{ok: boolean}> => request('/admin/model-limits', { method: 'POST', body: JSON.stringify(body) })
 
 export const getCallableModels = (): Promise<{object: 'list'; data: {id: string; upstream_model?: string; pricing?: import('./contracts').Price}[]}> => request('/v1/models')
+
+export const getAccountingCapabilities = (signal?: AbortSignal): Promise<import('./contracts').AccountingCapabilities> => request('/admin/capabilities', { signal })
+
+export function getUsageReport(filters: UsageFilters, dimension: import('./contracts').UsageReportDimension, agents: string[], conversation: string, signal?: AbortSignal): Promise<import('./contracts').UsageReport> {
+  const params = new URLSearchParams()
+  applyFilters(params, filters)
+  params.set('group_by', dimension)
+  params.set('series_by', dimension)
+  params.set('bucket', groupByForUsageRange(filters))
+  params.set('time_basis', 'accounting')
+  if (filters.model) params.set('model', filters.model)
+  if (agents.length) params.set('agent_id', [...new Set(agents)].sort().join(','))
+  if (conversation.trim()) params.set('conversation_id', conversation.trim())
+  const now = new Date()
+  if (filters.range === '1d') params.set('range', '24h')
+  if (filters.range === '90d' || filters.range === 'ytd') {
+    params.set('since', filters.range === 'ytd' ? new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString() : new Date(now.getTime() - 90 * 86_400_000).toISOString())
+    params.set('until', now.toISOString())
+  }
+  return request(`/admin/usage/report?${params}`, { signal })
+}

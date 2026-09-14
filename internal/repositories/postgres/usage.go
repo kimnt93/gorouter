@@ -151,6 +151,9 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 	if err := r.db.Pool.QueryRow(ctx, `SELECT count(*),coalesce(sum(cost_usd),0),coalesce(sum(input_cost_usd),0),coalesce(sum(output_cost_usd),0),coalesce(sum(cache_read_cost_usd),0),coalesce(sum(cache_write_cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),coalesce(sum(cache_write_tokens),0),count(*) FILTER (WHERE cache_hit),count(*) FILTER (WHERE NOT priced) FROM usage_events WHERE `+filter, args...).Scan(&summary.Requests, &summary.CostUSD, &summary.InputCostUSD, &summary.OutputCostUSD, &summary.CacheReadCostUSD, &summary.CacheWriteCostUSD, &summary.PromptTok, &summary.CompletionTo, &summary.CacheReadTok, &summary.CacheWriteTok, &summary.CacheHits, &summary.Unpriced); err != nil {
 		return nil, err
 	}
+	if query.TotalsOnly {
+		return summary, nil
+	}
 	rows, err := r.db.Pool.Query(ctx, `SELECT model,count(*),coalesce(sum(cost_usd),0),coalesce(sum(prompt_tokens),0),coalesce(sum(completion_tokens),0),coalesce(sum(cache_read_tokens),0),coalesce(sum(cache_write_tokens),0) FROM usage_events WHERE `+filter+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err
@@ -261,6 +264,9 @@ func postgresUsageFilter(query entities.UsageQuery) (string, []any) {
 	default:
 		clauses = append(clauses, "FALSE")
 	}
+	if query.PersonalOnly {
+		add("organization_id", "", "=")
+	}
 	for _, filter := range query.Filters() {
 		column := filter.Field
 		switch column {
@@ -273,11 +279,15 @@ func postgresUsageFilter(query entities.UsageQuery) (string, []any) {
 	if query.StatusCode != nil {
 		add("status_code", *query.StatusCode, "=")
 	}
+	timeColumn := "ts"
+	if query.TimeBasis == "accounting" {
+		timeColumn = "accounting_ts"
+	}
 	if query.Since != nil {
-		add("ts", query.Since.UTC(), ">=")
+		add(timeColumn, query.Since.UTC(), ">=")
 	}
 	if query.Until != nil {
-		add("ts", query.Until.UTC(), "<")
+		add(timeColumn, query.Until.UTC(), "<")
 	}
 	if len(clauses) == 0 {
 		clauses = append(clauses, "TRUE")

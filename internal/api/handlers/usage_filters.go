@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +56,7 @@ func readUsageSelection(c fiber.Ctx, name string) (string, error) {
 			}
 		}
 	}
+	sort.Strings(selected)
 	return strings.Join(selected, ","), nil
 }
 

@@ -2,6 +2,8 @@ package clickhouse
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
 	"time"
@@ -280,14 +282,12 @@ func (r *ApiKeyRepo) DeleteForTenant(ctx context.Context, tenant, id string) err
 func (r *ApiKeyRepo) CreatePrimary(ctx context.Context, input entities.ApiKey) (*entities.ApiKey, error) {
 	var result *entities.ApiKey
 	err := r.s.mutate(ctx, "primary-key:"+input.OwnerUserID, func() error {
-		stored, err := list[storedAPIKey](ctx, r.s, "api_key")
-		if err != nil {
-			return err
+		_, err := r.PrimaryForUser(ctx, input.OwnerUserID)
+		if err == nil {
+			return entities.ErrConflict
 		}
-		for _, v := range stored {
-			if v.OwnerType == entities.OwnerUser && v.OwnerUserID == input.OwnerUserID {
-				return entities.ErrConflict
-			}
+		if !errors.Is(err, entities.ErrNotFound) {
+			return err
 		}
 		if err = input.ValidateOwnerShape(); err != nil {
 			return err
@@ -306,4 +306,23 @@ func (r *ApiKeyRepo) CreatePrimary(ctx context.Context, input entities.ApiKey) (
 		return nil
 	})
 	return result, err
+}
+
+// PrimaryForUser returns one canonical record without materializing all secrets
+// in the service. Disabled records remain candidates; reads never rotate keys.
+func (r *ApiKeyRepo) PrimaryForUser(ctx context.Context, userID string) (*entities.ApiKey, error) {
+	var raw string
+	err := r.s.Conn.QueryRow(ctx, `SELECT payload FROM config_records FINAL WHERE entity='api_key' AND deleted=0 AND JSONExtractString(payload,'owner_type')='user' AND JSONExtractString(payload,'owner_user_id')=? ORDER BY (JSONExtractString(payload,'context_organization_id')='') DESC,parseDateTime64BestEffort(JSONExtractString(payload,'created_at'),9,'UTC'),key LIMIT 1`, userID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, entities.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var stored storedAPIKey
+	if err = json.Unmarshal([]byte(raw), &stored); err != nil {
+		return nil, err
+	}
+	stored.ApiKey.SecretHash = stored.Hash
+	return &stored.ApiKey, nil
 }

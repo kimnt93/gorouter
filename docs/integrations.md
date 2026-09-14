@@ -405,6 +405,16 @@ protocol requirements.
 
 ## Usage tracking for applications
 
-See [Usage tracking API (v0.2.1)](usage-tracking.md) for trusted agent/user
-bindings, request/run/parent-run/trace/conversation headers, and permission-scoped
-multi-select REST queries. Prompt/completion storage is not required.
+See [Usage tracking API](usage-tracking.md) for authenticated user ownership,
+request-local agent/run/parent-run/trace/conversation headers, and
+permission-scoped multi-select queries. Agent IDs are correlation, not key
+bindings or principals. Prompt/completion storage is not required.
+
+For the **v0.2.2 development preview**, use
+[`GET /admin/capabilities` and the report usage guide](accounting-v0.2.2/README.md)
+to discover totals-only and grouped-report support. The
+[v0.2.2 release notes](release-notes-v0.2.2.md#usage) include conversation totals,
+combined agent charts, organization reports and canonical-key metadata examples.
+Require explicit durable-accounting flags before enabling a consumer mode that
+needs receipts, allocations or atomic credit counters; those flags are currently
+false. Do not interpret missing/unknown usage as free or complete accounting.

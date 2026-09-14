@@ -4,6 +4,20 @@
 
 <h1 align="center">GoRouter</h1>
 
+## Version and release notes
+
+Current accounting work targets **v0.2.2** and reports **`0.2.2-dev`** through
+`GET /admin/capabilities`. This is a development preview of usage reporting,
+not the completed durable accounting/credit engine. Gate integrations on the
+individual capability flags, not the version string.
+
+- [v0.2.2 release notes, usage examples and upgrade notes](docs/release-notes-v0.2.2.md)
+- [Accounting report API and shared JSON fixture](docs/accounting-v0.2.2/README.md)
+- [Inference tracking headers and usage queries](docs/usage-tracking.md)
+- [v0.2.1 release notes](docs/release-notes-v0.2.1.md)
+
+The source preview does not imply that a v0.2.2 tag or image has been published.
+
 ## Providers
 
 GoRouter is a small multi-user LLM gateway with OpenAI-compatible APIs,

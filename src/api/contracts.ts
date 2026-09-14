@@ -230,3 +230,39 @@ export interface OrganizationModelGrant {
   organization_id: string; model: string; user_id: string; enabled: boolean
   weekly_limit_usd: number | null; updated_at: string
 }
+
+export interface UsageReportTotals {
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  total_tokens: number
+  cost_usd: number
+  input_cost_usd: number
+  output_cost_usd: number
+  cache_read_cost_usd: number
+  cache_write_cost_usd: number
+  response_cache_hits: number
+  measurement_unknown_requests: number
+  unattributed_requests: number
+}
+export type UsageReportDimension = 'agent' | 'model' | 'user'
+export interface UsageReport {
+  capability_version: 'gorouter-usage-report-v1'
+  scope: { kind: 'personal' | 'organization' | 'all_owned' | 'global'; user_id?: string; organization_id?: string }
+  range: { from: string; to: string; time_basis: 'accounting' | 'completion'; timezone: 'UTC'; week_starts_on: string }
+  as_of: string
+  freshness: { state: string; revision?: string }
+  coverage: { state: string; unattributed_requests: number; measurement_unknown_requests: number }
+  totals: UsageReportTotals
+  groups: Array<{ dimension: UsageReportDimension; id: string; unattributed: boolean; totals: UsageReportTotals }>
+  series: Array<{ start: string; end: string; group_id: string; unattributed: boolean; totals: UsageReportTotals }>
+  truncated: boolean
+}
+export interface AccountingCapabilities {
+  version: string
+  backend: string
+  capabilities: { usage_report: string; totals_only: boolean; durable_acceptance: boolean; usage_receipts: boolean; member_allocations: boolean; atomic_credit_counters: boolean; canonical_key_metadata: boolean; user_weekly_usage: string }
+  measurement: { token_components: string[]; missing_price_policy: string; coverage: string }
+}

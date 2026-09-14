@@ -685,3 +685,12 @@ func (r *ApiKeyRepo) CreatePrimary(ctx context.Context, input entities.ApiKey) (
 	}
 	return &input, nil
 }
+
+// PrimaryForUser preserves disabled and legacy keys in deterministic selection.
+func (r *ApiKeyRepo) PrimaryForUser(ctx context.Context, userID string) (*entities.ApiKey, error) {
+	key, err := scanApiKey(r.db.Pool.QueryRow(ctx, `SELECT `+keyColumns+` FROM api_keys k WHERE k.owner_type='user' AND k.owner_user_id=$1 ORDER BY (coalesce(k.context_organization_id,'')='') DESC,k.created_at,k.id LIMIT 1`, userID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, entities.ErrNotFound
+	}
+	return key, err
+}

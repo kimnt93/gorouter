@@ -30,6 +30,7 @@ import (
 )
 
 type Dependencies struct {
+	DatabaseBackend  string
 	OrgModels        *orgmodel.Service
 	Auth             *auth.Service
 	Tenants          *tenant.Service
@@ -101,7 +102,7 @@ func New(d Dependencies) *fiber.App {
 		}
 		return c.Send(body)
 	})
-	app.Post("/login", (&handlers.Admin{Auth: d.Auth}).Verify)
+	app.Post("/login", (&handlers.Admin{DatabaseBackend: d.DatabaseBackend, Auth: d.Auth}).Verify)
 	app.Post("/logout", (&handlers.Admin{Auth: d.Auth}).Logout)
 	app.Get("/login", handlers.LoginPage)
 	ui := &handlers.UI{Cache: d.Cache, Usage: d.Usage, Keys: d.Keys, Tenants: d.Tenants, Credentials: d.Credentials, Models: d.Models, Identity: d.Identity, IdentityRepo: d.IdentityRepo, Audit: d.Audit}
@@ -169,6 +170,9 @@ func New(d Dependencies) *fiber.App {
 	admin := &handlers.Admin{OrgModels: d.OrgModels, Auth: d.Auth, TenantSvc: d.Tenants, CredsSvc: d.Credentials, KeysSvc: d.Keys, ModelsSvc: d.Models, UsageSvc: d.Usage, Cache: d.Cache, Pricing: d.Pricing, IdentitySvc: d.Identity, IdentityRepo: d.IdentityRepo, AuditRepo: d.Audit, OAuthAvailable: d.OAuthAvailable}
 	mgmt := app.Group("/admin", handlers.Require(d.Auth, ""))
 	mgmt.Get("/session", admin.Session)
+	mgmt.Get("/capabilities", admin.Capabilities)
+	mgmt.Get("/users/:id/api-key", admin.CanonicalUserKey)
+	mgmt.Get("/usage/report", handlers.Require(d.Auth, entities.ScopeUsageRead), admin.UsageReport)
 	mgmt.Get("/model-aliases", admin.PersonalModelAliases)
 	mgmt.Post("/model-aliases", admin.PersonalModelAliases)
 	mgmt.Post("/model-grants", admin.PersonalModelGrants)

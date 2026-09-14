@@ -2,7 +2,9 @@ package local
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"slices"
 	"sort"
@@ -51,6 +53,7 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		if event.AccountingTS.IsZero() {
 			event.AccountingTS = event.TS
 		}
+		event.AccountingTS = event.AccountingTS.UTC()
 		if event.AccountingState == "" {
 			event.AccountingState = "settled"
 		}
@@ -66,30 +69,6 @@ func (r *UsageRepo) InsertBatch(ctx context.Context, events []entities.UsageEven
 		}
 	}
 	return tx.Commit()
-}
-
-func (r *UsageRepo) all(ctx context.Context) ([]entities.UsageEvent, error) {
-	rows, err := r.s.DB.QueryContext(ctx, `SELECT payload,conversation_enc,content_truncated FROM usage_events ORDER BY ts DESC,id DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	values := make([]entities.UsageEvent, 0)
-	for rows.Next() {
-		var payload, conversation []byte
-		var contentTruncated bool
-		if err := rows.Scan(&payload, &conversation, &contentTruncated); err != nil {
-			return nil, err
-		}
-		var event entities.UsageEvent
-		if err := json.Unmarshal(payload, &event); err != nil {
-			return nil, err
-		}
-		event.ConversationEnc = append([]byte(nil), conversation...)
-		event.ContentTruncated = contentTruncated
-		values = append(values, event)
-	}
-	return values, rows.Err()
 }
 
 func usageMatches(event entities.UsageEvent, query entities.UsageQuery, cursor auditCursor) bool {
@@ -144,39 +123,6 @@ func recent(event entities.UsageEvent) entities.RecentEvent {
 	return entities.RecentEvent{ID: event.ID, TS: event.TS, TenantID: event.TenantID, KeyID: event.ApiKeyID, CredentialID: event.CredentialID, Provider: event.Provider, Model: event.Model, UpstreamModel: event.UpstreamModel, PromptTokens: event.PromptTokens, CompletionTokens: event.CompletionTokens, CacheReadTokens: event.CacheReadTokens, CacheWriteTokens: event.CacheWriteTokens, CostUSD: event.CostUSD, Priced: event.Priced, CacheHit: event.CacheHit, StatusCode: event.StatusCode, DurationMS: event.DurationMS, Error: event.Error, ActorType: event.ActorType, UserID: event.UserID, Username: event.Username, OrganizationID: event.OrganizationID, Application: event.Application, Environment: event.Environment, WorkspaceID: event.WorkspaceID, AgentID: event.AgentID, ConversationID: event.ConversationID, RunID: event.RunID, ParentRunID: event.ParentRunID, TraceID: event.TraceID, LogicalRequestID: event.LogicalRequestID, ProviderAttemptID: event.ProviderAttemptID, AccountingTS: event.AccountingTS, UsageMeasurement: event.UsageMeasurement, AccountingState: event.AccountingState}
 }
 
-func (r *UsageRepo) QueryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsagePage, error) {
-	events, err := r.all(ctx)
-	if err != nil {
-		return nil, err
-	}
-	limit := boundedConfigLimit(query.Limit)
-	page := &entities.UsagePage{Data: make([]entities.RecentEvent, 0, limit)}
-	cursor := decodeAuditCursor(query.Cursor)
-	for _, event := range events {
-		if usageMatches(event, query, cursor) {
-			page.Data = append(page.Data, recent(event))
-			if len(page.Data) > limit {
-				break
-			}
-		}
-	}
-	if len(page.Data) > limit {
-		last := page.Data[limit-1]
-		page.NextCursor = encodeAuditCursor(entities.AuditEvent{ID: last.ID, TS: last.TS})
-		page.Data = page.Data[:limit]
-	}
-	return page, nil
-}
-func (r *UsageRepo) SpendForKeySince(ctx context.Context, id string, since time.Time) (float64, error) {
-	events, err := r.all(ctx)
-	var total float64
-	for _, e := range events {
-		if e.ApiKeyID == id && !e.TS.Before(since) {
-			total += e.CostUSD
-		}
-	}
-	return total, err
-}
 func (r *UsageRepo) Recent(ctx context.Context, limit int) ([]entities.RecentEvent, error) {
 	return r.recentFor(ctx, "", limit)
 }
@@ -196,49 +142,9 @@ func (r *UsageRepo) Summary(ctx context.Context, since time.Time) (*entities.Usa
 func (r *UsageRepo) SummaryForTenant(ctx context.Context, tenant string, since time.Time) (*entities.UsageSummary, error) {
 	return r.SummaryUsage(ctx, entities.UsageQuery{Visibility: entities.UsageVisibility{PrincipalType: entities.PrincipalMaster}, OrganizationID: tenant, Since: &since})
 }
-func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
-	events, err := r.all(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
-	for _, e := range events {
-		if !usageMatches(e, query, auditCursor{}) {
-			continue
-		}
-		out.Requests++
-		out.CostUSD += e.CostUSD
-		out.InputCostUSD += e.InputCostUSD
-		out.OutputCostUSD += e.OutputCostUSD
-		out.CacheReadCostUSD += e.CacheReadCostUSD
-		out.CacheWriteCostUSD += e.CacheWriteCostUSD
-		out.PromptTok += e.PromptTokens
-		out.CompletionTo += e.CompletionTokens
-		out.CacheReadTok += e.CacheReadTokens
-		out.CacheWriteTok += e.CacheWriteTokens
-		if e.CacheHit {
-			out.CacheHits++
-		}
-		if !e.Priced {
-			out.Unpriced++
-		}
-		m := out.ByModel[e.Model]
-		m.Requests++
-		m.CostUSD += e.CostUSD
-		m.InTok += e.PromptTokens
-		m.OutTok += e.CompletionTokens
-		m.CacheReadTok += e.CacheReadTokens
-		m.CacheWriteTok += e.CacheWriteTokens
-		out.ByModel[e.Model] = m
-		k := out.ByKey[e.ApiKeyID]
-		k.Requests++
-		k.CostUSD += e.CostUSD
-		out.ByKey[e.ApiKeyID] = k
-	}
-	return out, nil
-}
+
 func (r *UsageRepo) HealthUsage(ctx context.Context, query entities.UsageQuery) ([]entities.UsageHealthMetric, error) {
-	events, err := r.all(ctx)
+	events, err := r.selectedEvents(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +205,7 @@ func (r *UsageRepo) HealthUsage(ctx context.Context, query entities.UsageQuery) 
 	return out, nil
 }
 func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery, groupBy string) ([]entities.UsageActivityBucket, error) {
-	events, err := r.all(ctx)
+	events, err := r.selectedEvents(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -353,51 +259,20 @@ func (r *UsageRepo) ActivityUsage(ctx context.Context, query entities.UsageQuery
 }
 
 func (r *UsageRepo) UsageDetail(ctx context.Context, id string, visibility entities.UsageVisibility) (*entities.UsageDetail, error) {
-	events, err := r.all(ctx)
+	where, args := localUsageFilter(entities.UsageQuery{Visibility: visibility})
+	args = append(args, id)
+	var payload, encrypted []byte
+	var truncated bool
+	err := r.s.DB.QueryRowContext(ctx, "SELECT payload,conversation_enc,content_truncated FROM usage_events WHERE "+where+" AND id=?", args...).Scan(&payload, &encrypted, &truncated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, entities.ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, event := range events {
-		if event.ID != id || !usageMatches(event, entities.UsageQuery{Visibility: visibility}, auditCursor{}) {
-			continue
-		}
-		value := recent(event)
-		return &entities.UsageDetail{RecentEvent: value, ContentTruncated: event.ContentTruncated, ConversationEncrypted: append([]byte(nil), event.ConversationEnc...)}, nil
-	}
-	return nil, entities.ErrNotFound
-}
-
-func (r *UsageRepo) WorkloadUsageAggregate(ctx context.Context, query entities.UsageQuery) (*entities.UsageSummary, error) {
-	events, err := r.all(ctx)
-	if err != nil {
+	var event entities.UsageEvent
+	if err = json.Unmarshal(payload, &event); err != nil {
 		return nil, err
 	}
-	out := &entities.UsageSummary{ByModel: map[string]entities.ModelU{}, ByKey: map[string]entities.KeyU{}}
-	for _, event := range events {
-		originalTS := event.TS
-		if !event.AccountingTS.IsZero() {
-			event.TS = event.AccountingTS
-		}
-		if !usageMatches(event, query, auditCursor{}) {
-			continue
-		}
-		event.TS = originalTS
-		out.Requests++
-		out.CostUSD += event.CostUSD
-		out.InputCostUSD += event.InputCostUSD
-		out.OutputCostUSD += event.OutputCostUSD
-		out.CacheReadCostUSD += event.CacheReadCostUSD
-		out.CacheWriteCostUSD += event.CacheWriteCostUSD
-		out.PromptTok += event.PromptTokens
-		out.CompletionTo += event.CompletionTokens
-		out.CacheReadTok += event.CacheReadTokens
-		out.CacheWriteTok += event.CacheWriteTokens
-		if event.CacheHit {
-			out.CacheHits++
-		}
-		if !event.Priced {
-			out.Unpriced++
-		}
-	}
-	return out, nil
+	return &entities.UsageDetail{RecentEvent: recent(event), ContentTruncated: truncated, ConversationEncrypted: encrypted}, nil
 }

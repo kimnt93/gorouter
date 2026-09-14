@@ -41,6 +41,7 @@ func TestLocalUsageTracking(t *testing.T) {
 	}
 	store := New(db.DB)
 	integration.RunUsageTrackingContract(t, NewUsageRepo(store))
+	integration.RunUsageReportContract(t, NewUsageRepo(store))
 	integration.RunOrganizationModelsContract(t, NewOrganizationModelRepo(store))
 	integration.RunAliasUniquenessContract(t, NewOrganizationModelRepo(store))
 	integration.RunPrimaryKeyContract(t, NewApiKeyRepo(store), "primary-user")

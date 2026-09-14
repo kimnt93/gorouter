@@ -618,6 +618,33 @@
                 }
             }
         },
+        "/admin/capabilities": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Get dependency capabilities",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.CapabilitiesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/credentials": {
             "get": {
                 "security": [
@@ -4041,6 +4068,207 @@
                 }
             }
         },
+        "/admin/usage/report": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Single-statement stored usage snapshot. Coverage is unknown until durable acceptance tracking is available. Empty results do not establish measured free work. Empty dimension IDs denote unattributed history. Token totals exclude replayed Router response-cache metadata. Cache read ratio is cache_read_tokens/(input_tokens+cache_read_tokens), undefined when denominator is zero. Cost is historical Router-priced USD, not a provider invoice.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "usage"
+                ],
+                "summary": "Get a bounded usage report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "personal (user default), organization (context default), all_owned, global (master only)",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "24h (default), 7d, 30d; explicit bounds override presets",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 inclusive lower bound; maximum five years",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 exclusive upper bound",
+                        "name": "until",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "accounting (default) or completion",
+                        "name": "time_basis",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "agent, model, user; omitted means no groups; maximum 100",
+                        "name": "group_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "agent, model, user; omitted means combined series",
+                        "name": "series_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "hour, day (default), week, month; maximum 2000 buckets/20000 cells",
+                        "name": "bucket",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorized organization context",
+                        "name": "organization_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "conversation_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "parent_run_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "trace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated IDs (100 maximum)",
+                        "name": "logical_request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated model IDs",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated provider IDs",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated key IDs",
+                        "name": "api_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "CSV/repeated credential IDs",
+                        "name": "credential_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Legacy application filter",
+                        "name": "application",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Legacy environment filter",
+                        "name": "environment",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Legacy workspace filter",
+                        "name": "workspace_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Master-only user View As",
+                        "name": "view_user_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/usage/summary": {
             "get": {
                 "security": [
@@ -4054,6 +4282,12 @@
                 ],
                 "summary": "Get usage summary",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "all (default) or none (totals only)",
+                        "name": "breakdown",
+                        "in": "query"
+                    },
                     {
                         "type": "string",
                         "description": "24h, 7d, 30d, or all; default 24h",
@@ -4704,6 +4938,60 @@
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/users/{id}/api-key": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "keys"
+                ],
+                "summary": "Get canonical user API key metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.CanonicalKeyMetadataResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
                         }
@@ -6527,6 +6815,191 @@
                 }
             }
         },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReport": {
+            "type": "object",
+            "properties": {
+                "as_of": {
+                    "type": "string"
+                },
+                "capability_version": {
+                    "type": "string"
+                },
+                "coverage": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportCoverage"
+                },
+                "freshness": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportFreshness"
+                },
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportGroup"
+                    }
+                },
+                "range": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportRange"
+                },
+                "scope": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportScope"
+                },
+                "series": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportSeries"
+                    }
+                },
+                "totals": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals"
+                },
+                "truncated": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportCoverage": {
+            "type": "object",
+            "properties": {
+                "measurement_unknown_requests": {
+                    "type": "integer"
+                },
+                "state": {
+                    "type": "string"
+                },
+                "unattributed_requests": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportFreshness": {
+            "type": "object",
+            "properties": {
+                "revision": {
+                    "description": "No revision is promised until there is a durable acceptance watermark.",
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportGroup": {
+            "type": "object",
+            "properties": {
+                "dimension": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "totals": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals"
+                },
+                "unattributed": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportRange": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "time_basis": {
+                    "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                },
+                "week_starts_on": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportScope": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportSeries": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "start": {
+                    "type": "string"
+                },
+                "totals": {
+                    "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals"
+                },
+                "unattributed": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals": {
+            "type": "object",
+            "properties": {
+                "cache_read_cost_usd": {
+                    "type": "number"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_cost_usd": {
+                    "type": "number"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "cost_usd": {
+                    "type": "number"
+                },
+                "input_cost_usd": {
+                    "type": "number"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "measurement_unknown_requests": {
+                    "type": "integer"
+                },
+                "output_cost_usd": {
+                    "type": "number"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "response_cache_hits": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "unattributed_requests": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_kimnt93_gorouter_pkg_entities.UsageSummary": {
             "type": "object",
             "properties": {
@@ -6876,6 +7349,52 @@
                 }
             }
         },
+        "internal_api_handlers.AccountingCapabilities": {
+            "type": "object",
+            "properties": {
+                "atomic_credit_counters": {
+                    "type": "boolean"
+                },
+                "canonical_key_metadata": {
+                    "type": "boolean"
+                },
+                "durable_acceptance": {
+                    "type": "boolean"
+                },
+                "member_allocations": {
+                    "type": "boolean"
+                },
+                "totals_only": {
+                    "type": "boolean"
+                },
+                "usage_receipts": {
+                    "type": "boolean"
+                },
+                "usage_report": {
+                    "type": "string"
+                },
+                "user_weekly_usage": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.AccountingMeasurementFeatures": {
+            "type": "object",
+            "properties": {
+                "coverage": {
+                    "type": "string"
+                },
+                "missing_price_policy": {
+                    "type": "string"
+                },
+                "token_components": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_api_handlers.AuditListResponse": {
             "type": "object",
             "properties": {
@@ -6889,6 +7408,46 @@
                     "type": "string"
                 },
                 "object": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_handlers.CanonicalKeyMetadataResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "key_id": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api_handlers.CapabilitiesResponse": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string"
+                },
+                "capabilities": {
+                    "$ref": "#/definitions/internal_api_handlers.AccountingCapabilities"
+                },
+                "measurement": {
+                    "$ref": "#/definitions/internal_api_handlers.AccountingMeasurementFeatures"
+                },
+                "version": {
                     "type": "string"
                 }
             }

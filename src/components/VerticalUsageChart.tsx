@@ -261,6 +261,32 @@ export function VerticalUsageChart({ data, metric, groupBy, range, now }: { data
     { key: 'cache-read', label: 'Cache read', value: 0, color: colors[2] },
     { key: 'cache-write', label: 'Cache write', value: 0, color: colors[3] },
   ], total: 0 })), groupBy), [data, metric, groupBy, range, current])
+  return <UsageBucketsChart buckets={buckets} metric={metric} groupBy={groupBy} />
+}
+
+export function ReportUsageChart({ report, metric }: { report: import('../api/contracts').UsageReport; metric: Metric }) {
+  const ids = [...new Set(report.series.map((row) => row.group_id))].sort()
+  const byStart = new Map<string, Bucket>()
+  for (const row of report.series) {
+    const value = metric === 'tokens' ? row.totals.total_tokens : metric === 'cost' ? row.totals.cost_usd : row.totals.requests
+    const bucket = byStart.get(row.start) ?? { start: row.start, end: row.end, segments: [], total: 0 }
+    bucket.segments.push({ key: row.group_id, label: row.unattributed ? 'Unattributed' : row.group_id, value, color: colors[ids.indexOf(row.group_id) % colors.length] })
+    bucket.total += value
+    byStart.set(row.start, bucket)
+  }
+  const buckets = compressBuckets([...byStart.values()], (items) => {
+    const segments = new Map<string, Segment>()
+    for (const item of items) for (const segment of item.segments) {
+      const previous = segments.get(segment.key)
+      segments.set(segment.key, { ...segment, value: (previous?.value ?? 0) + segment.value })
+    }
+    return { start: items[0].start, end: items.at(-1)?.end, segments: [...segments.values()], total: items.reduce((sum, item) => sum + item.total, 0) }
+  })
+  return <UsageBucketsChart buckets={buckets} metric={metric} groupBy="day" exactBounds />
+}
+
+function UsageBucketsChart({ buckets, metric, groupBy, exactBounds = false }: { buckets: Bucket[]; metric: Metric; groupBy: GroupBy; exactBounds?: boolean }) {
+  const label = (bucket: Bucket) => exactBounds ? `${bucket.start} – ${bucket.end} (UTC)` : chartBucketLabel(bucket.start, bucket.end, groupBy)
   const max = Math.max(1, ...buckets.map((bucket) => bucket.total))
   const hover = useChartTooltip<Bucket>()
   const legend = useMemo(() => {
@@ -274,16 +300,16 @@ export function VerticalUsageChart({ data, metric, groupBy, range, now }: { data
     <div className="vertical-chart" aria-label={`${metric} activity trend`} onPointerLeave={hover.hide}>
       {buckets.map((bucket) => {
         const height = metric === 'requests' ? (bucket.total > 0 ? 100 : 0) : bucket.total / max * 100
-        return <div className="vertical-column" key={bucket.start} tabIndex={0} aria-label={`${chartBucketLabel(bucket.start, bucket.end, groupBy)} bucket`} onPointerEnter={(event) => hover.activate(bucket, event)} onPointerMove={hover.move} onFocus={(event) => hover.focus(bucket, event)} onBlur={hover.hide}>
+        return <div className="vertical-column" key={bucket.start} tabIndex={0} aria-label={`${label(bucket)} bucket`} onPointerEnter={(event) => hover.activate(bucket, event)} onPointerMove={hover.move} onFocus={(event) => hover.focus(bucket, event)} onBlur={hover.hide}>
           <div className="vertical-value">{metric === 'requests' ? `${formatInteger(bucket.total)}` : display(bucket.total)}</div>
           <div className="vertical-track"><div className="vertical-stack" style={{ height: `${height}%` }}>
             {bucket.segments.filter((segment) => segment.value > 0).map((segment) => <i key={segment.key} style={{ background: segment.color, height: `${bucket.total ? segment.value / bucket.total * 100 : 0}%` }} />)}
           </div></div>
-          <time dateTime={bucket.start}>{chartBucketLabel(bucket.start, bucket.end, groupBy)}</time>
+          <time dateTime={bucket.start} title={label(bucket)}>{exactBounds ? bucket.start.slice(5, 10) : label(bucket)}</time>
         </div>
       })}
     </div>
-    {hover.tooltip && <CursorTooltip state={hover.tooltip} tooltipRef={hover.tooltipRef}>{(bucket) => <><strong>{chartBucketLabel(bucket.start, bucket.end, groupBy)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></>}</CursorTooltip>}
+    {hover.tooltip && <CursorTooltip state={hover.tooltip} tooltipRef={hover.tooltipRef}>{(bucket) => <><strong>{label(bucket)}</strong>{bucket.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText><b>{display(segment.value)}</b></span>)}<span className="tooltip-total">Total<b>{display(bucket.total)}{metric === 'requests' ? ' · 100%' : ''}</b></span></>}</CursorTooltip>}
     <div className="chart-legend">{legend.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} /><TruncatedText>{segment.label}</TruncatedText></span>)}</div>
   </div>
 }

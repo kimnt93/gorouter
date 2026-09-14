@@ -133,6 +133,9 @@ type UsageVisibility struct {
 }
 
 type UsageQuery struct {
+	TotalsOnly       bool
+	PersonalOnly     bool
+	TimeBasis        string
 	Visibility       UsageVisibility
 	Cursor           string
 	Limit            int

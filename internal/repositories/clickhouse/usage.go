@@ -190,6 +190,9 @@ func usageWhere(query entities.UsageQuery, includeCursor bool) ([]string, []any)
 	} else {
 		clauses = append(clauses, "0=1")
 	}
+	if query.PersonalOnly {
+		clauses = append(clauses, "organization_id=''")
+	}
 	for _, filter := range query.Filters() {
 		column := filter.Field
 		switch column {
@@ -201,11 +204,15 @@ func usageWhere(query entities.UsageQuery, includeCursor bool) ([]string, []any)
 	if query.StatusCode != nil {
 		clauses, args = append(clauses, "status_code=?"), append(args, int32(*query.StatusCode))
 	}
+	timeColumn := "ts"
+	if query.TimeBasis == "accounting" {
+		timeColumn = "coalesce(accounting_ts,ts)"
+	}
 	if query.Since != nil {
-		clauses, args = append(clauses, "ts>=toDateTime64(?,9,'UTC')"), append(args, query.Since.UTC().Format("2006-01-02 15:04:05.000000000"))
+		clauses, args = append(clauses, timeColumn+">=toDateTime64(?,9,'UTC')"), append(args, query.Since.UTC().Format("2006-01-02 15:04:05.000000000"))
 	}
 	if query.Until != nil {
-		clauses, args = append(clauses, "ts<toDateTime64(?,9,'UTC')"), append(args, query.Until.UTC().Format("2006-01-02 15:04:05.000000000"))
+		clauses, args = append(clauses, timeColumn+"<toDateTime64(?,9,'UTC')"), append(args, query.Until.UTC().Format("2006-01-02 15:04:05.000000000"))
 	}
 	if includeCursor {
 		cursor := clickhouseAuditCursorDecode(query.Cursor)
@@ -255,6 +262,9 @@ func (r *UsageRepo) SummaryUsage(ctx context.Context, query entities.UsageQuery)
 		return nil, err
 	}
 	summary.Requests, summary.CacheHits, summary.Unpriced = int64(requests), int64(cacheHits), int64(unpriced)
+	if query.TotalsOnly {
+		return summary, nil
+	}
 	rows, err := r.s.Conn.Query(ctx, `SELECT model,count(),sum(cost_usd),sum(prompt_tokens),sum(completion_tokens),sum(cache_read_tokens),sum(cache_write_tokens) FROM usage_events WHERE `+where+` GROUP BY model`, args...)
 	if err != nil {
 		return nil, err

@@ -870,6 +870,127 @@ definitions:
       successes:
         type: integer
     type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReport:
+    properties:
+      as_of:
+        type: string
+      capability_version:
+        type: string
+      coverage:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportCoverage'
+      freshness:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportFreshness'
+      groups:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportGroup'
+        type: array
+      range:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportRange'
+      scope:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportScope'
+      series:
+        items:
+          $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportSeries'
+        type: array
+      totals:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals'
+      truncated:
+        type: boolean
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportCoverage:
+    properties:
+      measurement_unknown_requests:
+        type: integer
+      state:
+        type: string
+      unattributed_requests:
+        type: integer
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportFreshness:
+    properties:
+      revision:
+        description: No revision is promised until there is a durable acceptance watermark.
+        type: string
+      state:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportGroup:
+    properties:
+      dimension:
+        type: string
+      id:
+        type: string
+      totals:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals'
+      unattributed:
+        type: boolean
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportRange:
+    properties:
+      from:
+        type: string
+      time_basis:
+        type: string
+      timezone:
+        type: string
+      to:
+        type: string
+      week_starts_on:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportScope:
+    properties:
+      kind:
+        type: string
+      organization_id:
+        type: string
+      user_id:
+        type: string
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportSeries:
+    properties:
+      end:
+        type: string
+      group_id:
+        type: string
+      start:
+        type: string
+      totals:
+        $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals'
+      unattributed:
+        type: boolean
+    type: object
+  github_com_kimnt93_gorouter_pkg_entities.UsageReportTotals:
+    properties:
+      cache_read_cost_usd:
+        type: number
+      cache_read_tokens:
+        type: integer
+      cache_write_cost_usd:
+        type: number
+      cache_write_tokens:
+        type: integer
+      cost_usd:
+        type: number
+      input_cost_usd:
+        type: number
+      input_tokens:
+        type: integer
+      measurement_unknown_requests:
+        type: integer
+      output_cost_usd:
+        type: number
+      output_tokens:
+        type: integer
+      requests:
+        type: integer
+      response_cache_hits:
+        type: integer
+      total_tokens:
+        type: integer
+      unattributed_requests:
+        type: integer
+    type: object
   github_com_kimnt93_gorouter_pkg_entities.UsageSummary:
     properties:
       by_key:
@@ -1098,6 +1219,36 @@ definitions:
       plaintext:
         type: string
     type: object
+  internal_api_handlers.AccountingCapabilities:
+    properties:
+      atomic_credit_counters:
+        type: boolean
+      canonical_key_metadata:
+        type: boolean
+      durable_acceptance:
+        type: boolean
+      member_allocations:
+        type: boolean
+      totals_only:
+        type: boolean
+      usage_receipts:
+        type: boolean
+      usage_report:
+        type: string
+      user_weekly_usage:
+        type: string
+    type: object
+  internal_api_handlers.AccountingMeasurementFeatures:
+    properties:
+      coverage:
+        type: string
+      missing_price_policy:
+        type: string
+      token_components:
+        items:
+          type: string
+        type: array
+    type: object
   internal_api_handlers.AuditListResponse:
     properties:
       data:
@@ -1107,6 +1258,32 @@ definitions:
       next_cursor:
         type: string
       object:
+        type: string
+    type: object
+  internal_api_handlers.CanonicalKeyMetadataResponse:
+    properties:
+      enabled:
+        type: boolean
+      key_id:
+        type: string
+      owner_id:
+        type: string
+      revision:
+        type: string
+      scopes:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api_handlers.CapabilitiesResponse:
+    properties:
+      backend:
+        type: string
+      capabilities:
+        $ref: '#/definitions/internal_api_handlers.AccountingCapabilities'
+      measurement:
+        $ref: '#/definitions/internal_api_handlers.AccountingMeasurementFeatures'
+      version:
         type: string
     type: object
   internal_api_handlers.CodexResetCreditRequest:
@@ -2358,6 +2535,22 @@ paths:
       summary: Get cache statistics
       tags:
       - cache
+  /admin/capabilities:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.CapabilitiesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get dependency capabilities
+      tags:
+      - usage
   /admin/credentials:
     get:
       description: Lists safe credential metadata or creates an encrypted provider
@@ -4590,11 +4783,154 @@ paths:
       summary: List recent usage
       tags:
       - usage
+  /admin/usage/report:
+    get:
+      description: Single-statement stored usage snapshot. Coverage is unknown until
+        durable acceptance tracking is available. Empty results do not establish measured
+        free work. Empty dimension IDs denote unattributed history. Token totals exclude
+        replayed Router response-cache metadata. Cache read ratio is cache_read_tokens/(input_tokens+cache_read_tokens),
+        undefined when denominator is zero. Cost is historical Router-priced USD,
+        not a provider invoice.
+      parameters:
+      - description: personal (user default), organization (context default), all_owned,
+          global (master only)
+        in: query
+        name: scope
+        type: string
+      - description: 24h (default), 7d, 30d; explicit bounds override presets
+        in: query
+        name: range
+        type: string
+      - description: RFC3339 inclusive lower bound; maximum five years
+        in: query
+        name: since
+        type: string
+      - description: RFC3339 exclusive upper bound
+        in: query
+        name: until
+        type: string
+      - description: accounting (default) or completion
+        in: query
+        name: time_basis
+        type: string
+      - description: agent, model, user; omitted means no groups; maximum 100
+        in: query
+        name: group_by
+        type: string
+      - description: agent, model, user; omitted means combined series
+        in: query
+        name: series_by
+        type: string
+      - description: hour, day (default), week, month; maximum 2000 buckets/20000
+          cells
+        in: query
+        name: bucket
+        type: string
+      - description: Authorized organization context
+        in: query
+        name: organization_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: user_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: agent_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: conversation_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: run_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: parent_run_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: trace_id
+        type: string
+      - description: CSV/repeated IDs (100 maximum)
+        in: query
+        name: logical_request_id
+        type: string
+      - description: CSV/repeated model IDs
+        in: query
+        name: model
+        type: string
+      - description: CSV/repeated provider IDs
+        in: query
+        name: provider
+        type: string
+      - description: CSV/repeated key IDs
+        in: query
+        name: api_key_id
+        type: string
+      - description: CSV/repeated credential IDs
+        in: query
+        name: credential_id
+        type: string
+      - description: Legacy application filter
+        in: query
+        name: application
+        type: string
+      - description: Legacy environment filter
+        in: query
+        name: environment
+        type: string
+      - description: Legacy workspace filter
+        in: query
+        name: workspace_id
+        type: string
+      - description: Master-only user View As
+        in: query
+        name: view_user_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_entities.UsageReport'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a bounded usage report
+      tags:
+      - usage
   /admin/usage/summary:
     get:
       description: Returns policy-constrained aggregate request, token, cache, and
         cost metrics.
       parameters:
+      - description: all (default) or none (totals only)
+        in: query
+        name: breakdown
+        type: string
       - description: 24h, 7d, 30d, or all; default 24h
         in: query
         name: range
@@ -5029,6 +5365,40 @@ paths:
       summary: Get or update a user
       tags:
       - users
+  /admin/users/{id}/api-key:
+    get:
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_handlers.CanonicalKeyMetadataResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get canonical user API key metadata
+      tags:
+      - keys
   /healthz:
     get:
       description: Reports whether the gateway process is alive. This endpoint does

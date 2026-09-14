@@ -562,22 +562,10 @@ func normalizeWorkload(binding entities.WorkloadBinding) (entities.WorkloadBindi
 // records. Prefer an existing personal key, then stable creation order. Rotation
 // preserves its ID; legacy secondary keys cannot authenticate.
 func (s *Service) PrimaryForUser(ctx context.Context, userID string) (*entities.ApiKey, error) {
-	keys, err := s.repo.List(ctx)
-	if err != nil {
-		return nil, err
+	if repo, ok := s.repo.(interface {
+		PrimaryForUser(context.Context, string) (*entities.ApiKey, error)
+	}); ok {
+		return repo.PrimaryForUser(ctx, userID)
 	}
-	var primary *entities.ApiKey
-	for _, k := range keys {
-		if k.OwnerType != entities.OwnerUser || k.OwnerUserID != userID {
-			continue
-		}
-		if primary == nil || k.ContextOrganizationID == "" && primary.ContextOrganizationID != "" || (k.ContextOrganizationID == "") == (primary.ContextOrganizationID == "") && (k.CreatedAt.Before(primary.CreatedAt) || k.CreatedAt.Equal(primary.CreatedAt) && k.ID < primary.ID) {
-			value := k
-			primary = &value
-		}
-	}
-	if primary == nil {
-		return nil, entities.ErrNotFound
-	}
-	return primary, nil
+	return nil, errors.New("canonical API key lookup unavailable")
 }

@@ -17,6 +17,7 @@ func TestSwaggerDocumentsEveryJSONRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
+		"/admin/capabilities": {"get"}, "/admin/usage/report": {"get"}, "/admin/users/{id}/api-key": {"get"},
 		"/healthz": {"get"}, "/login": {"post"}, "/logout": {"post"}, "/admin/session": {"get"}, "/admin/model-aliases": {"get", "post"}, "/admin/model-grants": {"post"}, "/admin/model-limits": {"post"}, "/v1/chat/completions": {"post"}, "/v1/responses": {"post"}, "/v1/messages": {"post"}, "/v1/models": {"get"},
 		"/admin/tenants": {"get", "post"}, "/admin/organizations": {"get", "post"}, "/admin/organizations/{id}": {"get", "patch"}, "/admin/organizations/{id}/models": {"get", "post"}, "/admin/organizations/{id}/model-grants": {"get", "post"}, "/admin/organizations/{id}/members": {"get", "post"}, "/admin/organizations/{id}/members/{user_id}": {"patch", "delete"}, "/admin/users": {"get", "post"}, "/admin/users/{id}": {"get", "patch", "delete"}, "/admin/audit/events": {"get"},
 		"/admin/credentials": {"get", "post"}, "/admin/credentials/{id}": {"put", "delete"}, "/admin/providers": {"get"}, "/admin/oauth/{provider}/start": {"post"}, "/admin/oauth/{provider}/complete": {"post"}, "/admin/credentials/{id}/test": {"post"}, "/admin/credentials/{id}/quota": {"get", "post"}, "/admin/credentials/{id}/reset-credits": {"get", "post"}, "/admin/credentials/{id}/models": {"get"}, "/admin/credentials/{id}/models/import": {"post"}, "/admin/credentials/{id}/models/refresh": {"post"}, "/admin/credentials/{id}/chat-tests": {"post"},
