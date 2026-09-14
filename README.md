@@ -1,4 +1,8 @@
-# GoRouter
+<p align="center">
+  <img src="docs/assets/gorouter-logo.svg" width="320" height="290" alt="GoRouter — a Go gopher routing requests for three separate tenant teams" />
+</p>
+
+<h1 align="center">GoRouter</h1>
 
 ## Providers
 

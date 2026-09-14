@@ -84,13 +84,21 @@ func New(d Dependencies) *fiber.App {
 		if err != nil {
 			return c.SendStatus(fiber.StatusNotFound)
 		}
+		c.Set("Cache-Control", "public, max-age=31536000, immutable")
 		switch {
 		case strings.HasSuffix(name, ".css"):
 			c.Type("css")
 		case strings.HasSuffix(name, ".js"):
 			c.Type("js")
+		case strings.HasSuffix(name, ".svg"):
+			c.Type("svg")
+		case strings.HasSuffix(name, ".ico"):
+			c.Type("ico")
 		}
-		c.Set("Cache-Control", "public, max-age=31536000, immutable")
+		// Public branding files have stable names, unlike Vite's hashed bundles.
+		if name == "assets/favicon.svg" || name == "assets/favicon.ico" {
+			c.Set("Cache-Control", "no-cache")
+		}
 		return c.Send(body)
 	})
 	app.Post("/login", (&handlers.Admin{Auth: d.Auth}).Verify)

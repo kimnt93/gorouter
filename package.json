@@ -8,7 +8,8 @@
     "test": "vitest run",
     "seed:smoke": "node scripts/seed-smoke.mjs",
     "smoke:ui": "node scripts/ui-smoke.mjs",
-    "css": "tailwindcss -i ./ui/tailwind.css -o ./internal/api/views/static/tailwind.css --minify"
+    "css": "tailwindcss -i ./ui/tailwind.css -o ./internal/api/views/static/tailwind.css --minify",
+    "build:branding": "node scripts/build-branding.mjs"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.12",

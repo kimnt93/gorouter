@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="464" viewBox="0 0 512 464" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">GoRouter gopher</title>
+  <desc id="desc">A cyan Go gopher holds a network router. Three separate violet, green, and amber team badges connect to dedicated matching ports, representing routing for isolated tenants.</desc>
+  <!-- Separate paths and enclosed team badges represent tenant boundaries. -->
+  <g stroke="#183449" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M94 168V266Q94 286 114 286H174V336" stroke="#A99AF4"/>
+    <path d="M256 110V142" stroke="#58CFAB"/>
+    <path d="M418 168V266Q418 286 398 286H338V336" stroke="#F2BC68"/>
+    <rect x="48" y="80" width="92" height="88" rx="28" fill="#A99AF4"/>
+    <rect x="210" y="22" width="92" height="88" rx="28" fill="#58CFAB"/>
+    <rect x="372" y="80" width="92" height="88" rx="28" fill="#F2BC68"/>
+  </g>
+  <!-- Each badge contains its own team, rather than one shared user pool. -->
+  <g fill="#183449">
+    <circle cx="83" cy="112" r="10"/><circle cx="108" cy="117" r="8"/>
+    <path d="M66 141C66 123 100 123 100 141V146H66ZM101 131C115 127 122 136 122 146H106V141Q106 135 101 131Z"/>
+    <circle cx="245" cy="54" r="10"/><circle cx="270" cy="59" r="8"/>
+    <path d="M228 83C228 65 262 65 262 83V88H228ZM263 73C277 69 284 78 284 88H268V83Q268 77 263 73Z"/>
+    <circle cx="407" cy="112" r="10"/><circle cx="432" cy="117" r="8"/>
+    <path d="M390 141C390 123 424 123 424 141V146H390ZM425 131C439 127 446 136 446 146H430V141Q430 135 425 131Z"/>
+  </g>
+  <g stroke="#183449" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Round ears, big eyes, tiny paws, and buck teeth keep the Go family resemblance. -->
+    <circle cx="170" cy="174" r="29" fill="#64D5E7"/>
+    <circle cx="342" cy="174" r="29" fill="#64D5E7"/>
+    <path d="M165 168Q176 162 180 177M332 177Q336 162 347 168" stroke="#238BA5" stroke-width="7"/>
+    <ellipse cx="202" cy="417" rx="30" ry="15" fill="#F4D6B5"/>
+    <ellipse cx="310" cy="417" rx="30" ry="15" fill="#F4D6B5"/>
+    <path d="M151 263C151 181 186 142 256 142S361 181 361 263V348C361 399 323 422 256 422S151 399 151 348Z" fill="#64D5E7"/>
+  </g>
+  <path d="M325 178C343 198 349 228 349 263V346C349 386 319 407 256 410C302 394 315 366 315 329V248C315 216 319 194 325 178Z" fill="#39B6D0"/>
+  <ellipse cx="256" cy="339" rx="64" ry="69" fill="#B8EEF0"/>
+  <g stroke="#183449" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="213" cy="217" rx="34" ry="40" fill="#FFFDF7"/>
+    <ellipse cx="299" cy="217" rx="34" ry="40" fill="#FFFDF7"/>
+  </g>
+  <g fill="#183449">
+    <ellipse cx="221" cy="223" rx="12" ry="17"/>
+    <ellipse cx="291" cy="223" rx="12" ry="17"/>
+  </g>
+  <g fill="#FFFDF7"><circle cx="224" cy="217" r="4"/><circle cx="294" cy="217" r="4"/></g>
+  <g stroke="#183449" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M239 271H273V289Q273 299 263 299H249Q239 299 239 289Z" fill="#FFFDF7"/>
+    <path d="M256 279V297"/>
+    <ellipse cx="242" cy="264" rx="22" ry="16" fill="#F4D6B5"/>
+    <ellipse cx="270" cy="264" rx="22" ry="16" fill="#F4D6B5"/>
+  </g>
+  <path d="M242 249Q256 242 270 249Q271 263 256 265Q241 263 242 249Z" fill="#183449"/>
+  <!-- A three-port router with an explicit branching arrow, not a Wi-Fi/cloud symbol. -->
+  <g stroke="#183449" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="160" y="318" width="192" height="80" rx="23" fill="#FFFDF7"/>
+    <path d="M174 334H338" stroke="#DAE6E9" stroke-width="5"/>
+    <path d="M246 379V354M232 365L246 351L260 365M246 372H279L290 361" stroke-width="5"/>
+    <rect x="178" y="351" width="19" height="23" rx="5" fill="#A99AF4" stroke-width="4"/>
+    <rect x="204" y="351" width="19" height="23" rx="5" fill="#58CFAB" stroke-width="4"/>
+    <rect x="310" y="351" width="19" height="23" rx="5" fill="#F2BC68" stroke-width="4"/>
+    <path d="M159 321C137 315 133 330 138 344C142 356 155 365 168 360Q177 356 169 347Q181 334 159 321Z" fill="#F4D6B5" stroke-width="7"/>
+    <path d="M353 321C375 315 379 330 374 344C370 356 357 365 344 360Q335 356 343 347Q331 334 353 321Z" fill="#F4D6B5" stroke-width="7"/>
+  </g>
+  <path d="M94 219V239M87 232L94 239L101 232" stroke="#A99AF4" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M418 219V239M411 232L418 239L425 232" stroke="#F2BC68" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
