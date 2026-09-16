@@ -163,7 +163,7 @@ export interface ProviderQuotaSnapshot {
 
 export interface Credential {
   id: string; name: string; provider: string; kind: string; base_url: string; status: string
-  label: string; owner_user_id?: string; created_at: string
+  label: string; owner_user_id?: string; created_at: string; last_refreshed_at?: string
 }
 
 export interface ConnectivityResult { ok: boolean; status?: number; latency_ms: number }

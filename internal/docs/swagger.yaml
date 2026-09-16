@@ -1368,6 +1368,8 @@ definitions:
         type: string
       label:
         type: string
+      last_refreshed_at:
+        type: string
       name:
         type: string
       owner_tenant_id:

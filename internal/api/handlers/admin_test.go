@@ -348,3 +348,20 @@ func TestWeeklyUsageRequiresUsageRepository(t *testing.T) {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
 }
+
+func TestCredentialRefreshTimestampProjection(t *testing.T) {
+	now := "2026-09-16T10:00:00Z"
+	record := entities.Credential{ID: "oauth", Kind: entities.KindOAuth}
+	runtime := &entities.CredentialRuntime{OAuthMeta: entities.OAuthMetadata{LastRefreshedAt: now}}
+	response := credentialResponse(record, runtime)
+	if response.LastRefreshedAt != now {
+		t.Fatalf("refresh time = %q", response.LastRefreshedAt)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil || !strings.Contains(string(encoded), `"last_refreshed_at":"`+now+`"`) {
+		t.Fatalf("response missing timestamp: %s %v", encoded, err)
+	}
+	if credentialResponse(entities.Credential{Kind: entities.KindAPIKey}, runtime).LastRefreshedAt != "" {
+		t.Fatal("API key exposed OAuth refresh metadata")
+	}
+}

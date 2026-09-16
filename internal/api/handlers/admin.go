@@ -281,16 +281,17 @@ func (a *Admin) Tenants(c fiber.Ctx) error {
 // connection. Label consistently contains either an OAuth account identity or
 // a masked API-key preview.
 type CredentialResponse struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Provider      string    `json:"provider"`
-	Kind          string    `json:"kind"`
-	BaseURL       string    `json:"base_url"`
-	Status        string    `json:"status"`
-	Label         string    `json:"label"`
-	OwnerTenantID *string   `json:"owner_tenant_id"`
-	OwnerUserID   string    `json:"owner_user_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Provider        string    `json:"provider"`
+	Kind            string    `json:"kind"`
+	BaseURL         string    `json:"base_url"`
+	Status          string    `json:"status"`
+	Label           string    `json:"label"`
+	OwnerTenantID   *string   `json:"owner_tenant_id"`
+	OwnerUserID     string    `json:"owner_user_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastRefreshedAt string    `json:"last_refreshed_at,omitempty"`
 }
 
 func credentialResponse(record entities.Credential, runtime *entities.CredentialRuntime) CredentialResponse {
@@ -304,8 +305,13 @@ func credentialResponse(record entities.Credential, runtime *entities.Credential
 	} else if runtime != nil {
 		label = credential.AccountLabel(runtime)
 	}
+	refreshed := ""
+	if runtime != nil && record.Kind == entities.KindOAuth {
+		refreshed = runtime.OAuthMeta.LastRefreshedAt
+	}
 	return CredentialResponse{
-		ID: record.ID, Name: record.Name, Provider: record.Provider, Kind: record.Kind,
+		LastRefreshedAt: refreshed,
+		ID:              record.ID, Name: record.Name, Provider: record.Provider, Kind: record.Kind,
 		BaseURL: record.BaseURL, Status: record.Status, Label: label,
 		OwnerTenantID: record.OwnerTenantID, OwnerUserID: record.OwnerUserID, CreatedAt: record.CreatedAt,
 	}

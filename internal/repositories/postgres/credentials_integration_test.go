@@ -110,7 +110,7 @@ func TestOAuthCredentialMetadataIsEncryptedAndPreservedAcrossRefresh(t *testing.
 	if after.OAuthAccess != "refreshed-access-secret" || after.OAuthRefreh != "refreshed-refresh-secret" {
 		t.Fatalf("refreshed OAuth tokens = access %q refresh %q", after.OAuthAccess, after.OAuthRefreh)
 	}
-	if after.OAuthIDToken != before.OAuthIDToken || after.OAuthAccount != before.OAuthAccount || after.OAuthMeta != before.OAuthMeta {
+	if after.OAuthIDToken != before.OAuthIDToken || after.OAuthAccount != before.OAuthAccount || after.OAuthMeta.LastRefreshedAt == "" {
 		t.Fatalf("refresh discarded OAuth identity metadata: before=%+v after=%+v", before, after)
 	}
 

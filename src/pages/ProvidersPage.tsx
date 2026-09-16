@@ -7,6 +7,7 @@ import { PageLoading } from '../components/PageState'
 import { SearchableSelect, TruncatedText } from '../components/SearchableSelect'
 import { useSession } from '../context/SessionContext'
 import { createIdempotencyKey } from '../lib/idempotency'
+import { formatDateTime } from '../lib/format'
 
 export function ProvidersPage() {
   const { viewOrganizationID } = useSession()
@@ -94,6 +95,7 @@ function ConnectionRow({ credential, quotaSupported, quotaReloadVersion, onModel
   }
   const accountIdentity = credential.label || quota?.account || (credential.kind === 'oauth' ? 'connected account' : 'encrypted API key')
   return <div className={`connection-row ${quota?.in_use ? 'in-use' : ''}`}><div className="connection-name"><i className={credential.status === 'active' ? 'connection-dot active' : 'connection-dot'} /><span><strong title={credential.name}>{credential.name}{quota?.in_use && <em className="in-use-label">In use</em>}</strong><small title={`${accountIdentity} · ${credential.base_url}`}>{accountIdentity} · {credential.base_url}</small></span></div>
+    {credential.kind === 'oauth' && <small className="connection-refresh-time">Last token refresh: {credential.last_refreshed_at ? formatDateTime(credential.last_refreshed_at) : 'Not recorded yet'}</small>}
     {quotaSupported && <QuotaPanel quota={quota} accountFallback={credential.label || credential.name} busy={quotaBusy} onReload={() => void reloadQuota()} />}
     {credential.provider === 'codex' && credential.kind === 'oauth' && <div className="reset-credit-panel"><button disabled={quotaBusy} onClick={() => void loadResetCredits()}>{quotaBusy ? 'Loading resets…' : 'Reset credits'}</button></div>}
     <div className="compact-actions">

@@ -7580,6 +7580,9 @@ const docTemplate = `{
                 "label": {
                     "type": "string"
                 },
+                "last_refreshed_at": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },

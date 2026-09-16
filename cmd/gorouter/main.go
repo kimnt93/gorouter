@@ -44,6 +44,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/identity"
 	"github.com/kimnt93/gorouter/pkg/modelroute"
 	oauthpkg "github.com/kimnt93/gorouter/pkg/oauth"
+	"github.com/kimnt93/gorouter/pkg/oauthmaintenance"
 	"github.com/kimnt93/gorouter/pkg/orgmodel"
 	"github.com/kimnt93/gorouter/pkg/pricing"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
@@ -251,11 +252,19 @@ func main() {
 	openai := &llm.OpenAIAdapter{HTTP: client}
 	anthropic := &llm.AnthropicAdapter{HTTP: client, OAuthClientID: cfg.OAuthClientID}
 	refresher := &llm.AnthropicOAuthRefresher{HTTP: client, TokenURL: cfg.OAuthTokenURL, ClientID: cfg.OAuthClientID, Persister: credSvc}
-	anthropic.Refresh = refresher.Refresh
+	oauthRefresh := &oauthmaintenance.Service{Store: credSvc, Locker: distributedRefreshLock, Refreshers: map[string]oauthmaintenance.Refresh{}}
+	anthropic.Refresh = func(ctx context.Context, cr *entities.CredentialRuntime) error {
+		return oauthRefresh.Refresh(ctx, cr, true)
+	}
+	oauthRefresh.Refreshers["claude"] = refresher.Refresh
 	claudeCode := &llm.ClaudeCodeAdapter{AnthropicAdapter: anthropic}
 	codex := &llm.CodexAdapter{HTTP: client}
 	codexRefresher := &llm.CodexOAuthRefresher{HTTP: client, TokenURL: cfg.CodexOAuthTokenURL, ClientID: cfg.CodexOAuthClientID, Persister: credSvc}
-	codex.Refresh = codexRefresher.Refresh
+	codex.Refresh = func(ctx context.Context, cr *entities.CredentialRuntime) error {
+		return oauthRefresh.Refresh(ctx, cr, true)
+	}
+	oauthRefresh.Refreshers["codex"] = codexRefresher.Refresh
+	oauthRefresh.Start(ctx, 30*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
 	copilot := &llm.CopilotAdapter{HTTP: client}
 	grokBuild := &llm.GrokBuildAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.GrokOAuthClientID}
 	xaiOAuth := &llm.XAIAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.GrokOAuthClientID}
@@ -315,7 +324,7 @@ func main() {
 	}
 	providerQuotaSvc := providerquota.New(client, credSvc)
 	providerQuotaSvc.SetStore(providerQuotaStore)
-	providerQuotaSvc.SetCodexOAuth(codexRefresher)
+	providerQuotaSvc.SetCodexOAuth(oauthRefreshAdapter{service: oauthRefresh})
 	if redisClient != nil {
 		providerQuotaSvc.SetStateCache(providerquota.NewRedisState(redisClient))
 	}
@@ -369,4 +378,11 @@ func main() {
 	if err := app.Shutdown(); err != nil {
 		log.Error().Err(err).Msg("failed to shut down server")
 	}
+}
+
+// oauthRefreshAdapter shares the same credential lock with request and timer refresh.
+type oauthRefreshAdapter struct{ service *oauthmaintenance.Service }
+
+func (a oauthRefreshAdapter) Refresh(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return a.service.Refresh(ctx, cr, true)
 }

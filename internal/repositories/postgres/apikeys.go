@@ -271,6 +271,7 @@ func (r *CredentialRepo) UpdateOAuthTokens(ctx context.Context, box entities.Sec
 	}
 	blob.Access = access
 	blob.Refresh = refresh
+	blob.Metadata.LastRefreshedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	encoded, _ := json.Marshal(blob)
 	sealed, err := box.Seal(encoded)
 	if err != nil {

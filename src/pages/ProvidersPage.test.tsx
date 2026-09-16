@@ -157,3 +157,15 @@ test('shows the full connection name and a masked API-key preview', async () => 
   expect(await screen.findByText('Production Groq Key')).toBeInTheDocument()
   expect(screen.getByText(/ghp_fsf\*{6}o28fk/)).toBeInTheDocument()
 })
+
+test('shows the last successful OAuth token refresh, or an unrecorded state', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'codex', name: 'Codex', description: '', auth: 'oauth', protocol: 'codex', default_base_url: '', model_prefix: 'cx', custom_base_url: false, oauth_supported: true, oauth_refresh_required: true, quota_supported: false }] })
+  api.getCredentials.mockResolvedValue([
+    { id: 'a', name: 'Refreshed', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', label: '', created_at: '', last_refreshed_at: '2026-09-16T10:00:00Z' },
+    { id: 'b', name: 'Pending', provider: 'codex', kind: 'oauth', base_url: '', status: 'active', label: '', created_at: '' },
+  ])
+  render(<ProvidersPage />)
+  await waitFor(() => expect(screen.getAllByText(/Last token refresh:/)).toHaveLength(2))
+  expect(screen.getByText(/Not recorded yet/)).toBeInTheDocument()
+  expect(screen.getByText(/2026/)).toBeInTheDocument()
+})

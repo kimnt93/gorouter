@@ -140,3 +140,39 @@ func TestLocalWorkloadUsageAggregateIsIsolatedAndHalfOpen(t *testing.T) {
 		t.Fatalf("idempotent summary=%+v err=%v", summary, err)
 	}
 }
+
+func TestLocalOAuthRefreshTimestamp(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.ConnectSQLite(ctx, t.TempDir()+"/oauth.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	box, err := seal.New("test-refresh-timestamp-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewCredentialRepo(New(db.DB))
+	created, err := repo.Create(ctx, entities.CredentialInput{Name: "OAuth", Provider: "codex", Kind: entities.KindOAuth, OAuthAccess: "old", OAuthRefresh: "old-refresh"}, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.Runtime(ctx, box, created.ID)
+	if err != nil || before.OAuthMeta.LastRefreshedAt != "" {
+		t.Fatalf("before refresh: %v %q", err, before.OAuthMeta.LastRefreshedAt)
+	}
+	if err := repo.UpdateOAuthTokens(ctx, box, created.ID, "new", "new-refresh"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := repo.Runtime(ctx, box, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamped, err := time.Parse(time.RFC3339Nano, after.OAuthMeta.LastRefreshedAt)
+	if err != nil || time.Since(stamped) > time.Minute || after.OAuthRefreh != "new-refresh" {
+		t.Fatalf("invalid timestamp or tokens: %q %v", after.OAuthMeta.LastRefreshedAt, err)
+	}
+}
