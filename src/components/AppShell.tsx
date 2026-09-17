@@ -36,6 +36,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     { href: '/dashboard/organizations', label: 'Organizations', show: true },
     { href: '/dashboard/keys', label: 'API keys', show: has('keys:manage') },
     { href: '/dashboard/audit', label: 'Audit', show: has('usage:read') },
+    { href: '/dashboard/update', label: 'Updates', show: isMaster },
   ].filter((link) => link.show)
   return (
     <div className="app-shell">

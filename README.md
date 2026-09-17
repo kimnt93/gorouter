@@ -4,30 +4,41 @@
 
 <h1 align="center">GoRouter</h1>
 
-## Version and release notes
-
-Current accounting work targets **v0.2.2** and reports **`0.2.2-dev`** through
-`GET /admin/capabilities`. This is a development preview of usage reporting,
-not the completed durable accounting/credit engine. Gate integrations on the
-individual capability flags, not the version string.
-
-- [v0.2.2 release notes, usage examples and upgrade notes](docs/release-notes-v0.2.2.md)
-- [Accounting report API and shared JSON fixture](docs/accounting-v0.2.2/README.md)
-- [Inference tracking headers and usage queries](docs/usage-tracking.md)
-- [v0.2.1 release notes](docs/release-notes-v0.2.1.md)
-
-The source preview does not imply that a v0.2.2 tag or image has been published.
-
 ## Providers
 
 GoRouter is a small multi-user LLM gateway with OpenAI-compatible APIs,
 ownership-aware routing, quotas, usage attribution, pricing, and caching.
 Connect accounts from `/dashboard/providers`.
 
+Explore the generated [Swaggo API documentation](http://localhost:8090/docs)
+at `http://<your-router-host>:8090/docs` (or `/docs` on your configured
+port). Protected API operations still require authentication.
+
+[Changes since v0.0.22](docs/release-notes-v0.0.23.md) are recorded separately.
+
 | Authentication | Providers |
 |---|---|
 | API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible, Windsurf / Devin Desktop (imported key; not OAuth) |
 | OAuth | Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Grok Build, xAI, Kimi Code, Cline, ClinePass, Kilo Code, Kiro, Amazon Q, Google Antigravity |
+
+## What GoRouter focuses on
+
+A feature comparison, not a claim that other gateways cannot support these
+workflows through add-ons or custom configuration. See each project's current
+[OmniRoute](https://github.com/diegosouzapw/OmniRoute) and
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) documentation for
+their latest capabilities.
+
+| Area | GoRouter | OmniRoute | CLIProxyAPI |
+|---|---|---|---|
+| Primary focus | Multi-user policy and accounting gateway | Broad provider aggregation, local dashboard, free-tier monitoring | Lightweight multi-account CLI/API proxy |
+| Durable backend | SQLite local; PostgreSQL or ClickHouse deployment | Database-backed dashboard | Configuration-file oriented proxy |
+| Multi-user and organizations | User-owned connections, memberships, org grants and model aliases | Dashboard accounts and provider connections | Management and provider accounts; different access model |
+| Cost visibility | Per-request token components and estimated USD cost with pricing | Usage and spending dashboards | Usage statistics; accounting varies by deployment |
+| Usage controls | Per-user/model weekly USD assignment caps, key quotas and RPM | Provider limits and usage monitoring | Provider quota and multi-account management |
+| Distributed coordination | Redis coordination with PostgreSQL/ClickHouse deployments | Deployment-specific | Deployment-specific |
+
+The table describes the built-in product boundaries, not a performance ranking.
 
 ## Performance snapshot
 

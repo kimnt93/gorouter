@@ -266,3 +266,5 @@ export interface AccountingCapabilities {
   capabilities: { usage_report: string; totals_only: boolean; durable_acceptance: boolean; usage_receipts: boolean; member_allocations: boolean; atomic_credit_counters: boolean; canonical_key_metadata: boolean; user_weekly_usage: string }
   measurement: { token_components: string[]; missing_price_policy: string; coverage: string }
 }
+
+export interface UpdateStatus { installed: string; latest: string; update_available: boolean; image: string; release_url: string; published_at?: string; checked_at: string }

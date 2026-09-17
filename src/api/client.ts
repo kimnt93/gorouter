@@ -1,4 +1,4 @@
-import type { APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteRequest, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
+import type { UpdateStatus, APIKey, APIKeyModelOption, AuditEvent, AuditFilters, CatalogPrice, ConnectivityResult, CreatedAPIKey, Credential, ListResponse, Membership, ModelDefinition, OAuthCompleteRequest, OAuthCompleteResponse, OAuthStartResponse, Organization, PricingCatalogResponse, ProviderDefinition, ProviderModelsResponse, ProviderQuotaSnapshot, CodexResetCreditList, CodexResetCreditResult, RouterCacheStats, Session, UsageActivityResponse, UsageDetail, UsageFilters, UsageRecentResponse, User, UserCreateResponse } from './contracts'
 import { groupByForUsageRange } from '../lib/usageResolution'
 
 export class APIError extends Error {
@@ -226,3 +226,5 @@ export function getUsageReport(filters: UsageFilters, dimension: import('./contr
   }
   return request(`/admin/usage/report?${params}`, { signal })
 }
+
+export const checkForUpdates = (): Promise<UpdateStatus> => request<UpdateStatus>('/admin/updates/check')

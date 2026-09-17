@@ -30,6 +30,7 @@ import (
 )
 
 type Dependencies struct {
+	UpdateChecker    handlers.ReleaseChecker
 	DatabaseBackend  string
 	OrgModels        *orgmodel.Service
 	Auth             *auth.Service
@@ -117,9 +118,11 @@ func New(d Dependencies) *fiber.App {
 	}
 	app.Get("/", handlers.Require(d.Auth, ""), spaPage)
 	app.Get("/dashboard", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
+	app.Get("/dashboard/update", handlers.Require(d.Auth, ""), spaPage)
 	app.Get("/dashboard/analysis", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
 	app.Get("/dashboard/logs", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
 	app.Get("/dashboard/cache", handlers.Require(d.Auth, entities.ScopeUsageRead), spaPage)
+	app.Get("/admin/updates/check", handlers.Require(d.Auth, ""), (handlers.Updates{Checker: d.UpdateChecker}).CheckRelease)
 	app.Get("/dashboard/providers", handlers.Require(d.Auth, entities.ScopeCredentialsManage), spaPage)
 	app.Get("/dashboard/credentials", handlers.Require(d.Auth, entities.ScopeCredentialsManage), spaPage)
 	app.Get("/dashboard/models", handlers.Require(d.Auth, entities.ScopeModelsManage), spaPage)

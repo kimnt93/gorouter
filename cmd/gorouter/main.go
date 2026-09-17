@@ -51,6 +51,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
 	"github.com/kimnt93/gorouter/pkg/tenant"
+	"github.com/kimnt93/gorouter/pkg/updatecheck"
 	"github.com/kimnt93/gorouter/pkg/usage"
 )
 
@@ -372,8 +373,8 @@ func main() {
 		RouteRetries: cfg.RouteRetries, AutoMaxTries: cfg.AutoMaxTries,
 	}
 	app := routes.New(routes.Dependencies{
-		DatabaseBackend: cfg.DatabaseBackend,
-		OrgModels:       orgModelSvc, Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
+		DatabaseBackend: cfg.DatabaseBackend, UpdateChecker: updatecheck.Service{},
+		OrgModels: orgModelSvc, Auth: authSvc, Tenants: tenantSvc, Credentials: credSvc, Keys: keySvc,
 		Models: modelSvc, Usage: usageSvc, Cache: cacheSvc, Gateway: gw,
 		Identity: identitySvc, IdentityRepo: identityRepo, Audit: auditRepo,
 		OpenAI: openai, Anthropic: anthropic, Codex: codex, Providers: providerProbes, OAuth: oauthSvc, OAuthAvailable: oauthSvc.OAuthAvailable,

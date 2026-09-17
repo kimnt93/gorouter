@@ -1135,6 +1135,23 @@ definitions:
       used_percent:
         type: number
     type: object
+  github_com_kimnt93_gorouter_pkg_updatecheck.Status:
+    properties:
+      checked_at:
+        type: string
+      image:
+        type: string
+      installed:
+        type: string
+      latest:
+        type: string
+      published_at:
+        type: string
+      release_url:
+        type: string
+      update_available:
+        type: boolean
+    type: object
   internal_api_handlers.APIKeyCreateRequest:
     properties:
       context_organization_id:
@@ -4502,6 +4519,32 @@ paths:
       summary: Deprecated organization alias
       tags:
       - organizations
+  /admin/updates/check:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_updatecheck.Status'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Check for a published GoRouter update
+      tags:
+      - updates
   /admin/usage/activity:
     get:
       description: Returns time-bucketed usage activity and its aggregate summary

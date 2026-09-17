@@ -3647,6 +3647,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/updates/check": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "updates"
+                ],
+                "summary": "Check for a published GoRouter update",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_updatecheck.Status"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/usage/activity": {
             "get": {
                 "security": [
@@ -7220,6 +7262,32 @@ const docTemplate = `{
                 },
                 "used_percent": {
                     "type": "number"
+                }
+            }
+        },
+        "github_com_kimnt93_gorouter_pkg_updatecheck.Status": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "installed": {
+                    "type": "string"
+                },
+                "latest": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "release_url": {
+                    "type": "string"
+                },
+                "update_available": {
+                    "type": "boolean"
                 }
             }
         },

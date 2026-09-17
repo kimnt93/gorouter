@@ -3,7 +3,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gorouter ./cmd/gorouter
+ARG GOROUTER_VERSION=unknown
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/kimnt93/gorouter/pkg/updatecheck.Version=${GOROUTER_VERSION}" -o /out/gorouter ./cmd/gorouter
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates

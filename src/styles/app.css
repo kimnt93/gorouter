@@ -558,3 +558,9 @@ h2 { font-size: 19px; }
 .accounting-report-controls .filter-chips { flex-wrap: wrap; }
 
 .provider-monogram img { display: block; width: 27px; height: 27px; object-fit: contain; }
+
+.update-panel { max-width: 800px; }
+.update-panel-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.update-panel h2 { margin: 22px 0 10px; font-size: 16px; }
+.update-panel p { line-height: 1.6; }
+.update-command { overflow-x: auto; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: #10131a; user-select: text; }

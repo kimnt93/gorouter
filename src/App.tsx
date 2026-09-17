@@ -9,11 +9,13 @@ import { UsersPage } from './pages/UsersPage'
 import { OrganizationsPage } from './pages/OrganizationsPage'
 import { KeysPage } from './pages/KeysPage'
 import { AuditPage } from './pages/AuditPage'
+import { UpdatePage } from './pages/UpdatePage'
 import './styles/app.css'
 
 export default function App() {
   const path = window.location.pathname
-  const page = path.endsWith('/logs') ? <LogsPage />
+  const page = path.endsWith('/update') ? <UpdatePage />
+    : path.endsWith('/logs') ? <LogsPage />
     : path.endsWith('/cache') ? <CachePage />
       : path.endsWith('/providers') ? <ProvidersPage />
         : path.endsWith('/credentials') ? <CredentialsPage />
