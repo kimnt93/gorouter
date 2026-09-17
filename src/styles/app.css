@@ -556,3 +556,5 @@ h2 { font-size: 19px; }
 .accounting-report-controls form label { display: grid; gap: 8px; flex: 1 1 240px; min-width: 0; }
 .accounting-report-controls .select-field { min-width: 180px; }
 .accounting-report-controls .filter-chips { flex-wrap: wrap; }
+
+.provider-monogram img { display: block; width: 27px; height: 27px; object-fit: contain; }

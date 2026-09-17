@@ -26,7 +26,7 @@ Connect accounts from `/dashboard/providers`.
 
 | Authentication | Providers |
 |---|---|
-| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible |
+| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible, Windsurf / Devin Desktop (imported key; not OAuth) |
 | OAuth | Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Grok Build, xAI, Kimi Code, Cline, ClinePass, Kilo Code, Kiro, Amazon Q, Google Antigravity |
 
 ## Performance snapshot

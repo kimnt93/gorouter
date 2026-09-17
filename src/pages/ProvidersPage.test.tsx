@@ -169,3 +169,13 @@ test('shows the last successful OAuth token refresh, or an unrecorded state', as
   expect(screen.getByText(/Not recorded yet/)).toBeInTheDocument()
   expect(screen.getByText(/2026/)).toBeInTheDocument()
 })
+
+test('shows the Windsurf avatar and asks for an imported Devin Desktop key, not OAuth', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-desktop', name: 'Windsurf / Devin Desktop', description: 'Import a Devin Desktop key', auth: 'api_key', protocol: 'openai', default_base_url: 'https://server.codeium.com', model_prefix: 'dd', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
+  render(<ProvidersPage />)
+  expect(await screen.findByRole('button', { name: 'Connect Windsurf / Devin Desktop' })).toBeInTheDocument()
+  expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Connect Windsurf / Devin Desktop' }))
+  expect(screen.getByLabelText('Devin Desktop / Windsurf key (import; no OAuth refresh)')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start authorization' })).not.toBeInTheDocument()
+})
