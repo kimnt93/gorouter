@@ -264,7 +264,6 @@ func main() {
 		return oauthRefresh.Refresh(ctx, cr, true)
 	}
 	oauthRefresh.Refreshers["codex"] = codexRefresher.Refresh
-	oauthRefresh.Start(ctx, 30*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
 	copilot := &llm.CopilotAdapter{HTTP: client}
 	grokBuild := &llm.GrokBuildAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.GrokOAuthClientID}
 	xaiOAuth := &llm.XAIAdapter{HTTP: client, Persister: credSvc, ClientID: cfg.GrokOAuthClientID}
@@ -277,6 +276,22 @@ func main() {
 	amazonQ := &llm.AmazonQAdapter{HTTP: client, Persister: credSvc}
 	antigravityClientID, antigravityClientSecret := oauthpkg.ResolveAntigravityClientCredentials(cfg.AntigravityOAuthClientID, cfg.AntigravityOAuthClientSecret)
 	antigravity := &llm.AntigravityAdapter{HTTP: client, Persister: credSvc, ClientID: antigravityClientID, ClientSecret: antigravityClientSecret}
+	registerRefresh := func(providerID string, exchange oauthmaintenance.Refresh, wire *func(context.Context, *entities.CredentialRuntime) error) {
+		oauthRefresh.Refreshers[providerID] = exchange
+		*wire = func(ctx context.Context, cr *entities.CredentialRuntime) error {
+			return oauthRefresh.Refresh(ctx, cr, true)
+		}
+	}
+	registerRefresh("grok-build", grokBuild.RefreshToken, &grokBuild.Refresh)
+	registerRefresh("xai-oauth", xaiOAuth.RefreshToken, &xaiOAuth.Refresh)
+	registerRefresh("cline", cline.RefreshToken, &cline.Refresh)
+	registerRefresh("clinepass", clinePass.RefreshToken, &clinePass.Refresh)
+	registerRefresh("kimi-code", kimiCode.RefreshToken, &kimiCode.Refresh)
+	registerRefresh("cursor", cursor.RefreshToken, &cursor.Refresh)
+	registerRefresh("kiro", kiro.RefreshToken, &kiro.Refresh)
+	registerRefresh("amazon-q", amazonQ.RefreshToken, &amazonQ.Refresh)
+	registerRefresh("antigravity", antigravity.RefreshToken, &antigravity.Refresh)
+	oauthRefresh.Start(ctx, 5*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
 	opencodeZen := &llm.OpenCodeZenAdapter{HTTP: client}
 	providerProbes := map[string]credential.ConnectivityProber{

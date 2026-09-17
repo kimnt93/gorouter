@@ -23,10 +23,18 @@ const (
 )
 
 type AntigravityAdapter struct {
+	Refresh      func(context.Context, *entities.CredentialRuntime) error
 	HTTP         *http.Client
 	Persister    OAuthTokenPersister
 	ClientID     string
 	ClientSecret string
+}
+
+func (a *AntigravityAdapter) refreshRuntime(ctx context.Context, cr *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(ctx, cr)
+	}
+	return refreshOAuthForm(ctx, a.HTTP, a.Persister, cr, "https://oauth2.googleapis.com/token", a.ClientID, a.ClientSecret, nil)
 }
 
 func (a *AntigravityAdapter) client() *http.Client {
@@ -60,7 +68,7 @@ func (a *AntigravityAdapter) Send(ctx context.Context, cr *entities.CredentialRu
 	result, err := postJSON(ctx, a.client(), base+path, headers, payload)
 	if err == nil && result.StatusCode == http.StatusUnauthorized && a.Persister != nil && canRetryOAuth(ctx) {
 		result.Body.Close()
-		if refreshErr := refreshOAuthForm(ctx, a.HTTP, a.Persister, cr, "https://oauth2.googleapis.com/token", a.ClientID, a.ClientSecret, nil); refreshErr != nil {
+		if refreshErr := a.refreshRuntime(ctx, cr); refreshErr != nil {
 			return nil, refreshErr
 		}
 		return a.Send(markOAuthRetry(ctx), cr, model, raw)
@@ -370,4 +378,8 @@ func antigravityChatModel(id string) bool {
 		}
 	}
 	return strings.Contains(id, "gemini") || strings.Contains(id, "claude") || strings.Contains(id, "gpt")
+}
+
+func (a *AntigravityAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return refreshOAuthForm(ctx, a.HTTP, a.Persister, cr, "https://oauth2.googleapis.com/token", a.ClientID, a.ClientSecret, nil)
 }

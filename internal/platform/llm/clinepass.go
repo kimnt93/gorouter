@@ -8,6 +8,7 @@ import (
 )
 
 type ClinePassAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
 }
@@ -15,8 +16,14 @@ type ClinePassAdapter struct {
 func (a *ClinePassAdapter) refresh(c context.Context, r *entities.CredentialRuntime) error {
 	return refreshOAuthJSON(c, a.HTTP, a.Persister, r, "https://api.cline.bot/api/v1/auth/refresh", map[string]string{"refreshToken": r.OAuthRefreh, "grantType": "refresh_token", "clientType": "extension"}, nil)
 }
+func (a *ClinePassAdapter) refreshRuntime(c context.Context, r *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(c, r)
+	}
+	return a.refresh(c, r)
+}
 func (a *ClinePassAdapter) delegate() *OpenAIAdapter {
-	return &OpenAIAdapter{HTTP: a.HTTP, Refresh: a.refresh}
+	return &OpenAIAdapter{HTTP: a.HTTP, Refresh: a.refreshRuntime}
 }
 func (a *ClinePassAdapter) Send(c context.Context, r *entities.CredentialRuntime, m string, b []byte) (*entities.UpstreamResult, error) {
 	return a.delegate().Send(c, r, m, b)
@@ -30,4 +37,8 @@ func (a *ClinePassAdapter) DiscoverModels(c context.Context, r *entities.Credent
 		return models, nil
 	}
 	return modelsFor("clinepass", "default"), nil
+}
+
+func (a *ClinePassAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return a.refresh(ctx, cr)
 }

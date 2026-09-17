@@ -8,6 +8,7 @@ import (
 )
 
 type XAIAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
 	ClientID  string
@@ -16,8 +17,14 @@ type XAIAdapter struct {
 func (a *XAIAdapter) refresh(c context.Context, r *entities.CredentialRuntime) error {
 	return refreshOAuthForm(c, a.HTTP, a.Persister, r, "https://auth.x.ai/oauth2/token", a.ClientID, "", nil)
 }
+func (a *XAIAdapter) refreshRuntime(c context.Context, r *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(c, r)
+	}
+	return a.refresh(c, r)
+}
 func (a *XAIAdapter) delegate() *OpenAIAdapter {
-	return &OpenAIAdapter{HTTP: a.HTTP, Refresh: a.refresh}
+	return &OpenAIAdapter{HTTP: a.HTTP, Refresh: a.refreshRuntime}
 }
 func (a *XAIAdapter) Send(c context.Context, r *entities.CredentialRuntime, m string, b []byte) (*entities.UpstreamResult, error) {
 	return a.delegate().Send(c, r, m, b)
@@ -31,4 +38,8 @@ func (a *XAIAdapter) DiscoverModels(c context.Context, r *entities.CredentialRun
 		return models, nil
 	}
 	return modelsFor("xai-oauth", "grok-4.1", "grok-4.1-fast", "grok-code-fast-1"), nil
+}
+
+func (a *XAIAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return a.refresh(ctx, cr)
 }

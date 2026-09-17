@@ -104,3 +104,13 @@ func TestIdleRefresh(t *testing.T) {
 		t.Fatal("idle credential not refreshed")
 	}
 }
+
+func TestRefreshWithoutExpiryIsThrottledAndReloadsRuntime(t *testing.T) {
+	store := &memoryStore{cr: entities.CredentialRuntime{ID: "id", Provider: "codex", Kind: entities.KindOAuth, OAuthAccess: "new", OAuthRefreh: "new-refresh", OAuthMeta: entities.OAuthMetadata{LastRefreshedAt: time.Now().UTC().Format(time.RFC3339Nano)}}}
+	calls := 0
+	svc := &Service{Store: store, Refreshers: map[string]Refresh{"codex": func(context.Context, *entities.CredentialRuntime) error { calls++; return nil }}}
+	stale := &entities.CredentialRuntime{ID: "id", Provider: "codex", Kind: entities.KindOAuth, OAuthAccess: "new", OAuthRefreh: "new-refresh"}
+	if err := svc.Refresh(context.Background(), stale, false); err != nil || calls != 0 || stale.OAuthMeta.LastRefreshedAt == "" {
+		t.Fatalf("refresh=%v calls=%d runtime=%+v", err, calls, stale.OAuthMeta)
+	}
+}

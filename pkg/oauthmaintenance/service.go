@@ -64,7 +64,8 @@ func (s *Service) Refresh(ctx context.Context, cr *entities.CredentialRuntime, f
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !force && !needsRefresh(latest.OAuthMeta.TokenExpiresAt) {
+		if !force && !needsRefresh(latest.OAuthMeta.TokenExpiresAt, latest.OAuthMeta.LastRefreshedAt) {
+			*cr = *latest
 			return nil
 		}
 		if err := refresh(ctx, latest); err != nil {
@@ -96,11 +97,17 @@ func (s *Service) Refresh(ctx context.Context, cr *entities.CredentialRuntime, f
 	return run()
 }
 
-func needsRefresh(expires string) bool {
+func needsRefresh(expires, lastRefresh string) bool {
 	if expires == "" {
+		if last, err := time.Parse(time.RFC3339Nano, lastRefresh); err == nil {
+			return time.Since(last) >= 30*time.Minute
+		}
 		return true
-	} // provider omitted expiry: refresh on timer
+	}
 	expiry, err := time.Parse(time.RFC3339, expires)
+	if last, parsed := time.Parse(time.RFC3339Nano, lastRefresh); parsed == nil && time.Since(last) < 30*time.Minute {
+		return false
+	}
 	return err != nil || time.Until(expiry) < 15*time.Minute
 }
 

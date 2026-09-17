@@ -17,9 +17,17 @@ import (
 // public API, this entitlement uses the Responses endpoint and CLI identity
 // headers at cli-chat-proxy.grok.com.
 type GrokBuildAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
 	ClientID  string
+}
+
+func (a *GrokBuildAdapter) refreshRuntime(ctx context.Context, cr *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(ctx, cr)
+	}
+	return a.refresh(ctx, cr)
 }
 
 func (a *GrokBuildAdapter) client() *http.Client {
@@ -96,7 +104,7 @@ func (a *GrokBuildAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 	}
 	if result.StatusCode == http.StatusUnauthorized && a.Persister != nil && canRetryOAuth(ctx) {
 		result.Body.Close()
-		if err := a.refresh(ctx, cr); err != nil {
+		if err := a.refreshRuntime(ctx, cr); err != nil {
 			return nil, err
 		}
 		return a.Send(markOAuthRetry(ctx), cr, model, raw)
@@ -148,4 +156,8 @@ func (a *GrokBuildAdapter) DiscoverModels(ctx context.Context, cr *entities.Cred
 		}
 	}
 	return modelsFor("grok-build", "grok-composer-2.5-fast", "grok-code-fast-1", "grok-4.1-fast", "grok-4.1"), nil
+}
+
+func (a *GrokBuildAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return a.refresh(ctx, cr)
 }

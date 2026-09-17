@@ -16,8 +16,16 @@ import (
 )
 
 type KiroAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
+}
+
+func (a *KiroAdapter) refreshRuntime(ctx context.Context, cr *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(ctx, cr)
+	}
+	return refreshKiroOAuth(ctx, a.HTTP, a.Persister, cr)
 }
 
 func (a *KiroAdapter) client() *http.Client {
@@ -30,7 +38,7 @@ func (a *KiroAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, 
 	result, err := sendKiroNative(ctx, a.client(), cr, model, raw)
 	if err == nil && result != nil && result.StatusCode == http.StatusUnauthorized && a.Persister != nil && canRetryOAuth(ctx) {
 		result.Body.Close()
-		if refreshErr := refreshKiroOAuth(ctx, a.HTTP, a.Persister, cr); refreshErr != nil {
+		if refreshErr := a.refreshRuntime(ctx, cr); refreshErr != nil {
 			return nil, refreshErr
 		}
 		return a.Send(markOAuthRetry(ctx), cr, model, raw)
@@ -429,4 +437,8 @@ func (a *KiroAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime)
 }
 func (a *KiroAdapter) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
 	return modelsFor("kiro", "claude-sonnet-5", "claude-sonnet-4.5", "claude-haiku-4.5", "deepseek-3.2", "minimax-m2.5", "glm-5", "qwen3-coder-next", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"), nil
+}
+
+func (a *KiroAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return refreshKiroOAuth(ctx, a.HTTP, a.Persister, cr)
 }

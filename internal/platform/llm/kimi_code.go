@@ -9,6 +9,7 @@ import (
 )
 
 type KimiCodeAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
 	ClientID  string
@@ -17,8 +18,14 @@ type KimiCodeAdapter struct {
 func (a *KimiCodeAdapter) refresh(c context.Context, r *entities.CredentialRuntime) error {
 	return refreshOAuthForm(c, a.HTTP, a.Persister, r, "https://auth.kimi.com/api/oauth/token", a.ClientID, "", nil)
 }
+func (a *KimiCodeAdapter) refreshRuntime(c context.Context, r *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(c, r)
+	}
+	return a.refresh(c, r)
+}
 func (a *KimiCodeAdapter) delegate() *AnthropicAdapter {
-	return &AnthropicAdapter{HTTP: a.HTTP, Refresh: a.refresh}
+	return &AnthropicAdapter{HTTP: a.HTTP, Refresh: a.refreshRuntime}
 }
 func (a *KimiCodeAdapter) Send(c context.Context, r *entities.CredentialRuntime, m string, b []byte) (*entities.UpstreamResult, error) {
 	return a.delegate().Send(c, r, m, b)
@@ -52,4 +59,8 @@ func (a *KimiCodeAdapter) DiscoverModels(ctx context.Context, runtime *entities.
 		}
 	}
 	return modelsFor("kimi-code", "k3", "kimi-for-coding", "kimi-for-coding-highspeed"), nil
+}
+
+func (a *KimiCodeAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return a.refresh(ctx, cr)
 }

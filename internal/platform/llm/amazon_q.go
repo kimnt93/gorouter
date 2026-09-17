@@ -8,8 +8,16 @@ import (
 )
 
 type AmazonQAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
+}
+
+func (a *AmazonQAdapter) refreshRuntime(c context.Context, r *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(c, r)
+	}
+	return refreshKiroOAuth(c, a.HTTP, a.Persister, r)
 }
 
 func (a *AmazonQAdapter) client() *http.Client {
@@ -22,7 +30,7 @@ func (a *AmazonQAdapter) Send(c context.Context, r *entities.CredentialRuntime, 
 	result, err := sendKiroNative(c, a.client(), r, m, b)
 	if err == nil && result != nil && result.StatusCode == http.StatusUnauthorized && a.Persister != nil && canRetryOAuth(c) {
 		result.Body.Close()
-		if refreshErr := refreshKiroOAuth(c, a.HTTP, a.Persister, r); refreshErr != nil {
+		if refreshErr := a.refreshRuntime(c, r); refreshErr != nil {
 			return nil, refreshErr
 		}
 		return a.Send(markOAuthRetry(c), r, m, b)
@@ -34,4 +42,8 @@ func (a *AmazonQAdapter) Probe(c context.Context, r *entities.CredentialRuntime)
 }
 func (a *AmazonQAdapter) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
 	return modelsFor("amazon-q", "claude-sonnet-5", "claude-sonnet-4.5", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"), nil
+}
+
+func (a *AmazonQAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return refreshKiroOAuth(ctx, a.HTTP, a.Persister, cr)
 }

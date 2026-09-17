@@ -19,8 +19,16 @@ import (
 )
 
 type CursorAdapter struct {
+	Refresh   func(context.Context, *entities.CredentialRuntime) error
 	HTTP      *http.Client
 	Persister OAuthTokenPersister
+}
+
+func (a *CursorAdapter) refreshRuntime(ctx context.Context, cr *entities.CredentialRuntime) error {
+	if a.Refresh != nil {
+		return a.Refresh(ctx, cr)
+	}
+	return a.refresh(ctx, cr)
 }
 
 func (a *CursorAdapter) client() *http.Client {
@@ -92,7 +100,7 @@ func (a *CursorAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime
 	if resp.StatusCode == http.StatusUnauthorized && a.Persister != nil && canRetryOAuth(ctx) {
 		resp.Body.Close()
 		requestWriter.Close()
-		if err := a.refresh(ctx, cr); err != nil {
+		if err := a.refreshRuntime(ctx, cr); err != nil {
 			return nil, err
 		}
 		return a.Send(markOAuthRetry(ctx), cr, model, raw)
@@ -633,4 +641,8 @@ func (a *CursorAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntim
 }
 func (a *CursorAdapter) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
 	return modelsFor("cursor", "auto", "gpt-5.6-sol", "gpt-5.5", "claude-sonnet-5", "claude-sonnet-4.6", "gemini-3.1-pro-preview"), nil
+}
+
+func (a *CursorAdapter) RefreshToken(ctx context.Context, cr *entities.CredentialRuntime) error {
+	return a.refresh(ctx, cr)
 }

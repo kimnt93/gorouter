@@ -146,7 +146,7 @@ func (s *Service) SyncAccountRings(ctx context.Context) error {
 		}
 		grouped[item.Provider] = append(grouped[item.Provider], account{id: item.ID, name: strings.ToLower(strings.TrimSpace(item.Name))})
 	}
-	for _, providerID := range []string{"codex", "claude", "kiro", "amazon-q", "opencode-go", "opencode-zen"} {
+	for _, providerID := range []string{"codex", "claude", "kiro", "amazon-q", "opencode-go", "opencode-zen", "grok-build"} {
 		accounts := grouped[providerID]
 		sort.Slice(accounts, func(i, j int) bool {
 			if accounts[i].name == accounts[j].name {
@@ -295,7 +295,7 @@ func containsCredential(ids []string, target string) bool {
 
 func Supported(provider string) bool {
 	switch provider {
-	case "codex", "claude", "kiro", "amazon-q", "opencode-go", "opencode-zen":
+	case "codex", "claude", "kiro", "amazon-q", "opencode-go", "opencode-zen", "grok-build":
 		return true
 	default:
 		return false
@@ -467,6 +467,12 @@ func (s *Service) Refresh(ctx context.Context, id string) (Snapshot, error) {
 	snapshot := Snapshot{CredentialID: id, Provider: runtime.Provider, Account: maskAccount(runtime), FetchedAt: &fetchedAt, Available: true, Windows: []Window{}}
 	var payload map[string]any
 	switch runtime.Provider {
+	case "grok-build":
+		var window Window
+		window, err = s.grokCredits(ctx, runtime)
+		if err == nil {
+			snapshot.Windows = append(snapshot.Windows, window)
+		}
 	case "codex":
 		payload, err = s.fetch(ctx, runtime, http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", nil, map[string]string{"chatgpt-account-id": runtime.OAuthAccount, "originator": "codex_cli_rs"})
 		if err == nil {
