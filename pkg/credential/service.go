@@ -171,6 +171,12 @@ func validate(in CreateInput) error {
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrUnsupportedProvider, in.Provider)
 	}
+	if in.Provider == "devin-cli" && !strings.HasPrefix(in.APIKey, "apk_user_") {
+		return fmt.Errorf("%w: Devin CLI requires an apk_user key, not a Desktop or cloud API key", ErrInvalidCredential)
+	}
+	if in.Provider == "devin-desktop" && strings.HasPrefix(in.APIKey, "apk_user_") {
+		return fmt.Errorf("%w: apk_user keys belong to Devin CLI; choose Devin CLI instead of Devin Desktop", ErrInvalidCredential)
+	}
 	switch in.Kind {
 	case entities.KindAPIKey:
 		if strings.TrimSpace(in.APIKey) == "" {

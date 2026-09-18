@@ -176,6 +176,17 @@ test('shows the Windsurf avatar and asks for an imported Devin Desktop key, not 
   expect(await screen.findByRole('button', { name: 'Connect Windsurf / Devin Desktop' })).toBeInTheDocument()
   expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Connect Windsurf / Devin Desktop' }))
-  expect(screen.getByLabelText('Devin Desktop / Windsurf key (import; no OAuth refresh)')).toBeInTheDocument()
+  expect(screen.getByLabelText('Devin Desktop / Windsurf key (not a Devin CLI apk_user key)')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Start authorization' })).not.toBeInTheDocument()
+})
+
+
+test('shows Devin CLI separately with the Windsurf avatar and apk_user hint', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin CLI', description: 'Installed Devin ACP binary', auth: 'api_key', protocol: 'openai', default_base_url: '', model_prefix: 'dv', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
+  render(<ProvidersPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect Devin CLI' }))
+  expect(screen.getByLabelText('Devin CLI key (apk_user; requires installed CLI)')).toBeInTheDocument()
+  expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument()
+  expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
+  expect(screen.getByText(/router image does not bundle the official binary/)).toBeInTheDocument()
 })

@@ -294,6 +294,7 @@ func main() {
 	registerRefresh("antigravity", antigravity.RefreshToken, &antigravity.Refresh)
 	oauthRefresh.Start(ctx, 5*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
 	devinDesktop := &llm.DevinDesktopAdapter{HTTP: client}
+	devinCLI := &llm.DevinCLIAdapter{}
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
 	opencodeZen := &llm.OpenCodeZenAdapter{HTTP: client}
 	providerProbes := map[string]credential.ConnectivityProber{
@@ -301,9 +302,9 @@ func main() {
 		"github-copilot": copilot,
 		"grok-build":     grokBuild, "xai-oauth": xaiOAuth, "cline": cline, "clinepass": clinePass, "kilo-code": kiloCode,
 		"kimi-code": kimiCode, "cursor": cursor, "kiro": kiro, "amazon-q": amazonQ, "antigravity": antigravity,
-		"devin-desktop": devinDesktop,
-		"opencode-go":   opencodeGo,
-		"opencode-zen":  opencodeZen,
+		"devin-desktop": devinDesktop, "devin-cli": devinCLI,
+		"opencode-go":  opencodeGo,
+		"opencode-zen": opencodeZen,
 	}
 	if cfg.ModelCatalog.Enabled {
 		if redisClient != nil {

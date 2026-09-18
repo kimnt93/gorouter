@@ -77,3 +77,21 @@ func TestDevinDesktopAuthFailureDoesNotSendChat(t *testing.T) {
 		t.Fatalf("status=%d", result.StatusCode)
 	}
 }
+
+func TestDevinDesktopRejectsCLIKeyBeforeNetwork(t *testing.T) {
+	a := &DevinDesktopAdapter{HTTP: &http.Client{Transport: roundTripNeverCalled{t: t}}}
+	cr := &entities.CredentialRuntime{APIKey: "apk_user_synthetic"}
+	if _, err := a.Probe(context.Background(), cr); err == nil {
+		t.Fatal("CLI key accepted in Desktop health")
+	}
+	if _, err := a.Send(context.Background(), cr, "swe-1-7", []byte(`{"messages":[]}`)); err == nil {
+		t.Fatal("CLI key accepted in Desktop chat")
+	}
+}
+
+type roundTripNeverCalled struct{ t *testing.T }
+
+func (r roundTripNeverCalled) RoundTrip(*http.Request) (*http.Response, error) {
+	r.t.Fatal("wrong auth was sent upstream")
+	return nil, nil
+}

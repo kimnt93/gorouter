@@ -135,6 +135,9 @@ func devinRequest(input ChatRequest, model, key, session, jwt, cascade string) [
 }
 func (a *DevinDesktopAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, model string, raw []byte) (*entities.UpstreamResult, error) {
 	key := cr.APIKey
+	if strings.HasPrefix(key, "apk_user_") {
+		return nil, errors.New("apk_user keys belong to Devin CLI, not Devin Desktop")
+	}
 	if key == "" {
 		return nil, errors.New("Devin Desktop key unavailable")
 	}
@@ -330,6 +333,9 @@ func devinStream(upstream io.Reader, out io.Writer, model string) error {
 	return err
 }
 func (a *DevinDesktopAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime) (int, error) {
+	if cr == nil || strings.HasPrefix(cr.APIKey, "apk_user_") {
+		return 0, errors.New("apk_user keys belong to Devin CLI, not Devin Desktop")
+	}
 	session, _ := randomUUID()
 	_, status, err := a.authenticate(ctx, devinBase(cr.BaseURL), cr.APIKey, session)
 	return status, err

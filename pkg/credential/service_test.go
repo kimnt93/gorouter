@@ -89,6 +89,8 @@ func TestValidateCredential(t *testing.T) {
 		{"unknown provider", CreateInput{Name: "x", Provider: "other", Kind: entities.KindAPIKey, APIKey: "secret"}, ErrUnsupportedProvider},
 		{"missing api key", CreateInput{Name: "x", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}, ErrInvalidCredential},
 		{"oauth provider", CreateInput{Name: "x", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindOAuth, OAuthRefresh: "refresh"}, ErrInvalidCredential},
+		{"Devin Desktop rejects CLI key", CreateInput{Name: "Desktop", Provider: "devin-desktop", Kind: entities.KindAPIKey, APIKey: "apk_user_synthetic"}, ErrInvalidCredential},
+		{"Devin CLI rejects Desktop key", CreateInput{Name: "Devin", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "synthetic-desktop"}, ErrInvalidCredential},
 		{"missing refresh", CreateInput{Name: "x", Provider: entities.ProviderAnthropic, Kind: entities.KindOAuth}, ErrInvalidCredential},
 		{"bad url", CreateInput{Name: "x", Provider: entities.ProviderAnthropic, Kind: entities.KindAPIKey, APIKey: "secret", BaseURL: "://bad"}, ErrInvalidCredential},
 	}

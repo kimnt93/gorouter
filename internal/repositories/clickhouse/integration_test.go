@@ -199,4 +199,13 @@ func TestDevinDesktopCredentialRoundTrip(t *testing.T) {
 	if err != nil || runtime.Provider != "devin-desktop" || runtime.APIKey != "synthetic-key" {
 		t.Fatalf("round trip failed: %v", err)
 	}
+	cli, err := repo.Create(ctx, entities.CredentialInput{Name: "Devin CLI", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "apk_user_synthetic"}, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Delete(context.Background(), cli.ID) })
+	cliRuntime, err := repo.Runtime(ctx, box, cli.ID)
+	if err != nil || cliRuntime.Provider != "devin-cli" || cliRuntime.APIKey != "apk_user_synthetic" {
+		t.Fatalf("CLI round trip failed: %v", err)
+	}
 }

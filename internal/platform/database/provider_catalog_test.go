@@ -13,7 +13,7 @@ import (
 // CHECK constraint. SQLite and ClickHouse config records have no SQL provider
 // allowlist; all three backends share the service-level catalog validation.
 func TestLatestPostgresCredentialProviderConstraintMatchesCatalog(t *testing.T) {
-	raw, err := migrationsFS.ReadFile("migrations/0032_credentials_provider_catalog.sql")
+	raw, err := migrationsFS.ReadFile("migrations/0033_devin_cli_provider.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
