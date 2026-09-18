@@ -79,6 +79,31 @@ func TestLocalGlobalCredentialRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLocalDevinDesktopCredentialRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.ConnectSQLite(ctx, t.TempDir()+"/devin.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	box, err := seal.New("local-devin-test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewCredentialRepo(New(db.DB))
+	created, err := repo.Create(ctx, entities.CredentialInput{Name: "Devin", Provider: "devin-desktop", Kind: entities.KindAPIKey, BaseURL: "https://server.codeium.com", APIKey: "synthetic-key"}, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := repo.Runtime(ctx, box, created.ID)
+	if err != nil || runtime.Provider != "devin-desktop" || runtime.APIKey != "synthetic-key" {
+		t.Fatalf("round trip failed: %v", err)
+	}
+}
+
 func TestLocalUsagePersistsEncryptedConversationColumns(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.ConnectSQLite(ctx, t.TempDir()+"/gorouter.db")

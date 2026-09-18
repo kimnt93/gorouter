@@ -168,3 +168,35 @@ func TestPrimaryStoreRoundTrip(t *testing.T) {
 		t.Fatalf("provider quota round trip failed: a=%v b=%v snapshots=%+v", foundA, foundB, snapshots)
 	}
 }
+
+// ClickHouse stores provider IDs in encrypted config records without a SQL
+// allowlist; exercise the same Devin connection path as PostgreSQL and SQLite.
+func TestDevinDesktopCredentialRoundTrip(t *testing.T) {
+	dsn := os.Getenv("TEST_CLICKHOUSE_URL")
+	if dsn == "" {
+		t.Skip("TEST_CLICKHOUSE_URL is not set")
+	}
+	ctx := context.Background()
+	db, err := database.ConnectClickHouse(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	box, err := seal.New("synthetic-clickhouse-devin-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewCredentialRepo(New(db.Conn))
+	created, err := repo.Create(ctx, entities.CredentialInput{Name: "Devin", Provider: "devin-desktop", Kind: entities.KindAPIKey, BaseURL: "https://server.codeium.com", APIKey: "synthetic-key"}, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Delete(context.Background(), created.ID) })
+	runtime, err := repo.Runtime(ctx, box, created.ID)
+	if err != nil || runtime.Provider != "devin-desktop" || runtime.APIKey != "synthetic-key" {
+		t.Fatalf("round trip failed: %v", err)
+	}
+}

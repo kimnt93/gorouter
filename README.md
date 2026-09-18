@@ -14,7 +14,8 @@ Explore the generated [Swaggo API documentation](http://localhost:8090/docs)
 at `http://<your-router-host>:8090/docs` (or `/docs` on your configured
 port). Protected API operations still require authentication.
 
-[Changes since v0.0.22](docs/release-notes-v0.0.23.md) are recorded separately.
+[v0.0.24 Devin credential fix](docs/release-notes-v0.0.24.md) and
+[changes since v0.0.22](docs/release-notes-v0.0.23.md) are recorded separately.
 
 | Authentication | Providers |
 |---|---|

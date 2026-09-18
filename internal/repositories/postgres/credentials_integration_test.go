@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,5 +130,82 @@ func TestOAuthCredentialMetadataIsEncryptedAndPreservedAcrossRefresh(t *testing.
 	}
 	if len(snapshots) != 1 || snapshots[0].CredentialID != created.ID || !snapshots[0].InUse || len(snapshots[0].Windows) != 1 || snapshots[0].Windows[0].RemainingPercent != 62.5 {
 		t.Fatalf("provider quota round trip=%+v", snapshots)
+	}
+}
+
+// Exercises a fresh migration followed by a v31-style constraint upgrade and
+// the encrypted credential insert through the same repository used by the API.
+func TestDevinDesktopCredentialAcceptedAfterCatalogMigration(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	schema := fmt.Sprintf("devin_credential_test_%d", time.Now().UnixNano())
+	admin, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Skipf("test PostgreSQL unavailable: %v", err)
+	}
+	if _, err = admin.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		admin.Close(ctx)
+		t.Fatal(err)
+	}
+	admin.Close(ctx)
+	t.Cleanup(func() {
+		cleanup, e := pgx.Connect(context.Background(), databaseURL)
+		if e == nil {
+			_, _ = cleanup.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+			cleanup.Close(context.Background())
+		}
+	})
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	db, err := database.Connect(ctx, parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the deployed v31 constraint, then apply only the pending
+	// migration. Fresh-schema tests alone would miss upgrade regressions.
+	if _, err = db.Pool.Exec(ctx, `ALTER TABLE credentials DROP CONSTRAINT credentials_provider_valid;
+		ALTER TABLE credentials ADD CONSTRAINT credentials_provider_valid CHECK (provider IN ('codex','claude')) NOT VALID;
+		DELETE FROM schema_migrations WHERE version=32`); err != nil {
+		t.Fatal(err)
+	}
+	// Verify the prior constraint actually rejects the new provider.
+	if _, err = db.Pool.Exec(ctx, `INSERT INTO credentials(id,name,provider,kind,base_url,status,created_at,updated_at)
+		VALUES ('uncommitted-deprecated-row','Devin','devin-desktop','api_key','https://server.codeium.com','active',$1,$1)`, time.Now().UTC()); err == nil {
+		t.Fatal("old provider constraint unexpectedly accepted Devin")
+	}
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	box, err := seal.New("synthetic-deployment-test-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewCredentialRepo(New(db.Pool))
+	created, err := repo.Create(ctx, entities.CredentialInput{Name: "Devin account", Provider: "devin-desktop", Kind: entities.KindAPIKey, APIKey: "synthetic-key", BaseURL: "https://server.codeium.com"}, box)
+	if err != nil {
+		t.Fatalf("Devin credential rejected after migration: %v", err)
+	}
+	runtime, err := repo.Runtime(ctx, box, created.ID)
+	if err != nil || runtime.APIKey != "synthetic-key" || runtime.Provider != "devin-desktop" {
+		t.Fatalf("round trip failed: %v", err)
+	}
+	var def string
+	if err = db.Pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='credentials_provider_valid' AND conrelid='credentials'::regclass`).Scan(&def); err != nil || !strings.Contains(def, "devin-desktop") {
+		t.Fatalf("stale provider constraint: %v", err)
 	}
 }
