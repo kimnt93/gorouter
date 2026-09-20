@@ -157,7 +157,7 @@ func (a *DevinCLIAdapter) open(parent context.Context, key string) (*devinSessio
 	executable, err := exec.LookPath(binary)
 	if err != nil {
 		release()
-		return nil, devinFailure(503, "Devin CLI is missing; use the devin-cli image target")
+		return nil, devinFailure(503, "Devin CLI is missing; update to the standard GoRouter Docker image or install devin for a standalone binary deployment")
 	}
 	executable, err = filepath.Abs(executable)
 	if err != nil {

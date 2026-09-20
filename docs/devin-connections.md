@@ -15,45 +15,46 @@ implementation also incorrectly used `"protocolVersion":"0.3"` and
 The adapter now negotiates **ACP version 1** and uses the same credential-scoped
 session setup for health, catalog discovery and inference.
 
-## Run an image that includes the CLI
+## One standard image for all providers
 
-The small default image still excludes the external CLI. Build the explicit
-variant from this checkout:
+The standard GoRouter Docker image includes the checksum-verified official Devin
+CLI alongside GoRouter's other provider adapters. Add **Providers → Devin CLI**
+and enter your `apk_user_…` key, just like any other provider. There is no
+provider-specific image, extra container, build target, Compose overlay, or
+runtime installer to select.
 
-```sh
-docker build --target devin-cli -t gorouter:devin-cli .
-docker run --rm --entrypoint devin gorouter:devin-cli --version
-```
-
-Use the overlay with exactly one existing backend profile (same project name):
+Normal builds and releases include it automatically:
 
 ```sh
-docker compose -f docker-compose.local.yml -f docker-compose.devin-cli.yml up -d --build
-# Or use docker-compose.postgres.yml / docker-compose.clickhouse.yml instead.
+docker build -t gorouter:local .
+# Diagnostic only; connecting through the dashboard needs no CLI commands.
+docker run --rm --entrypoint devin gorouter:local --version
 ```
 
-Alternatively, set your existing Compose `gorouter` service to `build.target: devin-cli`, or
-use the image above with your **existing** environment, ports, network, secrets
-and volumes. For a prebuilt-binary deployment, the image must also install or
-copy `/usr/local/bin/devin`; merely replacing the GoRouter binary is insufficient.
-No Docker socket, privileged container, host HOME mount, or host repository
-mount is needed. The bundle is a native executable and must match the node's
-architecture.
+Use your existing `docker-compose.local.yml`, `docker-compose.postgres.yml`,
+or `docker-compose.clickhouse.yml` unchanged. Exactly one database backend is
+selected for each deployment. Keep the same project name, environment, volumes,
+ports and network when upgrading. The release workflow publishes the usual
+`<release>` and `latest` tags at `ghcr.io/kimnt93/gorouter`, with all provider
+runtime dependencies in the same image on amd64 and arm64.
 
-Future GitHub release builds publish both `<release>` / `latest` and
-`<release>-devin-cli` / `latest-devin-cli` to `ghcr.io/kimnt93/gorouter`.
-**A Git push is not an image release**; check package availability before
-pulling. Use the CLI suffix when upgrading this variant (the dashboard's
-manual update instructions default to the small image).
+**A Git push does not publish a new image or modify an already running
+container.** Existing installations built before this packaging change must
+upgrade once to a release containing it (or rebuild the standard Dockerfile).
+Remove old `--target` options and the former `docker-compose.devin-cli.yml`
+overlay; do not look for a `-devin-cli` image suffix. A custom prebuilt image that
+copies only the Go binary is not the standard distribution: it must also
+include `/usr/local/bin/devin`. Standalone non-Docker Go binaries still need
+the official CLI installed on their PATH.
 
-`scripts/install-devin-cli.sh` downloads the official **3000.10.31** Linux
-bundle from `static.devin.ai` and checks pinned SHA-256 values for amd64/arm64.
-There is no runtime installer or automatic executable update. Review and
-update the version/checksums when upgrading the CLI. CLI use remains subject
-to the provider's license and subscription terms. The Docker target runs as
-the same non-root UID as GoRouter.
+`scripts/install-devin-cli.sh` fetches official **3000.10.31** Linux bundles at
+image-build time from `static.devin.ai` and checks pinned SHA-256 values for
+amd64/arm64. Upgrading its version/checksums is a reviewed build change, not a
+runtime download. The final image remains non-root; no Docker socket,
+privileged container, host HOME or repository mount is required. CLI use
+remains subject to the provider's license and subscription terms.
 
-Every replica routing these credentials needs the CLI. Existing Redis catalog
+All replicas use the same standard image. Existing Redis catalog
 caches remain credential-scoped; no CLI HOME/auth state is shared among nodes
 or accounts. At most four local subprocesses run per adapter instance, with
 bounded queue wait, frame size, output size and request lifetime. Each call

@@ -182,11 +182,12 @@ test('shows the Windsurf avatar and asks for an imported Devin Desktop key, not 
 
 
 test('shows Devin CLI separately with the Windsurf avatar and apk_user hint', async () => {
-  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin CLI', description: 'Installed Devin ACP binary', auth: 'api_key', protocol: 'openai', default_base_url: '', model_prefix: 'dv', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
+  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin CLI', description: 'Devin CLI bundled in GoRouter', auth: 'api_key', protocol: 'openai', default_base_url: '', model_prefix: 'dv', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
   render(<ProvidersPage />)
   fireEvent.click(await screen.findByRole('button', { name: 'Connect Devin CLI' }))
-  expect(screen.getByLabelText('Devin CLI key (apk_user; requires installed CLI)')).toBeInTheDocument()
+  expect(screen.getByLabelText('Devin CLI key (apk_user)')).toBeInTheDocument()
   expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument()
   expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
-  expect(screen.getByText(/devin-cli Docker image target/)).toBeInTheDocument()
+  expect(screen.getByText(/included in the standard GoRouter Docker image/)).toBeInTheDocument()
+  expect(screen.queryByText(/requires installed CLI|devin-cli Docker image target/)).not.toBeInTheDocument()
 })

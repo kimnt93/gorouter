@@ -6,25 +6,22 @@ COPY . .
 ARG GOROUTER_VERSION=unknown
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/kimnt93/gorouter/pkg/updatecheck.Version=${GOROUTER_VERSION}" -o /out/gorouter ./cmd/gorouter
 
-FROM alpine:3.22 AS runtime
-RUN apk add --no-cache ca-certificates
-COPY --from=build /out/gorouter /usr/local/bin/gorouter
-RUN mkdir -p /var/lib/gorouter && chown 65532:65532 /var/lib/gorouter
-WORKDIR /var/lib/gorouter
-EXPOSE 8090
-USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/gorouter"]
-
-# Optional, reproducible image with the external CLI. Default target below
-# stays lightweight. Both targets run the identical non-root GoRouter binary.
+# Devin is an implementation detail of its provider adapter, bundled into
+# the same standard image as every other provider (amd64 and arm64).
 FROM alpine:3.22 AS devin-download
 ARG TARGETARCH
 RUN apk add --no-cache ca-certificates curl
 COPY scripts/install-devin-cli.sh /install-devin-cli.sh
 RUN sh /install-devin-cli.sh "$TARGETARCH" /out
 
-FROM runtime AS devin-cli
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates
+COPY --from=build /out/gorouter /usr/local/bin/gorouter
 COPY --from=devin-download /out/devin /usr/local/bin/devin
+RUN mkdir -p /var/lib/gorouter && chown 65532:65532 /var/lib/gorouter
+WORKDIR /var/lib/gorouter
+EXPOSE 8090
+USER 65532:65532
+# Fail the build if the bundled binary cannot run for this architecture/user.
 RUN devin --version
-
-FROM runtime AS default
+ENTRYPOINT ["/usr/local/bin/gorouter"]

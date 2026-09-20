@@ -18,15 +18,7 @@ env:
 
 jobs:
   publish:
-    name: Build and publish (${{ matrix.target }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: default
-            suffix: ""
-          - target: devin-cli
-            suffix: "-devin-cli"
+    name: Build and publish
     runs-on: ubuntu-latest
     steps:
       - name: Check out release commit
@@ -53,8 +45,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ github.event.release.tag_name }}${{ matrix.suffix }}
-            type=raw,value=latest${{ matrix.suffix }}
+            type=raw,value=${{ github.event.release.tag_name }}
+            type=raw,value=latest
           labels: |
             org.opencontainers.image.version=${{ github.event.release.tag_name }}
 
@@ -63,15 +55,14 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             GOROUTER_VERSION=${{ github.event.release.tag_name }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
 
@@ -79,7 +70,7 @@ jobs:
         run: |
           docker logout "${REGISTRY}"
           for attempt in {1..5}; do
-            if docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${{ github.event.release.tag_name }}${{ matrix.suffix }}"; then
+            if docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${{ github.event.release.tag_name }}"; then
               exit 0
             fi
             if [ "${attempt}" -lt 5 ]; then

@@ -19,12 +19,13 @@ port). Protected API operations still require authentication.
 
 | Authentication | Providers |
 |---|---|
-| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible, Windsurf / Devin Desktop (imported Desktop key), Devin CLI (apk_user key; use the `devin-cli` Docker target) |
+| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible, Windsurf / Devin Desktop (imported Desktop key), Devin CLI (apk_user key; included in the standard image) |
 | OAuth | Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Grok Build, xAI, Kimi Code, Cline, ClinePass, Kilo Code, Kiro, Amazon Q, Google Antigravity |
 
 [Devin CLI and Desktop connection requirements](docs/devin-connections.md),
-including the checksum-pinned `docker build --target devin-cli` image and
-authenticated model/reasoning refresh.
+including authenticated model/reasoning refresh. One standard GoRouter image
+contains the runtime dependencies for every listed provider, including Devin CLI.
+Add connections in the dashboard; no provider-specific image or sidecar is needed.
 
 ## What GoRouter focuses on
 
