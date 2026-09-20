@@ -4,9 +4,11 @@ These are separate products and credential types:
 
 | Connection | Key | Transport and discovery |
 |---|---|---|
-| Devin CLI (`dv/…`) | `apk_user_…` | Official `devin acp --agent-type summarizer`; authenticated `session/new` configuration selectors, not `models list`. |
+| Devin CLI (`dv/…`) | `apk_user_…` or current `cog_…` PAT | Official `devin acp --agent-type summarizer`; authenticated `session/new` configuration selectors, not `models list`. |
 | Windsurf / Devin Desktop (`dd/…`) | Imported Desktop key | Codeium Connect-protobuf / `GetUserJwt`. Its small static fallback catalog is **not account entitlement discovery**. Do not put a CLI key here. |
-| Devin cloud API | PAT/service token (`cog_…`; legacy formats differ) | Cloud agent sessions at `api.devin.ai/v3`, not OpenAI chat completions. Not this connection. |
+| Devin Cloud (`devin/devin`) | PAT/service-user token (`cog_…`) | Authenticated with documented `GET api.devin.ai/v3/self`. Discovery returns one agent-session capability because the API does not expose selectable foundation models. |
+
+The Devin Cloud connection is for authentication, honest capability discovery, and future agent-session integration; `/v1/chat/completions` is intentionally unsupported because mapping an asynchronous cloud agent session to a synchronous model response would be misleading.
 
 The documented Desktop `server.codeium.com/api/v1` service-key API is enterprise
 **analytics/configuration**, not a chat/model catalog API. The previous CLI
@@ -19,7 +21,7 @@ session setup for health, catalog discovery and inference.
 
 The standard GoRouter Docker image includes the checksum-verified official Devin
 CLI alongside GoRouter's other provider adapters. Add **Providers → Devin CLI**
-and enter your `apk_user_…` key, just like any other provider. There is no
+and enter your `apk_user_…` or `cog_…` key, just like any other provider. There is no
 provider-specific image, extra container, build target, Compose overlay, or
 runtime installer to select.
 
@@ -65,13 +67,16 @@ provider binary in the unprivileged container.
 
 ## Models and reasoning without a GoRouter release
 
-1. Add the key to **Providers → Devin CLI**. Existing Desktop credentials are
+1. Add an `apk_user_…` key or current `cog_…` PAT to **Providers → Devin CLI**. Existing Desktop credentials are
    not silently reinterpreted; create a new CLI connection, import its models,
    then remove obsolete `dd/…` routes if no longer needed.
 2. Health authenticates via `session/new` without sending chat or consuming an
    inference turn. Missing binary is 503, authentication rejection is 401.
 3. Discovery reads the live ACP model selector, selecting each model to read
-   **that model's** current reasoning selector. No hardcoded family names,
+   **that model's** current reasoning selector. Current `cog_…` PAT sessions can
+   authenticate and chat while omitting that selector; in that documented
+   provider-managed case GoRouter exposes only `dv/adaptive`, without invented
+   reasoning levels. No hardcoded family names,
    fabricated fallback efforts, marketing-page scraping or separate cached
    CLI login is used. Failed/unsupported discovery returns an error instead of
    inventing a successful catalog.
@@ -103,8 +108,7 @@ through. There is no live-account verification claim from synthetic tests.
 ## Verification and references
 
 - Official binary `--version`: 3000.10.31; checksum verified.
-- Real binary: ACP v1 initialize and invalid-key rejection at `session/new`;
-  no real account key or inference request was used.
+- Real binary: ACP v1 initialize, current `cog_…` PAT authentication, selector-omission behavior, and one bounded text turn were verified. The token and response content were not retained. Rotate credentials shared through support channels.
 - Strict mock ACP: no-prompt health, credential isolation, dynamic grouped
   catalogs, per-model reasoning, selection confirmation, streaming before
   completion, usage components, timeouts, cancellation, EOF/error denial.

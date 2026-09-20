@@ -110,6 +110,14 @@ func TestLocalDevinDesktopCredentialRoundTrip(t *testing.T) {
 	if err != nil || cliRuntime.Provider != "devin-cli" || cliRuntime.APIKey != "apk_user_synthetic" {
 		t.Fatalf("CLI round trip failed: %v", err)
 	}
+	cloud, err := repo.Create(ctx, entities.CredentialInput{Name: "Devin Cloud", Provider: "devin", Kind: entities.KindAPIKey, APIKey: "cog_synthetic", BaseURL: "https://api.devin.ai"}, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloudRuntime, err := repo.Runtime(ctx, box, cloud.ID)
+	if err != nil || cloudRuntime.Provider != "devin" || cloudRuntime.APIKey != "cog_synthetic" {
+		t.Fatalf("Cloud round trip failed: %v", err)
+	}
 }
 
 func TestLocalUsagePersistsEncryptedConversationColumns(t *testing.T) {

@@ -132,8 +132,9 @@ type devinSession struct {
 }
 
 func (a *DevinCLIAdapter) open(parent context.Context, key string) (*devinSession, error) {
-	if !strings.HasPrefix(key, "apk_user_") || strings.TrimSpace(key) == "apk_user_" {
-		return nil, devinFailure(400, "Devin CLI requires an apk_user key")
+	key = strings.TrimSpace(key)
+	if (!strings.HasPrefix(key, "apk_user_") && !strings.HasPrefix(key, "cog_")) || key == "apk_user_" || key == "cog_" {
+		return nil, devinFailure(400, "Devin CLI requires an apk_user_ or cog_ key")
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Minute)
 	a.once.Do(func() {

@@ -74,7 +74,7 @@ func TestDevinACPHelperProcess(t *testing.T) {
 			if json.Unmarshal(msg.Params, &params) != nil || params.CWD != home || params.MCPServers == nil || len(params.MCPServers) > 0 || params.Model != "" {
 				os.Exit(93)
 			}
-			if os.Getenv("WINDSURF_API_KEY") != "apk_user_synthetic" {
+			if key := os.Getenv("WINDSURF_API_KEY"); key != "apk_user_synthetic" && key != "cog_synthetic" {
 				fail(msg.ID, -32603, "Authentication required: invalid api key SENSITIVE")
 				continue
 			}
@@ -208,6 +208,27 @@ func devinTestAdapter(t *testing.T, scenario string) *DevinCLIAdapter {
 func devinTestCredential() *entities.CredentialRuntime {
 	return &entities.CredentialRuntime{Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "apk_user_synthetic"}
 }
+func TestDevinCLIAcceptsCurrentCognitionPAT(t *testing.T) {
+	a := devinTestAdapter(t, "no-catalog")
+	cr := devinTestCredential()
+	cr.APIKey = "cog_synthetic"
+	if status, err := a.Probe(context.Background(), cr); err != nil || status != http.StatusOK {
+		t.Fatalf("status=%d err=%v", status, err)
+	}
+	models, err := a.DiscoverModels(context.Background(), cr)
+	if err != nil || len(models) != 1 || models[0].ID != "adaptive" || len(models[0].SupportedReasoningLevels) != 0 {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	r, err := a.Send(context.Background(), cr, "adaptive", []byte(`{"messages":[{"role":"user","content":"synthetic"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", r.StatusCode)
+	}
+}
+
 func TestDevinCLIHealthAndDiscoveryWithoutInference(t *testing.T) {
 	a := devinTestAdapter(t, "no-prompt")
 	cr := devinTestCredential()

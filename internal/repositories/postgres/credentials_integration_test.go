@@ -177,7 +177,7 @@ func TestDevinDesktopCredentialAcceptedAfterCatalogMigration(t *testing.T) {
 	// migration. Fresh-schema tests alone would miss upgrade regressions.
 	if _, err = db.Pool.Exec(ctx, `ALTER TABLE credentials DROP CONSTRAINT credentials_provider_valid;
 		ALTER TABLE credentials ADD CONSTRAINT credentials_provider_valid CHECK (provider IN ('codex','claude')) NOT VALID;
-		DELETE FROM schema_migrations WHERE version IN (32,33)`); err != nil {
+		DELETE FROM schema_migrations WHERE version IN (32,33,34)`); err != nil {
 		t.Fatal(err)
 	}
 	// Verify the prior constraint actually rejects the new provider.
@@ -212,8 +212,16 @@ func TestDevinDesktopCredentialAcceptedAfterCatalogMigration(t *testing.T) {
 	if cliErr != nil || cliRuntime.APIKey != "apk_user_synthetic" {
 		t.Fatalf("Devin CLI round trip failed: %v", cliErr)
 	}
+	cloud, cloudErr := repo.Create(ctx, entities.CredentialInput{Name: "Devin Cloud", Provider: "devin", Kind: entities.KindAPIKey, APIKey: "cog_synthetic", BaseURL: "https://api.devin.ai"}, box)
+	if cloudErr != nil {
+		t.Fatalf("Devin Cloud credential rejected: %v", cloudErr)
+	}
+	cloudRuntime, cloudErr := repo.Runtime(ctx, box, cloud.ID)
+	if cloudErr != nil || cloudRuntime.APIKey != "cog_synthetic" || cloudRuntime.Provider != "devin" {
+		t.Fatalf("Devin Cloud round trip failed: %v", cloudErr)
+	}
 	var def string
-	if err = db.Pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='credentials_provider_valid' AND conrelid='credentials'::regclass`).Scan(&def); err != nil || !strings.Contains(def, "devin-desktop") || !strings.Contains(def, "devin-cli") {
+	if err = db.Pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='credentials_provider_valid' AND conrelid='credentials'::regclass`).Scan(&def); err != nil || !strings.Contains(def, "devin") || !strings.Contains(def, "devin-desktop") || !strings.Contains(def, "devin-cli") {
 		t.Fatalf("stale provider constraint: %v", err)
 	}
 }

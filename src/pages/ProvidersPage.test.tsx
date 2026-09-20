@@ -181,11 +181,21 @@ test('shows the Windsurf avatar and asks for an imported Devin Desktop key, not 
 })
 
 
+test('shows Devin Cloud cog key guidance and does not claim chat-completions support', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'devin', name: 'Devin Cloud', description: 'Connect Cognition Devin Cloud', auth: 'api_key', protocol: 'devin-cloud', default_base_url: 'https://api.devin.ai', model_prefix: 'devin', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
+  api.getCredentials.mockResolvedValue([])
+  render(<ProvidersPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect Devin Cloud' }))
+  expect(screen.getByLabelText('Devin Cloud key (cog_)')).toBeInTheDocument()
+  expect(screen.getByText(/asynchronous agent-session service/)).toBeInTheDocument()
+  expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
+})
+
 test('shows Devin CLI separately with the Windsurf avatar and apk_user hint', async () => {
   api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin CLI', description: 'Devin CLI bundled in GoRouter', auth: 'api_key', protocol: 'openai', default_base_url: '', model_prefix: 'dv', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
   render(<ProvidersPage />)
   fireEvent.click(await screen.findByRole('button', { name: 'Connect Devin CLI' }))
-  expect(screen.getByLabelText('Devin CLI key (apk_user)')).toBeInTheDocument()
+  expect(screen.getByLabelText('Devin CLI key (apk_user_ or cog_)')).toBeInTheDocument()
   expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument()
   expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
   expect(screen.getByText(/included in the standard GoRouter Docker image/)).toBeInTheDocument()

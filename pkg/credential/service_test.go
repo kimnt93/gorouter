@@ -89,6 +89,7 @@ func TestValidateCredential(t *testing.T) {
 		{"unknown provider", CreateInput{Name: "x", Provider: "other", Kind: entities.KindAPIKey, APIKey: "secret"}, ErrUnsupportedProvider},
 		{"missing api key", CreateInput{Name: "x", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindAPIKey}, ErrInvalidCredential},
 		{"oauth provider", CreateInput{Name: "x", Provider: entities.ProviderOpenAICompatible, Kind: entities.KindOAuth, OAuthRefresh: "refresh"}, ErrInvalidCredential},
+		{"Devin Cloud rejects legacy key", CreateInput{Name: "Cloud", Provider: "devin", Kind: entities.KindAPIKey, APIKey: "apk_user_synthetic"}, ErrInvalidCredential},
 		{"Devin Desktop rejects CLI key", CreateInput{Name: "Desktop", Provider: "devin-desktop", Kind: entities.KindAPIKey, APIKey: "apk_user_synthetic"}, ErrInvalidCredential},
 		{"Devin CLI rejects Desktop key", CreateInput{Name: "Devin", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "synthetic-desktop"}, ErrInvalidCredential},
 		{"missing refresh", CreateInput{Name: "x", Provider: entities.ProviderAnthropic, Kind: entities.KindOAuth}, ErrInvalidCredential},
@@ -104,6 +105,11 @@ func TestValidateCredential(t *testing.T) {
 	valid := CreateInput{Name: "anthropic", Provider: entities.ProviderAnthropic, Kind: entities.KindOAuth, OAuthRefresh: "refresh", BaseURL: "https://example.test"}
 	if err := validate(valid); err != nil {
 		t.Fatalf("valid credential rejected: %v", err)
+	}
+	for _, valid := range []CreateInput{{Name: "Devin Cloud", Provider: "devin", Kind: entities.KindAPIKey, APIKey: "cog_synthetic"}, {Name: "Devin CLI PAT", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "cog_synthetic"}} {
+		if err := validate(valid); err != nil {
+			t.Fatalf("valid Devin credential rejected: %v", err)
+		}
 	}
 }
 

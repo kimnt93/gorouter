@@ -19,7 +19,7 @@ port). Protected API operations still require authentication.
 
 | Authentication | Providers |
 |---|---|
-| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible, Windsurf / Devin Desktop (imported Desktop key), Devin CLI (apk_user key; included in the standard image) |
+| API key | OpenAI, Anthropic, Gemini, Groq, OpenRouter, OpenCode Zen, OpenCode Go, xAI, DeepSeek, Moonshot, Qwen, OpenAI-compatible, Devin Cloud (cog_ key), Windsurf / Devin Desktop (imported Desktop key), Devin CLI (apk_user_ or cog_ key; included in the standard image) |
 | OAuth | Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Grok Build, xAI, Kimi Code, Cline, ClinePass, Kilo Code, Kiro, Amazon Q, Google Antigravity |
 
 [Devin CLI and Desktop connection requirements](docs/devin-connections.md),

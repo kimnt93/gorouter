@@ -55,6 +55,12 @@ func (a *DevinCLIAdapter) DiscoverModels(ctx context.Context, cr *entities.Crede
 	}
 	defer s.Close()
 	values := devinValues(s.selector("model"))
+	if len(values) == 0 && strings.HasPrefix(strings.TrimSpace(cr.APIKey), "cog_") {
+		// Current Cognition PATs authenticate the CLI, but ACP summarizer sessions
+		// may omit the model selector because account policy manages selection.
+		// Expose only Adaptive rather than inventing a foundation-model catalog.
+		return []credential.ProviderModel{{ID: "adaptive", Name: "Adaptive", Description: "Cognition-managed adaptive model routing", Root: "adaptive", Object: "model", OwnedBy: "devin-cli", APIFormat: "chat/completions", SupportedEndpoints: []string{"chat/completions"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}}}, nil
+	}
 	if len(values) == 0 || len(values) > 256 {
 		return nil, devinFailure(502, "Devin CLI returned no supported model selector or too many models")
 	}
@@ -122,7 +128,10 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 	if err != nil {
 		return devinReject(err), nil
 	}
-	if err = s.selectValue("model", model); err != nil {
+	if s.selector("model") == nil && strings.HasPrefix(strings.TrimSpace(cr.APIKey), "cog_") && model == "adaptive" {
+		// The current PAT-authenticated summarizer may be policy-managed and omit
+		// selectors. Its default is the documented Adaptive router.
+	} else if err = s.selectValue("model", model); err != nil {
 		s.Close()
 		return devinReject(err), nil
 	}

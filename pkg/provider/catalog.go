@@ -17,6 +17,7 @@ const (
 	ProtocolKimi        = "kimi"
 	ProtocolKiro        = "kiro"
 	ProtocolAntigravity = "antigravity"
+	ProtocolDevinCloud  = "devin-cloud"
 
 	// ClaudeCodeClientVersion must meet the minimum version Anthropic requires
 	// for the subscription models exposed by its model catalog.
@@ -53,7 +54,8 @@ var definitions = []Definition{
 	{ID: "kiro", Name: "Kiro", Description: "Connect Kiro through AWS Builder ID device authorization.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "kiro", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
 	{ID: "amazon-q", Name: "Amazon Q Developer", Description: "Connect Amazon Q Developer through AWS Builder ID.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "amazonq", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
 	{ID: "antigravity", Name: "Google Antigravity", Description: "Connect Google Cloud Code Assist using browser OAuth.", Auth: AuthOAuth, Protocol: ProtocolAntigravity, DefaultBaseURL: "https://daily-cloudcode-pa.googleapis.com", ModelPrefix: "ag", OAuthSupported: true, OAuthRefreshRequired: true},
-	{ID: "devin-cli", Name: "Devin CLI", Description: "Connect a Devin CLI account with an apk_user key. The standard GoRouter Docker image includes the required CLI.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, ModelPrefix: "dv"},
+	{ID: "devin", Name: "Devin Cloud", Description: "Connect Cognition Devin Cloud with a cog_ personal access token or service-user API key. Cloud sessions do not expose selectable foundation models.", Auth: AuthAPIKey, Protocol: ProtocolDevinCloud, DefaultBaseURL: "https://api.devin.ai", ModelPrefix: "devin"},
+	{ID: "devin-cli", Name: "Devin CLI", Description: "Connect a Devin CLI account with an apk_user_ or cog_ key. The standard GoRouter Docker image includes the required CLI.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, ModelPrefix: "dv"},
 	{ID: "devin-desktop", Name: "Windsurf / Devin Desktop", Description: "Import a Devin Desktop (Windsurf) key; not an OAuth or CLI connection.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://server.codeium.com", ModelPrefix: "dd"},
 	{ID: "openai", Name: "OpenAI", Description: "OpenAI API models and compatible chat completions.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.openai.com/v1", ModelPrefix: "openai"},
 	{ID: "anthropic", Name: "Anthropic", Description: "Claude models using an Anthropic API key.", Auth: AuthAPIKey, Protocol: ProtocolAnthropic, DefaultBaseURL: "https://api.anthropic.com", ModelPrefix: "anthropic"},
