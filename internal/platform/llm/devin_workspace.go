@@ -26,8 +26,8 @@ type devinWorkspace struct {
 
 func (a *DevinCLIAdapter) workspace(parent context.Context, key string) (*devinWorkspace, error) {
 	key = strings.TrimSpace(key)
-	if (!strings.HasPrefix(key, "apk_user_") && !strings.HasPrefix(key, "cog_")) || key == "apk_user_" || key == "cog_" || strings.ContainsAny(key, "\r\n\x00") {
-		return nil, devinFailure(400, "Devin requires an apk_user_ key or cog_ personal access token")
+	if err := validateDevinKey(key); err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(parent, 3*time.Minute)
 	a.once.Do(func() {
@@ -159,7 +159,7 @@ func (w *devinWorkspace) catalog() ([]devinModel, error) {
 		if w.ctx.Err() != nil {
 			return nil, devinFailure(504, "Devin model discovery timed out or was canceled")
 		}
-		return nil, classifyDevinError(&devinRPCError{Message: stderr.buffer.String()})
+		return nil, devinCredentialError(w.key, classifyDevinError(&devinRPCError{Message: stderr.buffer.String()}))
 	}
 	if stdout.overflow {
 		return nil, devinFailure(502, "Devin model catalog exceeds limit")
@@ -173,4 +173,21 @@ func (w *devinWorkspace) catalog() ([]devinModel, error) {
 		return nil, devinFailure(502, "Invalid Devin model catalog")
 	}
 	return normalizeDevinCatalog(catalog)
+}
+
+func validateDevinKey(key string) error {
+	key = strings.TrimSpace(key)
+	if strings.HasPrefix(key, "apk_") && !strings.HasPrefix(key, "apk_user_") {
+		return devinFailure(400, "Devin apk_ service keys are for Cloud sessions, not CLI model inference; use a cog_ personal access token with CLI access")
+	}
+	if (!strings.HasPrefix(key, "apk_user_") && !strings.HasPrefix(key, "cog_")) || key == "apk_user_" || key == "cog_" || strings.ContainsAny(key, "\r\n\x00") {
+		return devinFailure(400, "Devin requires an apk_user_ key or cog_ personal access token")
+	}
+	return nil
+}
+func devinCredentialError(key string, err error) error {
+	if devinStatus(err) == 401 && strings.HasPrefix(strings.TrimSpace(key), "apk_user_") {
+		return devinFailure(401, "Devin CLI rejected this legacy apk_user_ key; Cloud API access does not grant CLI model access. Use a cog_ personal access token with CLI access")
+	}
+	return err
 }

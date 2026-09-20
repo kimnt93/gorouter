@@ -27,12 +27,12 @@ type devinVariant struct {
 	Output  int64  `json:"max_output_tokens"`
 }
 type devinChoice struct {
-	Effort  string
-	Variant devinVariant
+	Effort  string       `json:"effort"`
+	Variant devinVariant `json:"variant"`
 }
 type devinModel struct {
-	Metadata credential.ProviderModel
-	Choices  []devinChoice
+	Metadata credential.ProviderModel `json:"metadata"`
+	Choices  []devinChoice            `json:"choices"`
 }
 
 var devinSpeed = regexp.MustCompile(`(?i)(^|[\s_-])(fast|priority)([\s_-]|$)`)

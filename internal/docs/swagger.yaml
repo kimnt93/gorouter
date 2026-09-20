@@ -2810,13 +2810,18 @@ paths:
       - credentials
   /admin/credentials/{id}/models:
     get:
-      description: Discovers safe model metadata through a provider credential.
+      description: Returns credential-scoped cached model metadata when available.
+        Set refresh=true for a bounded upstream refresh.
       parameters:
       - description: Credential ID
         in: path
         name: id
         required: true
         type: string
+      - description: Force upstream catalog refresh
+        in: query
+        name: refresh
+        type: boolean
       responses:
         "200":
           description: OK

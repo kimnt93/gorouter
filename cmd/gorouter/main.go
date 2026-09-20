@@ -294,7 +294,13 @@ func main() {
 	registerRefresh("antigravity", antigravity.RefreshToken, &antigravity.Refresh)
 	oauthRefresh.Start(ctx, 5*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
 	devinRetired := &llm.RetiredDevinAdapter{}
-	devinCLI := &llm.DevinCLIAdapter{}
+	devinCLI := &llm.DevinCLIAdapter{CatalogTTL: cfg.ModelCatalog.CacheTTL}
+	if redisClient != nil {
+		devinCLI.CatalogCache = modeldiscovery.NewSnapshots(redisClient)
+		devinCLI.CatalogLocker = distributedRefreshLock
+	} else if cfg.DatabaseBackend == "local" {
+		devinCLI.CatalogCache = modeldiscovery.NewMemorySnapshots(128)
+	}
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
 	opencodeZen := &llm.OpenCodeZenAdapter{HTTP: client}
 	providerProbes := map[string]credential.ConnectivityProber{

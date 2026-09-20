@@ -12,7 +12,7 @@ shared HOME, or provider-specific image is needed.
    access. A Cloud service-user key or old Desktop/Windsurf key is not equivalent
    to a human CLI subscription. Invalid/revoked/unauthorized keys cannot be fixed
    by inventing a static model catalog.
-3. Open **Models** to refresh/import the account's live catalog.
+3. Open **Models** to read/import the cached account catalog. Use **Refresh from provider** when a live reload is needed.
 4. Choose a model name, then pass reasoning separately:
 
 ```json
@@ -79,8 +79,23 @@ availability, **not unlimited quota or guaranteed inference entitlement**.
   caches are shared. The durable encrypted credential is authoritative; Redis
   caches only credential-scoped discovery metadata. The discovery cache schema
   is versioned to avoid reusing earlier placeholder catalogs.
-- Chat re-reads the live mapping before selecting a variant. This is deliberately
-  stricter than caching an inferred model-to-UID mapping across accounts.
+- Discovery and chat share a bounded provider-reported mapping cache. Redis is
+  used in distributed deployments; explicit local mode uses bounded memory.
+  Cache identity includes the credential ID plus a digest of the current key,
+  so key rotation cannot reuse an earlier credential revision. Only non-secret
+  model metadata/UIDs are stored, never a token, CLI HOME, prompt or session.
+  `MODEL_CATALOG_CACHE_TTL` controls its lifetime (default one hour). A cache
+  outage falls back to bounded fresh discovery, not a stale local copy.
+- `GET /admin/credentials/{id}/models` uses cached metadata by default;
+  `?refresh=true` forces an upstream reload. Import, metadata refresh and health
+  checks revalidate upstream. Concurrent cold loads coalesce locally and use a
+  Redis refresh lock across replicas. Auth/permission failures invalidate the
+  mapping. Every chat still authenticates ACP and confirms the selected UID;
+  a cached catalog is not an authorization or quota grant.
+- Chat no longer runs a separate `models list` process on a warm cache hit. It
+  still starts a fresh private ACP process, so it does not have the persistent
+  IDE's warm connection/startup behavior. No cross-request conversation pooling
+  or saved writable CLI state is introduced.
 - Text chat and incremental text/reasoning streaming are supported. Client tool
   schemas, tool history, images, reasoning summaries and multiple choices are
   rejected. Inference sampling/output defaults remain CLI-owned; this is not
@@ -127,3 +142,30 @@ References: [CLI models](https://docs.devin.ai/cli/models),
 [permissions](https://docs.devin.ai/cli/reference/permissions),
 [authentication](https://docs.devin.ai/api-reference/authentication),
 [OmniRoute catalog comparison](https://github.com/diegosouzapw/OmniRoute/blob/7a921299/open-sse/config/providers/registry/devin/catalog.ts).
+
+## Legacy keys and measured latency (2026-09-20)
+
+Both tested legacy `apk_user_` and `apk_` service keys returned 200 from the
+read-only Cloud v1 session-list endpoint but were rejected by official CLI
+model discovery. They are valid for that legacy Cloud API, **not proven usable
+for CLI inference**. Cloud v3 `/self` returned 403 for those legacy keys.
+
+GoRouter now rejects `apk_` service keys with an explicit Cloud-versus-CLI
+message. A rejected `apk_user_` key returns actionable 401 guidance rather than
+calling it universally invalid. Use a current `cog_` **personal access token**
+with CLI access. Do not assume a `cog_` service-user token has human model access.
+No Cloud agent session is started as a fallback for an LLM request.
+
+A bounded local test with the same official CLI and `swe-2` / `medium`:
+
+| Path | Samples | Observed latency |
+|---|---:|---:|
+| Cold catalog through Go adapter | 1 | 2,601.56 ms |
+| Warm catalog through Go adapter (memory) | 5 | 0.863–1.352 ms; median 0.999 ms |
+| Cold chat, time to first text / completion | 1 | 12,693 / 12,702 ms |
+| Warm-catalog chat, time to first text / completion | 1 | 9,979 / 9,986 ms |
+
+These are diagnostic samples, not a general speed guarantee. Redis, HTTP and
+DB overhead are excluded from adapter catalog timings. Warm chat still incurs
+ACP startup/authentication, provider latency and generation. See the
+[latency report](devin-latency-report.md) for controls and reproduction.

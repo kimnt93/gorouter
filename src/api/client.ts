@@ -147,7 +147,7 @@ export const deleteCredential = (id: string): Promise<{ ok: boolean }> => reques
 export const testCredential = (id: string): Promise<ConnectivityResult> => request(`/admin/credentials/${encodeURIComponent(id)}/test`, { method: 'POST' })
 export const getCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`, { cache: 'no-store' })
 export const refreshCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`, { method: 'POST' })
-export const discoverModels = (id: string): Promise<ProviderModelsResponse> => request(`/admin/credentials/${encodeURIComponent(id)}/models`)
+export const discoverModels = (id: string, refresh = false): Promise<ProviderModelsResponse> => request(`/admin/credentials/${encodeURIComponent(id)}/models${refresh ? "?refresh=true" : ""}`)
 export const importModels = (id: string, models: string[]): Promise<{ ok: boolean; imported: string[] }> => request(`/admin/credentials/${encodeURIComponent(id)}/models/import`, { method: 'POST', body: JSON.stringify({ models }) })
 export const startOAuth = (provider: string): Promise<OAuthStartResponse> => request(`/admin/oauth/${encodeURIComponent(provider)}/start`, { method: 'POST' })
 export const completeOAuth = (provider: string, body: OAuthCompleteRequest): Promise<OAuthCompleteResponse> => request(`/admin/oauth/${encodeURIComponent(provider)}/complete`, { method: 'POST', body: JSON.stringify(body) })

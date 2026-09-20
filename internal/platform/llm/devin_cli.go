@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"golang.org/x/sync/singleflight"
 	"io"
 	"net/http"
 	"regexp"
@@ -20,11 +21,15 @@ import (
 // CLI installed. Its semaphore bounds local OS processes, not authorization or
 // quota; credentials/catalog caching remain scoped by the existing services.
 type DevinCLIAdapter struct {
-	Binary       string
-	WorkDir      string
-	MaxProcesses int
-	once         sync.Once
-	slots        chan struct{}
+	Binary        string
+	WorkDir       string
+	MaxProcesses  int
+	CatalogCache  DevinCatalogCache
+	CatalogLocker DevinCatalogLocker
+	CatalogTTL    time.Duration
+	catalogGroup  singleflight.Group
+	once          sync.Once
+	slots         chan struct{}
 }
 
 var devinModelID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
@@ -35,7 +40,7 @@ func (a *DevinCLIAdapter) Probe(ctx context.Context, cr *entities.CredentialRunt
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	models, err := a.DiscoverModels(ctx, cr)
+	models, err := a.RefreshModels(ctx, cr)
 	if err != nil {
 		return devinStatus(err), devinSafeError(err)
 	}
@@ -45,23 +50,30 @@ func (a *DevinCLIAdapter) Probe(ctx context.Context, cr *entities.CredentialRunt
 	return http.StatusOK, nil
 }
 func (a *DevinCLIAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	return a.discover(ctx, cr, false)
+}
+
+// RefreshModels is the explicit network refresh contract used by health probes
+// and the management reload action. Ordinary lists and chat share the cache.
+func (a *DevinCLIAdapter) RefreshModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	return a.discover(ctx, cr, true)
+}
+func (a *DevinCLIAdapter) discover(ctx context.Context, cr *entities.CredentialRuntime, force bool) ([]credential.ProviderModel, error) {
 	if cr == nil {
 		return nil, devinFailure(400, "missing Devin credential")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	work, err := a.workspace(ctx, cr.APIKey)
-	if err != nil {
-		return nil, err
-	}
-	defer work.Close()
-	models, err := work.catalog()
+	models, err := a.catalog(ctx, cr, force)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]credential.ProviderModel, 0, len(models))
 	for _, m := range models {
-		out = append(out, m.Metadata)
+		metadata := m.Metadata
+		metadata.InputModalities = append([]string(nil), metadata.InputModalities...)
+		metadata.OutputModalities = append([]string(nil), metadata.OutputModalities...)
+		metadata.SupportedEndpoints = append([]string(nil), metadata.SupportedEndpoints...)
+		metadata.SupportedReasoningLevels = append([]entities.ModelReasoningLevel(nil), metadata.SupportedReasoningLevels...)
+		out = append(out, metadata)
 	}
 	return out, nil
 }
@@ -98,13 +110,8 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 	if !devinModelID.MatchString(model) {
 		return devinReject(devinFailure(400, "invalid Devin model")), nil
 	}
-	work, err := a.workspace(ctx, cr.APIKey)
+	models, err := a.catalog(ctx, cr, false)
 	if err != nil {
-		return devinReject(err), nil
-	}
-	models, err := work.catalog()
-	if err != nil {
-		work.Close()
 		return devinReject(err), nil
 	}
 	effort := ""
@@ -116,28 +123,33 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 		Effort string `json:"reasoning_effort"`
 	}
 	if json.Unmarshal(raw, &options) != nil {
-		work.Close()
 		return devinReject(devinFailure(400, "Invalid reasoning effort")), nil
 	}
 	if options.Effort != "" {
 		if effort != "" && effort != options.Effort {
-			work.Close()
 			return devinReject(devinFailure(400, "Conflicting reasoning settings")), nil
 		}
 		effort = options.Effort
 	}
 	variant, err := selectDevinVariant(models, model, effort)
 	if err != nil {
-		work.Close()
+		return devinReject(err), nil
+	}
+	work, err := a.workspace(ctx, cr.APIKey)
+	if err != nil {
 		return devinReject(err), nil
 	}
 	s, err := work.open(variant)
 	if err != nil {
+		if devinStatus(err) == 401 || devinStatus(err) == 403 {
+			a.invalidateCatalog(ctx, cr)
+		}
 		return devinReject(err), nil
 	}
 	// The normal agent exposes actual UID selection; the old summarizer silently
 	// ignored it. Require confirmation before any billed prompt (never fallback).
 	if err = s.selectValue("model", variant); err != nil {
+		a.invalidateCatalog(ctx, cr)
 		s.Close()
 		return devinReject(err), nil
 	}
@@ -166,6 +178,9 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 				_, e = io.WriteString(writer, "data: [DONE]\n\n")
 			}
 			if e != nil {
+				if devinStatus(e) == 401 || devinStatus(e) == 403 {
+					a.invalidateCatalog(ctx, cr)
+				}
 				e = devinSafeError(e)
 			}
 			_ = writer.CloseWithError(e)
@@ -175,6 +190,9 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 	defer s.Close()
 	result, err := s.prompt(prompt, nil)
 	if err != nil {
+		if devinStatus(err) == 401 || devinStatus(err) == 403 {
+			a.invalidateCatalog(ctx, cr)
+		}
 		return devinReject(err), nil
 	}
 	body, _ := json.Marshal(Response{ID: id, Object: "chat.completion", Created: created, Model: model, Choices: []Choice{{Message: &result.message, FinishReason: result.finish}}, Usage: result.usage})

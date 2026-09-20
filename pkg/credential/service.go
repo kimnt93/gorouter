@@ -176,6 +176,9 @@ func validate(in CreateInput) error {
 	}
 	if in.Provider == "devin-cli" {
 		key := strings.TrimSpace(in.APIKey)
+		if strings.HasPrefix(key, "apk_") && !strings.HasPrefix(key, "apk_user_") {
+			return fmt.Errorf("%w: apk_ service keys only support Devin Cloud sessions, not CLI model inference; use a cog_ personal access token", ErrInvalidCredential)
+		}
 		if (!strings.HasPrefix(key, "apk_user_") && !strings.HasPrefix(key, "cog_")) || key == "apk_user_" || key == "cog_" || strings.ContainsAny(key, "\r\n\x00") {
 			return fmt.Errorf("%w: Devin requires an apk_user_ key or cog_ personal access token", ErrInvalidCredential)
 		}
@@ -272,9 +275,22 @@ func (s *Service) TestConnectivity(ctx context.Context, id string, probes map[st
 	return result, nil
 }
 
+// ModelRefresher lets provider-specific catalog caches honor explicit refreshes.
+// Ordinary discovery may reuse metadata; refresh must revalidate upstream.
+type ModelRefresher interface {
+	RefreshModels(context.Context, *entities.CredentialRuntime) ([]ProviderModel, error)
+}
+
 func (s *Service) RefreshDiscoveredModels(ctx context.Context, id string, discoverer ModelDiscoverer) ([]ProviderModel, error) {
 	if s.discoveryCache != nil {
 		_ = s.discoveryCache.Delete(ctx, id)
+	}
+	if refresher, ok := discoverer.(ModelRefresher); ok {
+		runtime, err := s.Runtime(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		return refresher.RefreshModels(ctx, runtime)
 	}
 	return s.DiscoverModels(ctx, id, discoverer)
 }
@@ -286,6 +302,12 @@ func (s *Service) DiscoverModels(ctx context.Context, id string, discoverer Mode
 	runtime, err := s.Runtime(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	// A provider-owned cache holds both display metadata and the private UID
+	// mapping. Avoid a second ID-only cache that could outlive key rotation or
+	// mask an authentication failure detected by that provider's refresh.
+	if _, ok := discoverer.(ModelRefresher); ok {
+		return discoverer.DiscoverModels(ctx, runtime)
 	}
 	if s.discoveryCache != nil && s.discoveryTTL > 0 {
 		if cached, ok, cacheErr := s.discoveryCache.Get(ctx, id); cacheErr == nil && ok {

@@ -175,7 +175,7 @@ func (work *devinWorkspace) open(model string) (*devinSession, error) {
 	var session devinSessionResult
 	if err = s.call("session/new", devinNewSession{CWD: home, MCPServers: []struct{}{}}, &session, nil); err != nil {
 		s.Close()
-		return nil, err
+		return nil, devinCredentialError(work.key, err)
 	}
 	if session.SessionID == "" {
 		s.Close()

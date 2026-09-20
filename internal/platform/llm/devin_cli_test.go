@@ -54,6 +54,13 @@ func TestDevinACPHelperProcess(t *testing.T) {
 		os.Exit(87)
 	}
 	if len(args) > 0 && args[0] == "models" {
+		if scenario == "catalog-slow" {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if scenario == "cached-only" {
+			fmt.Fprintln(os.Stderr, "catalog must not run SENSITIVE")
+			os.Exit(1)
+		}
 		if scenario == "timeout" {
 			time.Sleep(time.Minute)
 		}
@@ -129,7 +136,7 @@ func TestDevinACPHelperProcess(t *testing.T) {
 			if json.Unmarshal(msg.Params, &params) != nil || params.CWD != home || params.MCPServers == nil || len(params.MCPServers) > 0 || params.Model != "" {
 				os.Exit(93)
 			}
-			if key := os.Getenv("WINDSURF_API_KEY"); key != "apk_user_synthetic" && key != "cog_synthetic" {
+			if key := os.Getenv("WINDSURF_API_KEY"); scenario == "auth-revoked" || key != "apk_user_synthetic" && key != "cog_synthetic" {
 				fail(msg.ID, -32603, "Authentication required: invalid api key SENSITIVE")
 				continue
 			}
@@ -501,7 +508,7 @@ func TestDevinCLICapacityWaitRespectsCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	status, err := a.Probe(ctx, devinTestCredential())
-	if err == nil || status != 503 {
+	if err == nil || (status != 503 && status != 504) {
 		t.Fatalf("capacity status=%d err=%v", status, err)
 	}
 }

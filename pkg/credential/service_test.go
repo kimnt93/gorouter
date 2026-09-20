@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -271,5 +272,35 @@ func TestMaskPreviewProducesDisplayReadyLabel(t *testing.T) {
 		if got := MaskPreview(input); got != want {
 			t.Fatalf("MaskPreview(%q)=%q want %q", input, got, want)
 		}
+	}
+}
+
+type providerCachedDiscoverer struct{ discoveries, refreshes int }
+
+func (p *providerCachedDiscoverer) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]ProviderModel, error) {
+	p.discoveries++
+	return []ProviderModel{{ID: "fresh-provider-cache"}}, nil
+}
+func (p *providerCachedDiscoverer) RefreshModels(context.Context, *entities.CredentialRuntime) ([]ProviderModel, error) {
+	p.refreshes++
+	return []ProviderModel{{ID: "refreshed"}}, nil
+}
+func TestProviderCacheCannotBeMaskedByServiceCache(t *testing.T) {
+	service := NewService(credentialRepoStub{runtime: &entities.CredentialRuntime{ID: "cred", Provider: "devin-cli"}}, nil)
+	service.SetModelDiscoveryCache(&discoveryCacheStub{models: []ProviderModel{{ID: "old-revision"}}, present: true}, time.Hour)
+	d := &providerCachedDiscoverer{}
+	models, err := service.DiscoverModels(context.Background(), "cred", d)
+	if err != nil || models[0].ID != "fresh-provider-cache" || d.discoveries != 1 {
+		t.Fatal("ID-only cache masked provider credential revision")
+	}
+	models, err = service.RefreshDiscoveredModels(context.Background(), "cred", d)
+	if err != nil || models[0].ID != "refreshed" || d.refreshes != 1 {
+		t.Fatal("force refresh ignored")
+	}
+}
+func TestDevinCloudServiceKeyRejectedWithActionableReason(t *testing.T) {
+	err := validate(CreateInput{Name: "service", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "apk_synthetic_service"})
+	if !errors.Is(err, ErrInvalidCredential) || !strings.Contains(err.Error(), "Cloud sessions") {
+		t.Fatal("service key was advertised as inference compatible")
 	}
 }

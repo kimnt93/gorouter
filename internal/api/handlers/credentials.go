@@ -207,7 +207,7 @@ func (h *CredentialConnectivity) RefreshModelMetadata(c fiber.Ctx) error {
 		return responseapi.For(c).NotFound("credential not found").Send()
 	}
 	_, discoverer, _ := h.adapter(runtime.Provider)
-	discovered, err := h.Credentials.DiscoverModels(c.Context(), runtime.ID, discoverer)
+	discovered, err := h.Credentials.RefreshDiscoveredModels(c.Context(), runtime.ID, discoverer)
 	if err != nil {
 		var safe interface {
 			ProviderStatus() int
@@ -349,10 +349,11 @@ func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
 
 // Models discovers safe model metadata through a credential.
 // @Summary Discover provider models
-// @Description Discovers safe model metadata through a provider credential.
+// @Description Returns credential-scoped cached model metadata when available. Set refresh=true for a bounded upstream refresh.
 // @Tags credentials
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
+// @Param refresh query boolean false "Force upstream catalog refresh"
 // @Success 200 {object} ProviderModelsResponse
 // @Failure 400,401,403,404,429,500,502,503,504 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/models [get]
@@ -368,7 +369,15 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 		return responseapi.For(c).InternalError("failed to load credential").Send()
 	}
 	_, discoverer, _ := h.adapter(runtime.Provider)
-	models, err := h.Credentials.RefreshDiscoveredModels(c.Context(), c.Params("id"), discoverer)
+	var models []credential.ProviderModel
+	switch c.Query("refresh") {
+	case "", "false", "0":
+		models, err = h.Credentials.DiscoverModels(c.Context(), c.Params("id"), discoverer)
+	case "true", "1":
+		models, err = h.Credentials.RefreshDiscoveredModels(c.Context(), c.Params("id"), discoverer)
+	default:
+		return responseapi.For(c).BadRequest("refresh must be true or false").Send()
+	}
 	if err != nil {
 		var safe interface {
 			ProviderStatus() int
@@ -379,7 +388,8 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 		}
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
 	}
-	if h.Health != nil {
+	// A cached catalog is not evidence that a previously unhealthy account recovered.
+	if h.Health != nil && (c.Query("refresh") == "true" || c.Query("refresh") == "1") {
 		h.Health.Report(runtime.ID, true)
 	}
 	defaultModel := ""

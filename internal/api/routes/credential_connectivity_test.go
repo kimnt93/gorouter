@@ -301,3 +301,42 @@ func TestCredentialDiscoveryPreservesSafeProviderStatus(t *testing.T) {
 		}
 	}
 }
+
+type cachedRouteProvider struct {
+	connectivityRouteProvider
+	reads, refreshes int
+}
+
+func (p *cachedRouteProvider) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	p.reads++
+	return p.connectivityRouteProvider.DiscoverModels(ctx, cr)
+}
+func (p *cachedRouteProvider) RefreshModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	p.refreshes++
+	return p.connectivityRouteProvider.DiscoverModels(ctx, cr)
+}
+func TestModelListUsesCacheUnlessExplicitRefresh(t *testing.T) {
+	repo := &connectivityRouteCredentialRepo{credentials: []entities.Credential{{ID: "cred", Provider: "devin-cli"}}, runtimes: map[string]*entities.CredentialRuntime{"cred": {ID: "cred", Provider: "devin-cli"}}}
+	provider := &cachedRouteProvider{}
+	app := routes.New(routes.Dependencies{Auth: auth.NewService("master-secret", "session-secret", nil), Credentials: credential.NewService(repo, oauthRouteBox{}), Providers: map[string]credential.ConnectivityProber{"devin-cli": provider}})
+	for _, tc := range []struct {
+		query, key string
+		status     int
+	}{{"", "master-secret", 200}, {"?refresh=true", "master-secret", 200}, {"?refresh=false", "master-secret", 200}, {"?refresh=invalid", "master-secret", 400}, {"?refresh=true", "", 401}} {
+		req, _ := http.NewRequest("GET", "/admin/credentials/cred/models"+tc.query, nil)
+		if tc.key != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.key)
+		}
+		r, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode != tc.status {
+			t.Fatalf("status=%d want=%d", r.StatusCode, tc.status)
+		}
+	}
+	if provider.reads != 2 || provider.refreshes != 1 {
+		t.Fatalf("reads=%d refreshes=%d", provider.reads, provider.refreshes)
+	}
+}

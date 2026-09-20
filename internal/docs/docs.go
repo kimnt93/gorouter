@@ -1019,7 +1019,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Discovers safe model metadata through a provider credential.",
+                "description": "Returns credential-scoped cached model metadata when available. Set refresh=true for a bounded upstream refresh.",
                 "tags": [
                     "credentials"
                 ],
@@ -1031,6 +1031,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Force upstream catalog refresh",
+                        "name": "refresh",
+                        "in": "query"
                     }
                 ],
                 "responses": {
