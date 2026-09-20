@@ -9,6 +9,12 @@ import (
 func TestReasoningFallbackAndUpstreamPrecedence(t *testing.T) {
 	for _, provider := range Catalog() {
 		def, levels, source := ReasoningOptions(&entities.ModelMetadata{Provider: provider.ID})
+		if provider.ID == "devin-cli" {
+			if def != "" || len(levels) != 0 || source != "upstream" {
+				t.Fatal("invented Devin reasoning levels")
+			}
+			continue
+		}
 		if def != "medium" || len(levels) != 3 || source != "static_fallback" {
 			t.Fatalf("fallback for %s", provider.ID)
 		}

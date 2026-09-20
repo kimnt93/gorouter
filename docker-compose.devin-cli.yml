@@ -1,0 +1,9 @@
+# Overlay on ONE existing backend file, retaining its project/environment/volumes:
+# docker compose -f docker-compose.local.yml -f docker-compose.devin-cli.yml up -d --build
+# Replace .local with .postgres or .clickhouse for those deployments.
+services:
+  gorouter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: devin-cli

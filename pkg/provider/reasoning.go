@@ -20,6 +20,11 @@ func ReasoningOptions(metadata *entities.ModelMetadata) (string, []entities.Mode
 		}
 		return defaultLevel, levels, "upstream"
 	}
+	// Devin's authenticated ACP selector is authoritative. Missing thought
+	// options must not advertise invented efforts that requests will reject.
+	if metadata != nil && metadata.Provider == "devin-cli" {
+		return "", []entities.ModelReasoningLevel{}, "upstream"
+	}
 	defaultLevel := "medium"
 	if metadata != nil && metadata.DefaultReasoningLevel != "" {
 		defaultLevel = metadata.DefaultReasoningLevel

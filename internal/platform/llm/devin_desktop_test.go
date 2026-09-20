@@ -81,6 +81,9 @@ func TestDevinDesktopAuthFailureDoesNotSendChat(t *testing.T) {
 func TestDevinDesktopRejectsCLIKeyBeforeNetwork(t *testing.T) {
 	a := &DevinDesktopAdapter{HTTP: &http.Client{Transport: roundTripNeverCalled{t: t}}}
 	cr := &entities.CredentialRuntime{APIKey: "apk_user_synthetic"}
+	if _, err := a.DiscoverModels(context.Background(), cr); err == nil {
+		t.Fatal("invented Desktop catalog for CLI key")
+	}
 	if _, err := a.Probe(context.Background(), cr); err == nil {
 		t.Fatal("CLI key accepted in Desktop health")
 	}

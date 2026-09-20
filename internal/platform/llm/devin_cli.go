@@ -1,162 +1,106 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-// DevinCLIAdapter runs the official Devin CLI over ACP stdio. CLI execution is
-// confined to a dedicated empty directory; never use the router's working tree.
-// The binary must be installed separately. No shell, prompts in logs, or
-// process-local token cache is used.
+// DevinCLIAdapter owns isolated no-tool ACP sessions. Every replica needs the
+// CLI installed. Its semaphore bounds local OS processes, not authorization or
+// quota; credentials/catalog caching remain scoped by the existing services.
 type DevinCLIAdapter struct {
-	Binary  string
-	WorkDir string
+	Binary       string
+	WorkDir      string
+	MaxProcesses int
+	once         sync.Once
+	slots        chan struct{}
 }
 
 var devinModelID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
-func (a *DevinCLIAdapter) binary() string {
-	if a.Binary != "" {
-		return a.Binary
-	}
-	return "devin"
-}
-func (a *DevinCLIAdapter) directory() string {
-	if a.WorkDir != "" {
-		return a.WorkDir
-	}
-	return os.TempDir()
-}
-func (a *DevinCLIAdapter) command(ctx context.Context, key string, args ...string) (*exec.Cmd, func(), error) {
-	if !strings.HasPrefix(key, "apk_user_") {
-		return nil, nil, errors.New("Devin CLI requires an apk_user key; Devin Desktop keys use a separate connection")
-	}
-	dir := a.directory()
-	if !filepath.IsAbs(dir) {
-		return nil, nil, errors.New("Devin CLI work directory must be absolute")
-	}
-	// Each credential invocation gets an isolated home and cwd. A shared HOME
-	// would allow the CLI to read/write a different user's cached login.
-	home, err := os.MkdirTemp(dir, "gorouter-devin-*")
-	if err != nil {
-		return nil, nil, errors.New("Devin CLI work directory unavailable")
-	}
-	_ = os.Chmod(home, 0700)
-	cmd := exec.CommandContext(ctx, a.binary(), args...)
-	cmd.Dir = home
-	// Do not inherit other users' Devin tokens or process credentials.
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "WINDSURF_API_KEY=" + key}
-	return cmd, func() { _ = os.RemoveAll(home) }, nil
-}
 func (a *DevinCLIAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime) (int, error) {
 	if cr == nil {
 		return 0, errors.New("missing Devin credential")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	// Listing alone may use cached login, not the supplied key. Exercise the
-	// same ACP path as chat with a bounded, read-only summarizer request.
-	_, err := a.exchange(ctx, cr.APIKey, "", "Reply with exactly: connected")
+	s, err := a.open(ctx, cr.APIKey)
 	if err != nil {
-		return 0, err
+		return devinStatus(err), devinSafeError(err)
 	}
+	defer s.Close()
+	// session/new fetches authenticated team settings; never send a paid prompt.
 	return http.StatusOK, nil
-}
-func parseDevinCLIModels(raw []byte) ([]credential.ProviderModel, error) {
-	var doc struct {
-		Models []struct {
-			ID              string                         `json:"id"`
-			Name            string                         `json:"name"`
-			Model           string                         `json:"model"`
-			ReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels"`
-		} `json:"models"`
-	}
-	var records []struct {
-		ID              string                         `json:"id"`
-		Name            string                         `json:"name"`
-		Model           string                         `json:"model"`
-		ReasoningLevels []entities.ModelReasoningLevel `json:"supported_reasoning_levels"`
-	}
-	if json.Unmarshal(raw, &doc) == nil && len(doc.Models) > 0 {
-		records = doc.Models
-	} else if json.Unmarshal(raw, &records) != nil {
-		return nil, errors.New("invalid Devin model list")
-	}
-	seen := map[string]bool{}
-	out := make([]credential.ProviderModel, 0, len(records))
-	for _, v := range records {
-		id := strings.TrimSpace(v.ID)
-		if id == "" {
-			id = strings.TrimSpace(v.Model)
-		}
-		if !devinModelID.MatchString(id) || seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, credential.ProviderModel{ID: id, Name: v.Name, Root: id, Object: "model", OwnedBy: "devin-cli", APIFormat: "chat/completions", SupportedEndpoints: []string{"chat/completions"}, SupportedReasoningLevels: v.ReasoningLevels})
-	}
-	if len(out) == 0 {
-		return nil, errors.New("Devin CLI returned no models")
-	}
-	return out, nil
 }
 func (a *DevinCLIAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
 	if cr == nil {
 		return nil, errors.New("missing Devin credential")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	cmd, cleanup, err := a.command(ctx, cr.APIKey, "models", "list", "--format", "json")
+	s, err := a.open(ctx, cr.APIKey)
 	if err != nil {
 		return nil, err
 	}
-	defer cleanup()
-	var buffer boundedDevinOutput
-	cmd.Stdout = &buffer
-	if err = cmd.Run(); err != nil || buffer.exceeded {
-		return nil, errors.New("Devin CLI model discovery failed")
+	defer s.Close()
+	values := devinValues(s.selector("model"))
+	if len(values) == 0 || len(values) > 256 {
+		return nil, devinFailure(502, "Devin CLI returned no supported model selector or too many models")
 	}
-	return parseDevinCLIModels(buffer.Bytes())
-}
-
-type boundedDevinOutput struct {
-	bytes.Buffer
-	exceeded bool
-}
-
-func (b *boundedDevinOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 2<<20 {
-		b.exceeded = true
-		return 0, errors.New("Devin CLI catalog too large")
+	out := make([]credential.ProviderModel, 0, len(values))
+	seen := map[string]bool{}
+	for _, v := range values {
+		if !devinModelID.MatchString(v.Value) || seen[v.Value] {
+			continue
+		}
+		seen[v.Value] = true
+		// Thought levels are model-specific. Never copy one model's options to all.
+		if err = s.selectValue("model", v.Value); err != nil {
+			return nil, err
+		}
+		model := credential.ProviderModel{ID: v.Value, Name: v.Name, Description: v.Description, Root: v.Value, Object: "model", OwnedBy: "devin-cli", APIFormat: "chat/completions", SupportedEndpoints: []string{"chat/completions"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}}
+		if thought := s.selector("thought_level"); thought != nil {
+			model.DefaultReasoningLevel = thought.CurrentValue
+			for _, level := range devinValues(thought) {
+				if level.Value != "" {
+					model.SupportedReasoningLevels = append(model.SupportedReasoningLevels, entities.ModelReasoningLevel{Effort: level.Value, Description: level.Description})
+				}
+			}
+		}
+		out = append(out, model)
 	}
-	return b.Buffer.Write(p)
+	if len(out) == 0 {
+		return nil, devinFailure(502, "Devin CLI returned no usable models")
+	}
+	return out, nil
 }
 
-type acpMessage struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *struct {
-		Code int `json:"code"`
-	} `json:"error,omitempty"`
+type devinErrorBody struct {
+	Error struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error"`
+}
+
+func devinReject(err error) *entities.UpstreamResult {
+	// Return statuses rather than transport errors so a rejected credential or
+	// unsupported model does not consume the transient retry budget.
+	payload := devinErrorBody{}
+	payload.Error.Message = devinSafeError(err).Error()
+	payload.Error.Type = "upstream_error"
+	body, _ := json.Marshal(payload)
+	return &entities.UpstreamResult{StatusCode: devinStatus(err), Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}
 }
 
 func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, model string, raw []byte) (*entities.UpstreamResult, error) {
@@ -164,160 +108,203 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 		return nil, errors.New("missing Devin credential")
 	}
 	var req ChatRequest
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return nil, err
+	if json.Unmarshal(raw, &req) != nil {
+		return devinReject(devinFailure(400, "invalid Devin chat request")), nil
 	}
-	if len(req.Tools) > 0 {
-		return nil, errors.New("Devin CLI chat adapter does not support tools")
+	prompt, err := devinPrompt(req)
+	if err != nil {
+		return devinReject(err), nil
 	}
 	if !devinModelID.MatchString(model) {
-		return nil, errors.New("invalid Devin CLI model")
+		return devinReject(devinFailure(400, "invalid Devin model")), nil
+	}
+	s, err := a.open(ctx, cr.APIKey)
+	if err != nil {
+		return devinReject(err), nil
+	}
+	if err = s.selectValue("model", model); err != nil {
+		s.Close()
+		return devinReject(err), nil
 	}
 	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		return nil, errors.New("Devin CLI ACP does not accept request-scoped reasoning effort; select an available model variant")
+		if err = s.selectValue("thought_level", req.Reasoning.Effort); err != nil {
+			s.Close()
+			return devinReject(err), nil
+		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-	prompt := devinPrompt(req.Messages)
-	text, err := a.exchange(ctx, cr.APIKey, model, prompt)
-	if err != nil {
-		return nil, err
-	}
-	output := bytes.NewBufferString(text)
-	id, _ := randomUUID()
-	usage := Usage{PromptTokens: EstimateTextTokens(prompt), CompletionTokens: EstimateTextTokens(output.String())}
+	id := entities.NewID("chatcmpl")
+	created := time.Now().Unix()
 	if req.Stream {
-		chunk, _ := json.Marshal(Chunk{ID: "chatcmpl-" + id, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: model, Choices: []ChunkChoice{{Delta: Delta{Role: "assistant", Content: output.String()}}}})
-		final, _ := json.Marshal(Chunk{ID: "chatcmpl-" + id, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: model, Choices: []ChunkChoice{{FinishReason: "stop"}}, Usage: &usage})
-		return &entities.UpstreamResult{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf("data: %s\n\ndata: %s\n\ndata: [DONE]\n\n", chunk, final)))}, nil
-	}
-	response, _ := json.Marshal(Response{ID: "chatcmpl-" + id, Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []Choice{{Message: &ResponseMessage{Role: "assistant", Content: output.String()}, FinishReason: "stop"}}, Usage: usage})
-	return &entities.UpstreamResult{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(response))}, nil
-}
-
-// exchange never exposes CLI diagnostics (which could contain account or prompt
-// data) to the router. The CLI is cancelled after one complete ACP turn.
-func (a *DevinCLIAdapter) exchange(ctx context.Context, key, model, prompt string) (string, error) {
-	cmd, cleanup, err := a.command(ctx, key, "acp", "--agent-type", "summarizer")
-	if err != nil {
-		return "", err
-	}
-	defer cleanup()
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return "", err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
-	if err = cmd.Start(); err != nil {
-		return "", errors.New("Devin CLI is not installed or could not start")
-	}
-	// The caller bounds ctx. Kill on completion too, in case the CLI stays alive.
-	var output bytes.Buffer
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 4096), 1<<20)
-	send := func(id int, method string, params any) error {
-		line, e := json.Marshal(struct {
-			JSONRPC string `json:"jsonrpc"`
-			ID      int    `json:"id"`
-			Method  string `json:"method"`
-			Params  any    `json:"params"`
-		}{"2.0", id, method, params})
-		if e != nil {
-			return e
-		}
-		_, e = fmt.Fprintln(stdin, string(line))
-		return e
-	}
-	err = send(1, "initialize", map[string]any{"protocolVersion": "0.3", "clientInfo": map[string]string{"name": "gorouter", "version": "1"}, "capabilities": map[string]any{}})
-	state := 0
-	session := ""
-
-	for err == nil && scanner.Scan() {
-		var msg acpMessage
-		if json.Unmarshal(scanner.Bytes(), &msg) != nil {
-			continue
-		}
-		if msg.Error != nil {
-			err = errors.New("Devin CLI ACP request failed")
-			break
-		}
-		switch {
-		case msg.ID == 1 && len(msg.Result) > 0 && state == 0:
-			state = 1
-			params := map[string]any{"cwd": cmd.Dir, "mcpServers": []any{}}
-			if model != "" {
-				params["model"] = model
-			}
-			err = send(2, "session/new", params)
-		case msg.ID == 2 && len(msg.Result) > 0 && state == 1:
-			var result struct {
-				SessionID string `json:"sessionId"`
-			}
-			if json.Unmarshal(msg.Result, &result) != nil || result.SessionID == "" {
-				err = errors.New("Devin CLI omitted session ID")
-				break
-			}
-			session = result.SessionID
-			state = 2
-			err = send(3, "session/prompt", map[string]any{"sessionId": session, "prompt": []map[string]string{{"type": "text", "text": prompt}}})
-		case msg.Method == "session/update" && state == 2:
-			var params struct {
-				Update struct {
-					SessionUpdate string `json:"sessionUpdate"`
-					Content       struct {
-						Text string `json:"text"`
-					} `json:"content"`
-				} `json:"update"`
-			}
-			if json.Unmarshal(msg.Params, &params) == nil && params.Update.SessionUpdate == "agent_message_chunk" {
-				if output.Len()+len(params.Update.Content.Text) > 4<<20 {
-					err = errors.New("Devin CLI output too large")
-					break
+		reader, writer := io.Pipe()
+		// Cancel producer even when the consumer stops while a pipe write is blocked.
+		stop := context.AfterFunc(s.ctx, func() { _ = writer.CloseWithError(devinFailure(504, "Devin stream canceled or timed out")) })
+		go func() {
+			defer s.Close()
+			defer stop()
+			emit := func(d Delta, finish *string, usage *Usage) error {
+				b, e := json.Marshal(devinChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: model, Choices: []devinChunkChoice{{Delta: d, FinishReason: finish}}, Usage: usage})
+				if e != nil {
+					return e
 				}
-				output.WriteString(params.Update.Content.Text)
+				_, e = writer.Write(append(append([]byte("data: "), b...), '\n', '\n'))
+				return e
 			}
-		case msg.ID == 3 && len(msg.Result) > 0 && state == 2:
-			var result struct {
-				StopReason string `json:"stopReason"`
+			result, e := s.prompt(prompt, func(d Delta) error { return emit(d, nil, nil) })
+			if e == nil {
+				e = emit(Delta{}, &result.finish, &result.usage)
 			}
-			if json.Unmarshal(msg.Result, &result) != nil || result.StopReason == "cancelled" {
-				err = errors.New("Devin CLI turn did not finish")
-				break
+			if e == nil {
+				_, e = io.WriteString(writer, "data: [DONE]\n\n")
 			}
-			state = 3
-		}
-		if state == 3 {
-			break
-		}
+			if e != nil {
+				e = devinSafeError(e)
+			}
+			_ = writer.CloseWithError(e)
+		}()
+		return &entities.UpstreamResult{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &devinStreamBody{PipeReader: reader, cancel: s.cancel}}, nil
 	}
-	if err == nil {
-		err = scanner.Err()
-	}
-	if state != 3 && err == nil {
-		err = errors.New("Devin CLI did not complete the turn")
-	}
-	if ctx.Err() != nil {
-		err = errors.New("Devin CLI request timed out or was canceled")
-	}
-	stdin.Close()
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-	_ = cmd.Wait()
+	defer s.Close()
+	result, err := s.prompt(prompt, nil)
 	if err != nil {
-		return "", err
+		return devinReject(err), nil
 	}
-	return output.String(), nil
+	body, _ := json.Marshal(Response{ID: id, Object: "chat.completion", Created: created, Model: model, Choices: []Choice{{Message: &result.message, FinishReason: result.finish}}, Usage: result.usage})
+	return &entities.UpstreamResult{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, nil
 }
-func devinPrompt(messages []Message) string {
-	var lines []string
-	for _, m := range messages {
-		if text := rawText(m.Content); text != "" {
-			lines = append(lines, "["+m.Role+"]\n"+text)
-		}
+
+type devinStreamBody struct {
+	*io.PipeReader
+	cancel context.CancelFunc
+}
+
+func (b *devinStreamBody) Close() error { b.cancel(); return b.PipeReader.Close() }
+
+type devinChunk struct {
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Choices []devinChunkChoice `json:"choices"`
+	Usage   *Usage             `json:"usage,omitempty"`
+}
+type devinChunkChoice struct {
+	Index        int     `json:"index"`
+	Delta        Delta   `json:"delta"`
+	FinishReason *string `json:"finish_reason"`
+}
+type devinTurn struct {
+	message ResponseMessage
+	usage   Usage
+	finish  string
+}
+
+type devinTurnUsage struct {
+	Input      int64 `json:"inputTokens"`
+	Output     int64 `json:"outputTokens"`
+	Thought    int64 `json:"thoughtTokens"`
+	CacheRead  int64 `json:"cachedReadTokens"`
+	CacheWrite int64 `json:"cachedWriteTokens"`
+}
+
+func (s *devinSession) prompt(text string, emit func(Delta) error) (devinTurn, error) {
+	result := devinTurn{message: ResponseMessage{Role: "assistant"}}
+	var content, thought strings.Builder
+	var done struct {
+		StopReason string          `json:"stopReason"`
+		Usage      *devinTurnUsage `json:"usage"`
 	}
-	return strings.Join(lines, "\n\n")
+	err := s.call("session/prompt", devinPromptParams{SessionID: s.sessionID, Prompt: []devinContent{{Type: "text", Text: text}}}, &done, func(u devinUpdate) error {
+		switch u.Update.Kind {
+		case "agent_message_chunk", "agent_thought_chunk":
+			if u.Update.Content.Type != "text" {
+				return devinFailure(502, "unsupported Devin content type")
+			}
+			t := u.Update.Content.Text
+			if content.Len()+thought.Len()+len(t) > 4<<20 {
+				return devinFailure(502, "Devin output exceeds limit")
+			}
+			delta := Delta{Role: "assistant"}
+			if u.Update.Kind == "agent_message_chunk" {
+				content.WriteString(t)
+				delta.Content = t
+			} else {
+				thought.WriteString(t)
+				delta.ReasoningContent = t
+			}
+			if emit != nil {
+				return emit(delta)
+			}
+		case "tool_call", "tool_call_update":
+			return devinFailure(502, "unexpected tool call in Devin no-tool session")
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	switch done.StopReason {
+	case "end_turn":
+		result.finish = "stop"
+	case "max_tokens", "max_turn_requests":
+		result.finish = "length"
+	case "refusal":
+		result.finish = "content_filter"
+	case "cancelled":
+		return result, devinFailure(502, "Devin turn canceled")
+	default:
+		return result, devinFailure(502, "Devin omitted a valid stop reason")
+	}
+	result.message.Content = content.String()
+	result.message.ReasoningContent = thought.String()
+	// Each subprocess has one prompt turn, so optional ACP session token totals
+	// equal this turn. Context-window 'used' notifications are NOT token usage.
+	// Keep cache components separate; do not bill thought tokens a second time.
+	result.usage = Usage{PromptTokens: EstimateTextTokens(text), CompletionTokens: EstimateTextTokens(content.String() + thought.String())}
+	if done.Usage != nil {
+		u := done.Usage
+		if u.Input < 0 || u.Output < 0 || u.CacheRead < 0 || u.CacheWrite < 0 || u.Thought < 0 {
+			return result, devinFailure(502, "invalid Devin token usage")
+		}
+		result.usage = Usage{PromptTokens: u.Input, CompletionTokens: u.Output, CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite}
+	}
+	return result, nil
+}
+func devinPrompt(req ChatRequest) (string, error) {
+	if len(req.Tools) > 0 || len(req.ToolChoice) > 0 && string(req.ToolChoice) != "null" && string(req.ToolChoice) != "\"none\"" {
+		return "", devinFailure(400, "Devin summarizer does not support tools")
+	}
+	if req.N != nil && *req.N != 1 {
+		return "", devinFailure(400, "Devin supports one choice")
+	}
+	if req.Reasoning != nil && req.Reasoning.Summary != "" {
+		return "", devinFailure(400, "Devin does not support reasoning summary selection")
+	}
+	var lines []string
+	for _, m := range req.Messages {
+		if m.Role != "user" && m.Role != "assistant" && m.Role != "system" && m.Role != "developer" || len(m.ToolCalls) > 0 || m.ToolCallID != "" {
+			return "", devinFailure(400, "Devin summarizer accepts text conversation only")
+		}
+		var text string
+		if len(m.Content) > 0 && string(m.Content) != "null" && json.Unmarshal(m.Content, &text) != nil {
+			var blocks []devinContent
+			if json.Unmarshal(m.Content, &blocks) != nil {
+				return "", devinFailure(400, "invalid Devin text content")
+			}
+			for _, b := range blocks {
+				if b.Type != "text" {
+					return "", devinFailure(400, "Devin summarizer accepts text only")
+				}
+				text += b.Text
+			}
+		}
+		lines = append(lines, "["+m.Role+"]\n"+text)
+	}
+	if len(lines) == 0 {
+		return "", devinFailure(400, "messages are required")
+	}
+	text := strings.Join(lines, "\n\n")
+	if len(text) > devinMaxFrame/2 {
+		return "", devinFailure(400, "Devin prompt exceeds limit")
+	}
+	return text, nil
 }

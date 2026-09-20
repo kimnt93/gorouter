@@ -340,6 +340,9 @@ func (a *DevinDesktopAdapter) Probe(ctx context.Context, cr *entities.Credential
 	_, status, err := a.authenticate(ctx, devinBase(cr.BaseURL), cr.APIKey, session)
 	return status, err
 }
-func (a *DevinDesktopAdapter) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+func (a *DevinDesktopAdapter) DiscoverModels(_ context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	if cr == nil || strings.HasPrefix(cr.APIKey, "apk_user_") {
+		return nil, errors.New("apk_user keys belong to Devin CLI, not Devin Desktop")
+	}
 	return modelsFor("devin-desktop", "swe-1-7", "swe-1-7-lightning"), nil
 }

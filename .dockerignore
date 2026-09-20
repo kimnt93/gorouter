@@ -2,3 +2,6 @@ node_modules
 .git
 bin
 *.tsbuildinfo
+.env
+.env.*
+!.env.example

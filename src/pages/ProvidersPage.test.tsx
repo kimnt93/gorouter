@@ -188,5 +188,5 @@ test('shows Devin CLI separately with the Windsurf avatar and apk_user hint', as
   expect(screen.getByLabelText('Devin CLI key (apk_user; requires installed CLI)')).toBeInTheDocument()
   expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument()
   expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
-  expect(screen.getByText(/router image does not bundle the official binary/)).toBeInTheDocument()
+  expect(screen.getByText(/devin-cli Docker image target/)).toBeInTheDocument()
 })
