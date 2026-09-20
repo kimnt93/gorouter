@@ -167,7 +167,7 @@ export interface Credential {
 }
 
 export interface ConnectivityResult { ok: boolean; status?: number; latency_ms: number }
-export interface ProviderModel { id: string; public_id: string; name?: string; owned_by?: string; context_length?: number; default?: boolean }
+export interface ProviderModel { id: string; public_id: string; name?: string; owned_by?: string; context_length?: number; default?: boolean; default_reasoning_level?: string; supported_reasoning_levels?: { effort: string; description?: string }[] }
 export interface ProviderModelsResponse { object: 'list'; provider: string; default_model?: string; data: ProviderModel[] }
 export interface OAuthStartResponse { flow_id: string; flow_type: string; authorize_url: string; verification_uri?: string; verification_uri_complete?: string; user_code?: string; interval?: number; expires_in?: number; instructions: string }
 export interface OAuthCompleteRequest { flow_id: string; callback?: string; name?: string }

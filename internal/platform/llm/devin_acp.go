@@ -6,13 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 const devinMaxFrame = 4 << 20
@@ -23,6 +20,8 @@ type devinError struct {
 	message string
 }
 
+func (e *devinError) ProviderStatus() int           { return e.status }
+func (e *devinError) SafeMessage() string           { return e.message }
 func (e *devinError) Error() string                 { return e.message }
 func devinFailure(status int, message string) error { return &devinError{status, message} }
 
@@ -131,60 +130,16 @@ type devinSession struct {
 	options   []devinOption
 }
 
-func (a *DevinCLIAdapter) open(parent context.Context, key string) (*devinSession, error) {
-	key = strings.TrimSpace(key)
-	if (!strings.HasPrefix(key, "apk_user_") && !strings.HasPrefix(key, "cog_")) || key == "apk_user_" || key == "cog_" {
-		return nil, devinFailure(400, "Devin CLI requires an apk_user_ or cog_ key")
+func (work *devinWorkspace) open(model string) (*devinSession, error) {
+	args := []string{"acp"}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
-	ctx, cancel := context.WithTimeout(parent, 3*time.Minute)
-	a.once.Do(func() {
-		limit := a.MaxProcesses
-		if limit <= 0 {
-			limit = 4
-		}
-		a.slots = make(chan struct{}, limit)
-	})
-	select {
-	case a.slots <- struct{}{}:
-	case <-ctx.Done():
-		cancel()
-		return nil, devinFailure(503, "Devin CLI capacity unavailable")
-	}
-	release := func() { cancel(); <-a.slots }
-	binary := a.Binary
-	if binary == "" {
-		binary = "devin"
-	}
-	executable, err := exec.LookPath(binary)
-	if err != nil {
-		release()
-		return nil, devinFailure(503, "Devin CLI is missing; update to the standard GoRouter Docker image or install devin for a standalone binary deployment")
-	}
-	executable, err = filepath.Abs(executable)
-	if err != nil {
-		release()
-		return nil, devinFailure(503, "Devin CLI executable unavailable")
-	}
-	root := a.WorkDir
-	if root == "" {
-		root = os.TempDir()
-	}
-	if !filepath.IsAbs(root) {
-		release()
-		return nil, devinFailure(503, "Devin CLI temporary directory must be absolute")
-	}
-	home, err := os.MkdirTemp(root, "gorouter-devin-*")
-	if err != nil {
-		release()
-		return nil, devinFailure(503, "Devin CLI temporary directory unavailable")
-	}
-	clean := func() { _ = os.RemoveAll(home); release() }
-	cmd := exec.CommandContext(ctx, executable, "acp", "--agent-type", "summarizer")
-	cmd.Dir = home
-	// No inherited config, login, proxy credential, plugin, or system prompt.
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + home, "XDG_CONFIG_HOME=" + home + "/.config", "XDG_DATA_HOME=" + home + "/.local/share", "XDG_CACHE_HOME=" + home + "/.cache", "TMPDIR=" + home, "WINDSURF_API_KEY=" + key, "DO_NOT_TRACK=1"}
-	configureDevinProcess(cmd)
-	cmd.WaitDelay = time.Second
+	cmd := work.command(args...)
+	clean := work.Close
+	ctx := work.ctx
+	home := work.home
+	cancel := work.cancel
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		clean()
@@ -314,11 +269,13 @@ func (s *devinSession) call(method string, params any, result any, visit func(de
 func classifyDevinError(e *devinRPCError) error {
 	text := strings.ToLower(e.Message)
 	switch {
-	case e.Code == -32000 || strings.Contains(text, "authentication required") || strings.Contains(text, "invalid api key") || strings.Contains(text, "not logged in"):
+	case strings.Contains(text, "authentication required") || strings.Contains(text, "invalid api key") || strings.Contains(text, "invalid service key") || strings.Contains(text, "unauthorized") || strings.Contains(text, "not logged in"):
 		return devinFailure(401, "Devin CLI authentication failed")
+	case strings.Contains(text, "permission denied") || strings.Contains(text, "forbidden"):
+		return devinFailure(403, "Devin credential lacks permission for this operation")
 	case strings.Contains(text, "rate limit") || strings.Contains(text, "quota exceeded"):
 		return devinFailure(429, "Devin CLI quota or rate limit reached")
-	case e.Code == -32602:
+	case e.Code == -32602 || e.Code == -32002:
 		return devinFailure(400, "Devin CLI rejected request parameters")
 	default:
 		return devinFailure(502, "Devin CLI request failed")

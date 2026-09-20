@@ -9,6 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/kimnt93/gorouter/pkg/credential"
+	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
 func TestRedisCatalogIsCredentialScopedExpiresAndDeletes(t *testing.T) {
@@ -39,5 +40,33 @@ func TestRedisCatalogIsCredentialScopedExpiresAndDeletes(t *testing.T) {
 	}
 	if _, ok, err := cache.Get(ctx, "one"); err != nil || ok {
 		t.Fatalf("deleted cache: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRedisCatalogVersionAndMultiNodeIsolation(t *testing.T) {
+	server := miniredis.RunT(t)
+	ctx := context.Background()
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer client.Close()
+	one, two := NewRedis(client), NewRedis(client)
+	_ = client.Set(ctx, "gorouter:model-discovery:cred", `[{"id":"adaptive"}]`, time.Minute).Err()
+	if _, ok, err := one.Get(ctx, "cred"); err != nil || ok {
+		t.Fatal("reused old placeholder catalog")
+	}
+	if err := one.Set(ctx, "cred", []credential.ProviderModel{{ID: "family", SupportedReasoningLevels: []entities.ModelReasoningLevel{{Effort: "high"}}}}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	m, ok, err := two.Get(ctx, "cred")
+	if err != nil || !ok || len(m) != 1 || len(m[0].SupportedReasoningLevels) != 1 {
+		t.Fatal("cross-node family metadata lost")
+	}
+	if _, ok, err := two.Get(ctx, "other"); err != nil || ok {
+		t.Fatal("cross-credential metadata leak")
+	}
+	if err := two.Delete(ctx, "cred"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := one.Get(ctx, "cred"); err != nil || ok {
+		t.Fatal("cross-node invalidation failed")
 	}
 }

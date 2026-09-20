@@ -17,7 +17,8 @@ const (
 	ProtocolKimi        = "kimi"
 	ProtocolKiro        = "kiro"
 	ProtocolAntigravity = "antigravity"
-	ProtocolDevinCloud  = "devin-cloud"
+	ProtocolDevinCLI    = "devin-cli"
+	ProtocolRetired     = "retired"
 
 	// ClaudeCodeClientVersion must meet the minimum version Anthropic requires
 	// for the subscription models exposed by its model catalog.
@@ -54,9 +55,7 @@ var definitions = []Definition{
 	{ID: "kiro", Name: "Kiro", Description: "Connect Kiro through AWS Builder ID device authorization.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "kiro", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
 	{ID: "amazon-q", Name: "Amazon Q Developer", Description: "Connect Amazon Q Developer through AWS Builder ID.", Auth: AuthOAuth, Protocol: ProtocolKiro, DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com", ModelPrefix: "amazonq", OAuthSupported: true, OAuthRefreshRequired: true, QuotaSupported: true},
 	{ID: "antigravity", Name: "Google Antigravity", Description: "Connect Google Cloud Code Assist using browser OAuth.", Auth: AuthOAuth, Protocol: ProtocolAntigravity, DefaultBaseURL: "https://daily-cloudcode-pa.googleapis.com", ModelPrefix: "ag", OAuthSupported: true, OAuthRefreshRequired: true},
-	{ID: "devin", Name: "Devin Cloud", Description: "Connect Cognition Devin Cloud with a cog_ personal access token or service-user API key. Cloud sessions do not expose selectable foundation models.", Auth: AuthAPIKey, Protocol: ProtocolDevinCloud, DefaultBaseURL: "https://api.devin.ai", ModelPrefix: "devin"},
-	{ID: "devin-cli", Name: "Devin CLI", Description: "Connect a Devin CLI account with an apk_user_ or cog_ key. The standard GoRouter Docker image includes the required CLI.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, ModelPrefix: "dv"},
-	{ID: "devin-desktop", Name: "Windsurf / Devin Desktop", Description: "Import a Devin Desktop (Windsurf) key; not an OAuth or CLI connection.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://server.codeium.com", ModelPrefix: "dd"},
+	{ID: "devin-cli", Name: "Devin", Description: "Live model families and reasoning levels through the bundled Devin CLI. Use an apk_user_ key or cog_ personal access token.", Auth: AuthAPIKey, Protocol: ProtocolDevinCLI, ModelPrefix: "dv"},
 	{ID: "openai", Name: "OpenAI", Description: "OpenAI API models and compatible chat completions.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://api.openai.com/v1", ModelPrefix: "openai"},
 	{ID: "anthropic", Name: "Anthropic", Description: "Claude models using an Anthropic API key.", Auth: AuthAPIKey, Protocol: ProtocolAnthropic, DefaultBaseURL: "https://api.anthropic.com", ModelPrefix: "anthropic"},
 	{ID: "gemini", Name: "Google Gemini", Description: "Gemini through Google's OpenAI-compatible API.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", ModelPrefix: "gemini"},
@@ -71,6 +70,25 @@ var definitions = []Definition{
 	{ID: "openai-compatible", Name: "OpenAI-compatible", Description: "A custom OpenAI-compatible endpoint.", Auth: AuthAPIKey, Protocol: ProtocolOpenAI, ModelPrefix: "custom", CustomBaseURL: true},
 }
 
+// Retired definitions preserve namespaces for existing records/history. They are
+// not connectable or routable; never reinterpret a Desktop/cloud credential.
+var retiredDefinitions = []Definition{
+	{ID: "devin", Name: "Devin Cloud", Description: "Retired connection. Reconnect through Devin.", Auth: AuthAPIKey, Protocol: ProtocolRetired, DefaultBaseURL: "https://api.devin.ai", ModelPrefix: "devin"},
+	{ID: "devin-desktop", Name: "Windsurf / Devin Desktop", Description: "Retired connection. Reconnect through Devin.", Auth: AuthAPIKey, Protocol: ProtocolRetired, DefaultBaseURL: "https://server.codeium.com", ModelPrefix: "dd"},
+}
+
+func IsRetired(id string) bool {
+	for _, d := range retiredDefinitions {
+		if d.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// StorageCatalog includes historical IDs accepted by durable repositories.
+func StorageCatalog() []Definition { return append(Catalog(), retiredDefinitions...) }
+
 func Catalog() []Definition {
 	out := make([]Definition, len(definitions))
 	copy(out, definitions)
@@ -79,9 +97,11 @@ func Catalog() []Definition {
 
 func Lookup(id string) (Definition, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	for _, definition := range definitions {
-		if definition.ID == id {
-			return definition, true
+	for _, catalog := range [][]Definition{definitions, retiredDefinitions} {
+		for _, definition := range catalog {
+			if definition.ID == id {
+				return definition, true
+			}
 		}
 	}
 	return Definition{}, false

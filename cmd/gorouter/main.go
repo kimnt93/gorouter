@@ -293,8 +293,7 @@ func main() {
 	registerRefresh("amazon-q", amazonQ.RefreshToken, &amazonQ.Refresh)
 	registerRefresh("antigravity", antigravity.RefreshToken, &antigravity.Refresh)
 	oauthRefresh.Start(ctx, 5*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
-	devinCloud := &llm.DevinCloudAdapter{HTTP: client}
-	devinDesktop := &llm.DevinDesktopAdapter{HTTP: client}
+	devinRetired := &llm.RetiredDevinAdapter{}
 	devinCLI := &llm.DevinCLIAdapter{}
 	opencodeGo := &llm.OpenCodeGoAdapter{HTTP: client}
 	opencodeZen := &llm.OpenCodeZenAdapter{HTTP: client}
@@ -303,7 +302,7 @@ func main() {
 		"github-copilot": copilot,
 		"grok-build":     grokBuild, "xai-oauth": xaiOAuth, "cline": cline, "clinepass": clinePass, "kilo-code": kiloCode,
 		"kimi-code": kimiCode, "cursor": cursor, "kiro": kiro, "amazon-q": amazonQ, "antigravity": antigravity,
-		"devin": devinCloud, "devin-desktop": devinDesktop, "devin-cli": devinCLI,
+		"devin": devinRetired, "devin-desktop": devinRetired, "devin-cli": devinCLI,
 		"opencode-go":  opencodeGo,
 		"opencode-zen": opencodeZen,
 	}

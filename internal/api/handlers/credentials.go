@@ -85,7 +85,7 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 // @Param id path string true "Credential ID"
 // @Param request body ImportModelsRequest true "Models to import"
 // @Success 200 {object} ImportModelsResponse
-// @Failure 400,401,403,404,500,502 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,404,429,500,502,503,504 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/models/import [post]
 func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	if !h.authorize(c) {
@@ -105,6 +105,13 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 	_, discoverer, _ := h.adapter(runtime.Provider)
 	discovered, err := h.Credentials.RefreshDiscoveredModels(c.Context(), runtime.ID, discoverer)
 	if err != nil {
+		var safe interface {
+			ProviderStatus() int
+			SafeMessage() string
+		}
+		if errors.As(err, &safe) {
+			return responseapi.For(c).Error(safe.ProviderStatus(), safe.SafeMessage(), "upstream_error", "").Send()
+		}
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
 	}
 	byUpstream := make(map[string]credential.ProviderModel, len(discovered))
@@ -183,7 +190,7 @@ func (h *CredentialConnectivity) ImportModels(c fiber.Ctx) error {
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
 // @Success 200 {object} RefreshModelMetadataResponse
-// @Failure 401,403,404,500,502 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,404,429,500,502,503,504 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/models/refresh [post]
 func (h *CredentialConnectivity) RefreshModelMetadata(c fiber.Ctx) error {
 	if sess := SessionFrom(c); sess == nil || !sess.IsMaster() {
@@ -202,6 +209,13 @@ func (h *CredentialConnectivity) RefreshModelMetadata(c fiber.Ctx) error {
 	_, discoverer, _ := h.adapter(runtime.Provider)
 	discovered, err := h.Credentials.DiscoverModels(c.Context(), runtime.ID, discoverer)
 	if err != nil {
+		var safe interface {
+			ProviderStatus() int
+			SafeMessage() string
+		}
+		if errors.As(err, &safe) {
+			return responseapi.For(c).Error(safe.ProviderStatus(), safe.SafeMessage(), "upstream_error", "").Send()
+		}
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
 	}
 	byID := make(map[string]credential.ProviderModel, len(discovered))
@@ -340,7 +354,7 @@ func (h *CredentialConnectivity) Test(c fiber.Ctx) error {
 // @Security BearerAuth
 // @Param id path string true "Credential ID"
 // @Success 200 {object} ProviderModelsResponse
-// @Failure 401,403,404,500,502 {object} responseapi.ErrorResponse
+// @Failure 400,401,403,404,429,500,502,503,504 {object} responseapi.ErrorResponse
 // @Router /admin/credentials/{id}/models [get]
 func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 	if !h.authorize(c) {
@@ -356,6 +370,13 @@ func (h *CredentialConnectivity) Models(c fiber.Ctx) error {
 	_, discoverer, _ := h.adapter(runtime.Provider)
 	models, err := h.Credentials.RefreshDiscoveredModels(c.Context(), c.Params("id"), discoverer)
 	if err != nil {
+		var safe interface {
+			ProviderStatus() int
+			SafeMessage() string
+		}
+		if errors.As(err, &safe) {
+			return responseapi.For(c).Error(safe.ProviderStatus(), safe.SafeMessage(), "upstream_error", "").Send()
+		}
 		return responseapi.For(c).Error(fiber.StatusBadGateway, "provider model discovery failed", "upstream_error", "").Send()
 	}
 	if h.Health != nil {

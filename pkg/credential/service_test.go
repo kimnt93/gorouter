@@ -106,7 +106,7 @@ func TestValidateCredential(t *testing.T) {
 	if err := validate(valid); err != nil {
 		t.Fatalf("valid credential rejected: %v", err)
 	}
-	for _, valid := range []CreateInput{{Name: "Devin Cloud", Provider: "devin", Kind: entities.KindAPIKey, APIKey: "cog_synthetic"}, {Name: "Devin CLI PAT", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "cog_synthetic"}} {
+	for _, valid := range []CreateInput{{Name: "Devin CLI PAT", Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "cog_synthetic"}} {
 		if err := validate(valid); err != nil {
 			t.Fatalf("valid Devin credential rejected: %v", err)
 		}

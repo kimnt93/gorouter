@@ -30,7 +30,7 @@ func TestLatestPostgresCredentialProviderConstraintMatchesCatalog(t *testing.T) 
 		}
 		got[value[1]] = true
 	}
-	for _, definition := range provider.Catalog() {
+	for _, definition := range provider.StorageCatalog() {
 		if !got[definition.ID] {
 			t.Errorf("database rejects catalog provider %q", definition.ID)
 		}

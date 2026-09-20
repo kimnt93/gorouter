@@ -13,7 +13,7 @@ func TestCatalogHasStableUniqueDefinitions(t *testing.T) {
 		}
 		seen[definition.ID] = true
 	}
-	for _, required := range []string{"claude", "codex", "openai", "anthropic", "gemini", "groq", "openrouter", "opencode-zen", "antigravity", "devin", "devin-cli"} {
+	for _, required := range []string{"claude", "codex", "openai", "anthropic", "gemini", "groq", "openrouter", "opencode-zen", "antigravity", "devin-cli"} {
 		if !seen[required] {
 			t.Fatalf("missing provider %q", required)
 		}
@@ -44,5 +44,24 @@ func TestOrganizationModelIDUsesStableSlugAndProviderPrefix(t *testing.T) {
 func TestKimiUsesAnthropicWireTranslation(t *testing.T) {
 	if !UsesAnthropicWire("kimi-code") || !UsesAnthropicWire("claude") || UsesAnthropicWire("codex") {
 		t.Fatal("Anthropic wire protocol classification is incorrect")
+	}
+}
+
+func TestDevinCatalogRetiresCloudAndDesktopWithoutLosingHistory(t *testing.T) {
+	for _, d := range Catalog() {
+		if IsRetired(d.ID) {
+			t.Fatal("retired provider is connectable")
+		}
+	}
+	for _, id := range []string{"devin", "devin-desktop"} {
+		if !IsRetired(id) {
+			t.Fatal("missing retirement")
+		}
+		if _, ok := Lookup(id); !ok {
+			t.Fatal("lost legacy namespace")
+		}
+	}
+	if ProtocolFor("devin-cli") == ProtocolOpenAI {
+		t.Fatal("Devin must never fall back to generic HTTP")
 	}
 }

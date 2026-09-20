@@ -269,3 +269,35 @@ func TestCredentialChatPreservesSafeUpstreamClientStatus(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
 	}
 }
+
+type safeDiscoveryError struct{ status int }
+
+func (e safeDiscoveryError) Error() string       { return "SENSITIVE diagnostic" }
+func (e safeDiscoveryError) ProviderStatus() int { return e.status }
+func (e safeDiscoveryError) SafeMessage() string { return "Safe Devin discovery failure" }
+
+type safeDiscoveryProvider struct{ status int }
+
+func (p safeDiscoveryProvider) Probe(context.Context, *entities.CredentialRuntime) (int, error) {
+	return p.status, nil
+}
+func (p safeDiscoveryProvider) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	return nil, safeDiscoveryError{p.status}
+}
+func TestCredentialDiscoveryPreservesSafeProviderStatus(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 429, 502, 503, 504} {
+		repo := &connectivityRouteCredentialRepo{credentials: []entities.Credential{{ID: "cred", Provider: "devin-cli"}}, runtimes: map[string]*entities.CredentialRuntime{"cred": {ID: "cred", Provider: "devin-cli"}}}
+		app := routes.New(routes.Dependencies{Auth: auth.NewService("master-secret", "session-secret", nil), Credentials: credential.NewService(repo, oauthRouteBox{}), Providers: map[string]credential.ConnectivityProber{"devin-cli": safeDiscoveryProvider{status}}})
+		req, _ := http.NewRequest("GET", "/admin/credentials/cred/models", nil)
+		req.Header.Set("Authorization", "Bearer master-secret")
+		response, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != status || strings.Contains(string(body), "SENSITIVE") || !strings.Contains(string(body), "Safe Devin discovery failure") {
+			t.Fatalf("status=%d want=%d", response.StatusCode, status)
+		}
+	}
+}

@@ -1,5 +1,7 @@
 # Devin ACP fix verification — 2026-09-20
 
+> Historical report, superseded by [the live family-catalog replacement](devin-connections.md). The earlier summarizer/Adaptive and environment-only discovery assumptions were incorrect.
+
 Source change after `cd46353`. No deployment or paid inference is claimed.
 
 ## Single-image packaging correction — 2026-09-20

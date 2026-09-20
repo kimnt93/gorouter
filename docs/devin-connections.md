@@ -1,125 +1,129 @@
-# Devin connections
+# Devin: live models and separate reasoning levels
 
-These are separate products and credential types:
+GoRouter now has **one connectable Devin provider**, `devin-cli` (dashboard name
+**Devin**, public prefix `dv`). The standard all-provider Docker image includes
+the checksum-pinned official CLI, currently **3000.10.31**. No sidecar, host login,
+shared HOME, or provider-specific image is needed.
 
-| Connection | Key | Transport and discovery |
-|---|---|---|
-| Devin CLI (`dv/…`) | `apk_user_…` or current `cog_…` PAT | Official `devin acp --agent-type summarizer`; authenticated `session/new` configuration selectors, not `models list`. |
-| Windsurf / Devin Desktop (`dd/…`) | Imported Desktop key | Codeium Connect-protobuf / `GetUserJwt`. Its small static fallback catalog is **not account entitlement discovery**. Do not put a CLI key here. |
-| Devin Cloud (`devin/devin`) | PAT/service-user token (`cog_…`) | Authenticated with documented `GET api.devin.ai/v3/self`. Discovery returns one agent-session capability because the API does not expose selectable foundation models. |
+## Connect and discover
 
-The Devin Cloud connection is for authentication, honest capability discovery, and future agent-session integration; `/v1/chat/completions` is intentionally unsupported because mapping an asynchronous cloud agent session to a synchronous model response would be misleading.
+1. Choose **Providers → Devin**.
+2. Add a `cog_…` **personal access token** or a legacy `apk_user_…` key with CLI
+   access. A Cloud service-user key or old Desktop/Windsurf key is not equivalent
+   to a human CLI subscription. Invalid/revoked/unauthorized keys cannot be fixed
+   by inventing a static model catalog.
+3. Open **Models** to refresh/import the account's live catalog.
+4. Choose a model name, then pass reasoning separately:
 
-The documented Desktop `server.codeium.com/api/v1` service-key API is enterprise
-**analytics/configuration**, not a chat/model catalog API. The previous CLI
-implementation also incorrectly used `"protocolVersion":"0.3"` and
-`devin models list`, which ignores `WINDSURF_API_KEY` and fails in a clean HOME.
-The adapter now negotiates **ACP version 1** and uses the same credential-scoped
-session setup for health, catalog discovery and inference.
-
-## One standard image for all providers
-
-The standard GoRouter Docker image includes the checksum-verified official Devin
-CLI alongside GoRouter's other provider adapters. Add **Providers → Devin CLI**
-and enter your `apk_user_…` or `cog_…` key, just like any other provider. There is no
-provider-specific image, extra container, build target, Compose overlay, or
-runtime installer to select.
-
-Normal builds and releases include it automatically:
-
-```sh
-docker build -t gorouter:local .
-# Diagnostic only; connecting through the dashboard needs no CLI commands.
-docker run --rm --entrypoint devin gorouter:local --version
+```json
+{
+  "model": "dv/gpt-5.6-luna",
+  "reasoning": { "effort": "low" },
+  "messages": [{ "role": "user", "content": "Hello" }]
+}
 ```
 
-Use your existing `docker-compose.local.yml`, `docker-compose.postgres.yml`,
-or `docker-compose.clickhouse.yml` unchanged. Exactly one database backend is
-selected for each deployment. Keep the same project name, environment, volumes,
-ports and network when upgrading. The release workflow publishes the usual
-`<release>` and `latest` tags at `ghcr.io/kimnt93/gorouter`, with all provider
-runtime dependencies in the same image on amd64 and arm64.
+`reasoning_effort` is also accepted by the Devin adapter for chat-completions.
+Conflicting values return 400. Supported levels are returned in
+`supported_reasoning_levels` by credential discovery
+and `/v1/models` after import/sync; `default_reasoning_level` gives the default.
+Unsupported model/effort pairs are rejected before inference. No low/medium/high
+fallback is fabricated for models that do not report reasoning variants.
 
-**A Git push does not publish a new image or modify an already running
-container.** Existing installations built before this packaging change must
-upgrade once to a release containing it (or rebuild the standard Dockerfile).
-Remove old `--target` options and the former `docker-compose.devin-cli.yml`
-overlay; do not look for a `-devin-cli` image suffix. A custom prebuilt image that
-copies only the Go binary is not the standard distribution: it must also
-include `/usr/local/bin/devin`. Standalone non-Docker Go binaries still need
-the official CLI installed on their PATH.
+## What changed and why it works
 
-`scripts/install-devin-cli.sh` fetches official **3000.10.31** Linux bundles at
-image-build time from `static.devin.ai` and checks pinned SHA-256 values for
-amd64/arm64. Upgrading its version/checksums is a reviewed build change, not a
-runtime download. The final image remains non-root; no Docker socket,
-privileged container, host HOME or repository mount is required. CLI use
-remains subject to the provider's license and subscription terms.
+The earlier implementation incorrectly assumed the summarizer's ACP
+`configOptions` would contain the account model list. The **summarizer is a
+special-purpose internal agent**: it omitted the model selector and accepted
+session creation even when a nonexistent `--model` was supplied. Labeling its
+unspecified model as Adaptive was not a verified model-selection contract.
 
-All replicas use the same standard image. Existing Redis catalog
-caches remain credential-scoped; no CLI HOME/auth state is shared among nodes
-or accounts. At most four local subprocesses run per adapter instance, with
-bounded queue wait, frame size, output size and request lifetime. Each call
-gets a fresh private HOME/XDG/cwd; cancellation kills the process group on
-Unix, waits, releases capacity and removes the directory. This is credential
-isolation, **not an OS security sandbox for the CLI**: run only a trusted
-provider binary in the unprivileged container.
+The replacement:
 
-## Models and reasoning without a GoRouter release
+- Creates a private `0700` temporary HOME/XDG directory and writes the encrypted
+  repository credential into a short-lived `0600` `credentials.toml`, in the
+  format the official CLI expects. `models list` does not use the environment
+  variable alone; a browser login is **not** required for this API-token path.
+- Runs `devin models list --format json`, consuming typed `families` and
+  `variants`. This is live provider metadata, not OmniRoute's static snapshot.
+- Publishes **one ID per family slug** and separates the provider-reported
+  reasoning labels. Native opaque variant UIDs stay internal; GoRouter never
+  constructs them from a family name or guesses that dots and hyphens match.
+- Excludes fast/priority variants and the separate Fast family. Fusion lead /
+  sidekick combinations are omitted because they are not a single model with
+  a reasoning level. For duplicate context-window variants at the same effort,
+  the smaller reported context is selected deterministically.
+- Starts normal ACP with the exact selected UID using `--model`, then requires
+  the model selector to confirm it before sending a prompt. There is no silent
+  Adaptive or summarizer fallback.
 
-1. Add an `apk_user_…` key or current `cog_…` PAT to **Providers → Devin CLI**. Existing Desktop credentials are
-   not silently reinterpreted; create a new CLI connection, import its models,
-   then remove obsolete `dd/…` routes if no longer needed.
-2. Health authenticates via `session/new` without sending chat or consuming an
-   inference turn. Missing binary is 503, authentication rejection is 401.
-3. Discovery reads the live ACP model selector, selecting each model to read
-   **that model's** current reasoning selector. Current `cog_…` PAT sessions can
-   authenticate and chat while omitting that selector; in that documented
-   provider-managed case GoRouter exposes only `dv/adaptive`, without invented
-   reasoning levels. No hardcoded family names,
-   fabricated fallback efforts, marketing-page scraping or separate cached
-   CLI login is used. Failed/unsupported discovery returns an error instead of
-   inventing a successful catalog.
-4. Existing model-catalog synchronization periodically refreshes these
-   snapshots; use the model refresh action to force a check. Newly exposed
-   models/options do not require a GoRouter rebuild **if the installed CLI
-   reports them**. Provider CLI protocol changes may require a CLI or adapter
-   update. Changes are subject to the existing cache/sync intervals.
-5. Requests select the advertised upstream model and `reasoning.effort` via
-   `session/set_config_option`. Reasoning stays request metadata, not an
-   invented suffix on a public model ID. Provider-native variant IDs remain
-   unchanged. Unsupported selections are rejected before sending a prompt.
+Families and reasoning metadata can change without a GoRouter code release as
+long as the installed CLI continues to support the wire format. A CLI protocol
+change may still require a reviewed runtime update. Listing proves catalog
+availability, **not unlimited quota or guaranteed inference entitlement**.
 
-## Scope and accounting
+## Safety, distributed operation and limitations
 
-The adapter is text-only and uses Devin's **no-tool summarizer**. It does not
-run agent workflows, execute requested tools, or grant filesystem/terminal/MCP
-permissions. Tools, tool history, images and unsupported reasoning-summary
-controls return 400. Streaming emits text/thought deltas as they arrive, not
-at the end of the turn. Cancelled, truncated or malformed streams do not emit
-a successful `[DONE]`. Clients must treat an interrupted stream as a failure.
+- Tools are disabled (`disabled_tools: ["*"]`) and denied
+  (`permissions.deny: ["*"]`); subagents, imported config and CLI auto-updates are
+  disabled. No MCP servers, filesystem/terminal client capabilities, hooks or
+  host configuration are supplied. Agent-originated client requests are denied;
+  an unexpected tool update fails the turn rather than executing it in GoRouter.
+- This relies on the trusted, pinned CLI honoring its configuration; a private
+  HOME is **not an OS sandbox**. Run the standard non-root container. GoRouter
+  does not implement autonomous coding workflows through this provider.
+- Four local subprocess slots, bounded output/diagnostics, request deadlines,
+  Unix process-group cancellation and directory cleanup remain enforced.
+- Each call/account/node gets isolated files, removed on normal completion,
+  errors and cancellation. No mutable login files or process-local entitlement
+  caches are shared. The durable encrypted credential is authoritative; Redis
+  caches only credential-scoped discovery metadata. The discovery cache schema
+  is versioned to avoid reusing earlier placeholder catalogs.
+- Chat re-reads the live mapping before selecting a variant. This is deliberately
+  stricter than caching an inferred model-to-UID mapping across accounts.
+- Text chat and incremental text/reasoning streaming are supported. Client tool
+  schemas, tool history, images, reasoning summaries and multiple choices are
+  rejected. Inference sampling/output defaults remain CLI-owned; this is not
+  full OpenAI parameter passthrough. Usage preserves optional ACP token totals
+  and cache components, otherwise uses GoRouter's existing estimator.
+- Authentication, permission, quota, invalid selection, missing runtime and
+  discovery timeout errors are sanitized and distinguished rather than all
+  becoming an unexplained 502. Raw CLI diagnostics and credentials are never
+  returned to clients or stored in application logs.
 
-When the CLI returns ACP turn usage, input/output/cache-read/cache-write values
-are retained separately; otherwise the existing GoRouter text estimator is
-used. Context-window `usage_update.used` is not billed usage. The CLI owns
-inference defaults; sampling controls are not a general OpenAI parameter pass-
-through. There is no live-account verification claim from synthetic tests.
+## Retired Cloud and Desktop connections
 
-## Verification and references
+The `devin` Cloud and `devin-desktop` Connect-protobuf implementations have been
+removed. They are not offered when creating connections and cannot run provider
+requests. Existing credential IDs, encrypted secrets, namespaces and usage
+history remain intact; no key is silently reinterpreted or moved between owners.
+A dashboard notice directs operators to reconnect through **Devin** and remove
+old connections from **Connection inventory** when ready.
 
-- Official binary `--version`: 3000.10.31; checksum verified.
-- Real binary: ACP v1 initialize, current `cog_…` PAT authentication, selector-omission behavior, and one bounded text turn were verified. The token and response content were not retained. Rotate credentials shared through support channels.
-- Strict mock ACP: no-prompt health, credential isolation, dynamic grouped
-  catalogs, per-model reasoning, selection confirmation, streaming before
-  completion, usage components, timeouts, cancellation, EOF/error denial.
-- The application/repositories still use the previously migrated `devin-cli`
-  ID. No new schema or backend-specific persisted field is introduced here.
+Catalog synchronization removes routes backed by retired connections; request
+handling also rejects them when synchronization is disabled. Existing
+`devin-cli` credentials retain their IDs and the `dv` namespace. Sync replaces
+obsolete managed variant routes with family routes after successful discovery;
+custom aliases referencing removed routes may need to be updated manually.
 
-Sources: [CLI models](https://docs.devin.ai/cli/models),
-[CLI ACP setup](https://docs.devin.ai/cli/acp/zed),
-[Desktop enterprise API](https://docs.devin.ai/desktop/accounts/api-reference/api-introduction),
-[cloud authentication](https://docs.devin.ai/api-reference/authentication),
-[ACP schema](https://github.com/agentclientprotocol/agent-client-protocol/tree/main/schema/v1),
-and the official CLI installer/manifest at `https://cli.devin.ai/install.sh`.
-Never paste tokens into command arguments, tracked files or support messages;
-rotate any key already shared publicly.
+No storage schema changes are needed: SQLite, PostgreSQL and ClickHouse retain
+historical provider IDs, and the shared service rejects new retired connections.
+
+## Verification (2026-09-20)
+
+- Official CLI, isolated credential file: **48 live families** received;
+  **46 standard families / 155 reasoning or default variants** after filtering.
+- Normal ACP confirmed an exact model UID; summarizer did not expose a selector.
+- One bounded request through the Go adapter using `gpt-5.6-luna` + `low`:
+  **HTTP 200**, complete text response, 5 reported completion tokens. No request
+  or response content, token or raw catalog is checked into the repository.
+- Synthetic tests cover future model families, opaque UIDs, reasoning mapping,
+  speed exclusion, malformed/oversized catalogs, authentication, denied host
+  requests, cancellation/cleanup, concurrency, SSE errors and token components.
+
+References: [CLI models](https://docs.devin.ai/cli/models),
+[ACP setup](https://docs.devin.ai/cli/acp/zed),
+[CLI configuration](https://docs.devin.ai/cli/reference/configuration),
+[permissions](https://docs.devin.ai/cli/reference/permissions),
+[authentication](https://docs.devin.ai/api-reference/authentication),
+[OmniRoute catalog comparison](https://github.com/diegosouzapw/OmniRoute/blob/7a921299/open-sse/config/providers/registry/devin/catalog.ts).

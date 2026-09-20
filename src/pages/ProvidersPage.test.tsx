@@ -170,34 +170,26 @@ test('shows the last successful OAuth token refresh, or an unrecorded state', as
   expect(screen.getByText(/2026/)).toBeInTheDocument()
 })
 
-test('shows the Windsurf avatar and asks for an imported Devin Desktop key, not OAuth', async () => {
-  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-desktop', name: 'Windsurf / Devin Desktop', description: 'Import a Devin Desktop key', auth: 'api_key', protocol: 'openai', default_base_url: 'https://server.codeium.com', model_prefix: 'dd', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
+test('shows one Devin connection with model and reasoning guidance', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin', description: 'Live Devin catalog', auth: 'api_key', protocol: 'devin-cli', default_base_url: '', model_prefix: 'dv', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
+  api.getCredentials.mockResolvedValue([{ id: 'old', name: 'Old Cloud', provider: 'devin', kind: 'api_key', status: 'active', created_at: '', base_url: '' }])
   render(<ProvidersPage />)
-  expect(await screen.findByRole('button', { name: 'Connect Windsurf / Devin Desktop' })).toBeInTheDocument()
-  expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Connect Windsurf / Devin Desktop' }))
-  expect(screen.getByLabelText('Devin Desktop / Windsurf key (not a Devin CLI apk_user key)')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Start authorization' })).not.toBeInTheDocument()
-})
-
-
-test('shows Devin Cloud cog key guidance and does not claim chat-completions support', async () => {
-  api.getProviders.mockResolvedValue({ data: [{ id: 'devin', name: 'Devin Cloud', description: 'Connect Cognition Devin Cloud', auth: 'api_key', protocol: 'devin-cloud', default_base_url: 'https://api.devin.ai', model_prefix: 'devin', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
-  api.getCredentials.mockResolvedValue([])
-  render(<ProvidersPage />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect Devin Cloud' }))
-  expect(screen.getByLabelText('Devin Cloud key (cog_)')).toBeInTheDocument()
-  expect(screen.getByText(/asynchronous agent-session service/)).toBeInTheDocument()
-  expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
-})
-
-test('shows Devin CLI separately with the Windsurf avatar and apk_user hint', async () => {
-  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin CLI', description: 'Devin CLI bundled in GoRouter', auth: 'api_key', protocol: 'openai', default_base_url: '', model_prefix: 'dv', custom_base_url: false, oauth_supported: false, oauth_refresh_required: false, quota_supported: false }] })
-  render(<ProvidersPage />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Connect Devin CLI' }))
-  expect(screen.getByLabelText('Devin CLI key (apk_user_ or cog_)')).toBeInTheDocument()
+  expect(await screen.findByText('Retired Devin connections')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Connect Devin Cloud' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Connect Devin' }))
+  expect(screen.getByLabelText('Devin key (cog_ PAT or apk_user_)')).toBeInTheDocument()
   expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument()
   expect(document.querySelector('img[src="/app-assets/assets/windsurf.svg"]')).toBeInTheDocument()
-  expect(screen.getByText(/included in the standard GoRouter Docker image/)).toBeInTheDocument()
-  expect(screen.queryByText(/requires installed CLI|devin-cli Docker image target/)).not.toBeInTheDocument()
+  expect(screen.getByText(/one model name with separate reasoning levels/)).toBeInTheDocument()
+  expect(screen.getByText(/Fast\/priority variants are excluded/)).toBeInTheDocument()
+})
+
+test('shows reasoning on each discovered model without variant rows', async () => {
+  api.getProviders.mockResolvedValue({ data: [{ id: 'devin-cli', name: 'Devin', auth: 'api_key', description: '', protocol: 'devin-cli', quota_supported: false }] })
+  api.getCredentials.mockResolvedValue([{ id: 'new', name: 'Devin account', provider: 'devin-cli', kind: 'api_key', status: 'active', created_at: '', base_url: '' }])
+  api.discoverModels.mockResolvedValue({ data: [{ id: 'future-model', public_id: 'dv/future-model', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }] }] })
+  render(<ProvidersPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Models' }))
+  expect(await screen.findByText(/Reasoning: low, high/)).toBeInTheDocument()
+  expect(screen.getAllByText('dv/future-model')).toHaveLength(1)
 })

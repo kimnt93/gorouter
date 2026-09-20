@@ -16,7 +16,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-// DevinCLIAdapter owns isolated no-tool ACP sessions. Every replica needs the
+// DevinCLIAdapter owns isolated, tool-disabled ACP sessions. Every replica needs the
 // CLI installed. Its semaphore bounds local OS processes, not authorization or
 // quota; credentials/catalog caching remain scoped by the existing services.
 type DevinCLIAdapter struct {
@@ -35,59 +35,33 @@ func (a *DevinCLIAdapter) Probe(ctx context.Context, cr *entities.CredentialRunt
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	s, err := a.open(ctx, cr.APIKey)
+	models, err := a.DiscoverModels(ctx, cr)
 	if err != nil {
 		return devinStatus(err), devinSafeError(err)
 	}
-	defer s.Close()
-	// session/new fetches authenticated team settings; never send a paid prompt.
+	if len(models) == 0 {
+		return 502, devinFailure(502, "Devin returned no models")
+	}
 	return http.StatusOK, nil
 }
 func (a *DevinCLIAdapter) DiscoverModels(ctx context.Context, cr *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
 	if cr == nil {
-		return nil, errors.New("missing Devin credential")
+		return nil, devinFailure(400, "missing Devin credential")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	s, err := a.open(ctx, cr.APIKey)
+	work, err := a.workspace(ctx, cr.APIKey)
 	if err != nil {
 		return nil, err
 	}
-	defer s.Close()
-	values := devinValues(s.selector("model"))
-	if len(values) == 0 && strings.HasPrefix(strings.TrimSpace(cr.APIKey), "cog_") {
-		// Current Cognition PATs authenticate the CLI, but ACP summarizer sessions
-		// may omit the model selector because account policy manages selection.
-		// Expose only Adaptive rather than inventing a foundation-model catalog.
-		return []credential.ProviderModel{{ID: "adaptive", Name: "Adaptive", Description: "Cognition-managed adaptive model routing", Root: "adaptive", Object: "model", OwnedBy: "devin-cli", APIFormat: "chat/completions", SupportedEndpoints: []string{"chat/completions"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}}}, nil
+	defer work.Close()
+	models, err := work.catalog()
+	if err != nil {
+		return nil, err
 	}
-	if len(values) == 0 || len(values) > 256 {
-		return nil, devinFailure(502, "Devin CLI returned no supported model selector or too many models")
-	}
-	out := make([]credential.ProviderModel, 0, len(values))
-	seen := map[string]bool{}
-	for _, v := range values {
-		if !devinModelID.MatchString(v.Value) || seen[v.Value] {
-			continue
-		}
-		seen[v.Value] = true
-		// Thought levels are model-specific. Never copy one model's options to all.
-		if err = s.selectValue("model", v.Value); err != nil {
-			return nil, err
-		}
-		model := credential.ProviderModel{ID: v.Value, Name: v.Name, Description: v.Description, Root: v.Value, Object: "model", OwnedBy: "devin-cli", APIFormat: "chat/completions", SupportedEndpoints: []string{"chat/completions"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}}
-		if thought := s.selector("thought_level"); thought != nil {
-			model.DefaultReasoningLevel = thought.CurrentValue
-			for _, level := range devinValues(thought) {
-				if level.Value != "" {
-					model.SupportedReasoningLevels = append(model.SupportedReasoningLevels, entities.ModelReasoningLevel{Effort: level.Value, Description: level.Description})
-				}
-			}
-		}
-		out = append(out, model)
-	}
-	if len(out) == 0 {
-		return nil, devinFailure(502, "Devin CLI returned no usable models")
+	out := make([]credential.ProviderModel, 0, len(models))
+	for _, m := range models {
+		out = append(out, m.Metadata)
 	}
 	return out, nil
 }
@@ -124,22 +98,48 @@ func (a *DevinCLIAdapter) Send(ctx context.Context, cr *entities.CredentialRunti
 	if !devinModelID.MatchString(model) {
 		return devinReject(devinFailure(400, "invalid Devin model")), nil
 	}
-	s, err := a.open(ctx, cr.APIKey)
+	work, err := a.workspace(ctx, cr.APIKey)
 	if err != nil {
 		return devinReject(err), nil
 	}
-	if s.selector("model") == nil && strings.HasPrefix(strings.TrimSpace(cr.APIKey), "cog_") && model == "adaptive" {
-		// The current PAT-authenticated summarizer may be policy-managed and omit
-		// selectors. Its default is the documented Adaptive router.
-	} else if err = s.selectValue("model", model); err != nil {
-		s.Close()
+	models, err := work.catalog()
+	if err != nil {
+		work.Close()
 		return devinReject(err), nil
 	}
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		if err = s.selectValue("thought_level", req.Reasoning.Effort); err != nil {
-			s.Close()
-			return devinReject(err), nil
+	effort := ""
+	if req.Reasoning != nil {
+		effort = req.Reasoning.Effort
+	}
+	// Also accept OpenAI's chat-completions spelling without changing other adapters.
+	var options struct {
+		Effort string `json:"reasoning_effort"`
+	}
+	if json.Unmarshal(raw, &options) != nil {
+		work.Close()
+		return devinReject(devinFailure(400, "Invalid reasoning effort")), nil
+	}
+	if options.Effort != "" {
+		if effort != "" && effort != options.Effort {
+			work.Close()
+			return devinReject(devinFailure(400, "Conflicting reasoning settings")), nil
 		}
+		effort = options.Effort
+	}
+	variant, err := selectDevinVariant(models, model, effort)
+	if err != nil {
+		work.Close()
+		return devinReject(err), nil
+	}
+	s, err := work.open(variant)
+	if err != nil {
+		return devinReject(err), nil
+	}
+	// The normal agent exposes actual UID selection; the old summarizer silently
+	// ignored it. Require confirmation before any billed prompt (never fallback).
+	if err = s.selectValue("model", variant); err != nil {
+		s.Close()
+		return devinReject(err), nil
 	}
 	id := entities.NewID("chatcmpl")
 	created := time.Now().Unix()
@@ -280,7 +280,7 @@ func (s *devinSession) prompt(text string, emit func(Delta) error) (devinTurn, e
 }
 func devinPrompt(req ChatRequest) (string, error) {
 	if len(req.Tools) > 0 || len(req.ToolChoice) > 0 && string(req.ToolChoice) != "null" && string(req.ToolChoice) != "\"none\"" {
-		return "", devinFailure(400, "Devin summarizer does not support tools")
+		return "", devinFailure(400, "Devin text gateway does not support tools")
 	}
 	if req.N != nil && *req.N != 1 {
 		return "", devinFailure(400, "Devin supports one choice")
@@ -291,7 +291,7 @@ func devinPrompt(req ChatRequest) (string, error) {
 	var lines []string
 	for _, m := range req.Messages {
 		if m.Role != "user" && m.Role != "assistant" && m.Role != "system" && m.Role != "developer" || len(m.ToolCalls) > 0 || m.ToolCallID != "" {
-			return "", devinFailure(400, "Devin summarizer accepts text conversation only")
+			return "", devinFailure(400, "Devin text gateway accepts text conversation only")
 		}
 		var text string
 		if len(m.Content) > 0 && string(m.Content) != "null" && json.Unmarshal(m.Content, &text) != nil {
@@ -301,7 +301,7 @@ func devinPrompt(req ChatRequest) (string, error) {
 			}
 			for _, b := range blocks {
 				if b.Type != "text" {
-					return "", devinFailure(400, "Devin summarizer accepts text only")
+					return "", devinFailure(400, "Devin text gateway accepts text only")
 				}
 				text += b.Text
 			}

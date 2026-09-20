@@ -179,3 +179,25 @@ func TestCatalogSyncSkipsWhenAnotherReplicaOwnsRefresh(t *testing.T) {
 		t.Fatalf("locker calls=%d models=%+v", locker.calls, repo.models)
 	}
 }
+
+func TestCatalogSyncRetiresDevinRoutesWithoutReadingSecrets(t *testing.T) {
+	calls := 0
+	cr := syncCredentialRepo{credentials: []entities.Credential{{ID: "old", Provider: "devin", Status: entities.StatusActive}}, runtimeCalls: &calls}
+	repo := &syncModelRepo{models: []entities.ModelDef{
+		{Name: "devin/devin", UpstreamModel: "devin", Metadata: &entities.ModelMetadata{Provider: "devin"}, Routes: []entities.ModelRoute{{CredentialID: "old", Enabled: true, Weight: 1}}},
+		{Name: "blend", UpstreamModel: "devin", Routes: []entities.ModelRoute{{CredentialID: "old", Enabled: true, Weight: 1}}},
+	}}
+	sync := &CatalogSync{Credentials: credential.NewService(cr, nil), Models: NewService(repo), Discoverer: func(string) credential.ModelDiscoverer {
+		t.Fatal("retired credential must not be discovered")
+		return nil
+	}}
+	if err := sync.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || len(repo.deletes) != 1 || repo.deletes[0] != "devin/devin" {
+		t.Fatal("did not retire managed routes")
+	}
+	if len(repo.upserts) != 1 || repo.upserts[0].Name != "blend" || len(repo.upserts[0].Routes) != 0 {
+		t.Fatal("old blend still routes retired credential")
+	}
+}

@@ -19,7 +19,7 @@ type Redis struct {
 
 func NewRedis(client redis.UniversalClient) *Redis { return &Redis{client: client} }
 
-func key(credentialID string) string { return "gorouter:model-discovery:" + credentialID }
+func key(credentialID string) string { return "gorouter:model-discovery:v2:" + credentialID }
 
 func (r *Redis) Get(ctx context.Context, credentialID string) ([]credential.ProviderModel, bool, error) {
 	value, err := r.client.Get(ctx, key(credentialID)).Bytes()

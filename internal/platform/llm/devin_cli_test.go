@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,23 +20,77 @@ import (
 
 // The child is a strict protocol fixture, not a simulated provider key.
 // Reject the old string version, nonstandard session model parameter, missing
-// selection confirmation and any attempt to use `models list` or a probe prompt.
+// selection confirmation, unsafe configuration, and any probe prompt.
 func TestDevinACPHelperProcess(t *testing.T) {
-	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "devin-helper" {
+	index := -1
+	for i, v := range os.Args {
+		if v == "devin-helper" {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
 		return
 	}
-	scenario := os.Args[len(os.Args)-1]
+	scenario := os.Args[index+1]
+	args := os.Args[index+2:]
 	home := os.Getenv("HOME")
 	if home != os.Getenv("TMPDIR") || !strings.HasPrefix(os.Getenv("XDG_CONFIG_HOME"), home+string(os.PathSeparator)) {
 		os.Exit(90)
 	}
-	model, level := "future-model", "low"
+	// A models-list subprocess and ACP subprocess use the SAME private login,
+	// but neither inherits host configuration or another account's token.
+	file, err := os.ReadFile(filepath.Join(home, ".local/share/devin/credentials.toml"))
+	if err != nil || !strings.Contains(string(file), strconv.Quote(os.Getenv("WINDSURF_API_KEY"))) {
+		os.Exit(89)
+	}
+	info, _ := os.Stat(filepath.Join(home, ".local/share/devin/credentials.toml"))
+	if info.Mode().Perm() != 0600 {
+		os.Exit(88)
+	}
+	var cfg devinConfig
+	config, _ := os.ReadFile(filepath.Join(home, ".config/devin/config.json"))
+	if json.Unmarshal(config, &cfg) != nil || cfg.AutoUpdate || cfg.Subagents || len(cfg.DisabledTools) != 1 || cfg.DisabledTools[0] != "*" || len(cfg.Permissions.Deny) != 1 || cfg.Permissions.Deny[0] != "*" {
+		os.Exit(87)
+	}
+	if len(args) > 0 && args[0] == "models" {
+		if scenario == "timeout" {
+			time.Sleep(time.Minute)
+		}
+		if k := os.Getenv("WINDSURF_API_KEY"); k != "apk_user_synthetic" && k != "cog_synthetic" {
+			fmt.Fprintln(os.Stderr, "invalid api key SENSITIVE")
+			os.Exit(1)
+		}
+		if scenario == "no-catalog" {
+			fmt.Println(`{"families":[]}`)
+			os.Exit(0)
+		}
+		if scenario == "catalog-oversize" {
+			fmt.Print(strings.Repeat("x", (4<<20)+1))
+			os.Exit(0)
+		}
+		if scenario == "catalog-malformed" {
+			fmt.Print(`{"families":`)
+			os.Exit(0)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(devinCatalog{Families: []devinFamily{
+			{Slug: "future-model", Label: "Future Model", Variants: []devinVariant{{UID: "future-low", Label: "Future Model Low"}, {UID: "future-high", Label: "Future Model High"}, {UID: "future-high-priority", Label: "Future Model High Fast"}}},
+			{Slug: "next-model", Label: "Next Model", Variants: []devinVariant{{UID: "next-off", Label: "Next Model Off"}}},
+		}})
+		os.Exit(0)
+	}
+	model, level := "future-low", "low"
+	if len(args) == 3 && args[0] == "acp" && args[1] == "--model" {
+		model = args[2]
+	} else if len(args) != 1 || args[0] != "acp" {
+		os.Exit(86)
+	}
 	options := func() []devinOption {
-		values := []devinValue{{Value: "low", Name: "Low"}, {Value: "ultra-next", Name: "Next effort"}}
-		if model == "next-model" {
+		values := []devinValue{{Value: "low", Name: "Low"}, {Value: "high", Name: "Next effort"}}
+		if model == "next-off" {
 			values = []devinValue{{Value: "off", Name: "Off"}}
 		}
-		return []devinOption{{ID: "model-id", Type: "select", Category: "model", CurrentValue: model, Options: []devinValue{{Group: "future", Name: "Future", Options: []devinValue{{Value: "future-model", Name: "Future Model"}, {Value: "next-model", Name: "Next Model"}, {Value: "../unsafe", Name: "Unsafe"}}}}}, {ID: "effort-id", Type: "select", Category: "thought_level", CurrentValue: level, Options: values}}
+		return []devinOption{{ID: "model-id", Type: "select", Category: "model", CurrentValue: model, Options: []devinValue{{Group: "future", Name: "Future", Options: []devinValue{{Value: "future-low", Name: "Future Model"}, {Value: "next-off", Name: "Next Model"}, {Value: "future-high", Name: "Future High"}, {Value: "../unsafe", Name: "Unsafe"}}}}}, {ID: "effort-id", Type: "select", Category: "thought_level", CurrentValue: level, Options: values}}
 	}
 	emit := func(id json.RawMessage, result any) {
 		_ = json.NewEncoder(os.Stdout).Encode(struct {
@@ -78,7 +133,7 @@ func TestDevinACPHelperProcess(t *testing.T) {
 				fail(msg.ID, -32603, "Authentication required: invalid api key SENSITIVE")
 				continue
 			}
-			if scenario == "no-catalog" {
+			if scenario == "no-selector" {
 				emit(msg.ID, devinSessionResult{SessionID: "s1"})
 				continue
 			}
@@ -91,7 +146,7 @@ func TestDevinACPHelperProcess(t *testing.T) {
 			if params.ConfigID == "model-id" {
 				model = params.Value
 				level = "low"
-				if model == "next-model" {
+				if model == "next-off" {
 					level = "off"
 				}
 			}
@@ -110,10 +165,10 @@ func TestDevinACPHelperProcess(t *testing.T) {
 			if json.Unmarshal(msg.Params, &params) != nil || params.SessionID != "s1" {
 				os.Exit(95)
 			}
-			if scenario == "selected" && (model != "next-model" || level != "off") {
+			if scenario == "selected" && model != "next-off" {
 				os.Exit(96)
 			}
-			if scenario == "reasoning" && level != "ultra-next" {
+			if scenario == "reasoning" && model != "future-high" {
 				os.Exit(97)
 			}
 			if scenario == "rpc-error" {
@@ -196,7 +251,7 @@ func mockDevinBinary(t *testing.T, scenario string) string {
 	}
 	path := filepath.Join(t.TempDir(), "devin")
 	// Values come exclusively from this test, not a user's request/credential.
-	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 3\nexec '%s' -test.run='^TestDevinACPHelperProcess$' -- devin-helper '%s'\n", bin, scenario)
+	script := fmt.Sprintf("#!/bin/sh\nexec '%s' -test.run='^TestDevinACPHelperProcess$' -- devin-helper '%s' \"$@\"\n", bin, scenario)
 	if err = os.WriteFile(path, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -209,17 +264,17 @@ func devinTestCredential() *entities.CredentialRuntime {
 	return &entities.CredentialRuntime{Provider: "devin-cli", Kind: entities.KindAPIKey, APIKey: "apk_user_synthetic"}
 }
 func TestDevinCLIAcceptsCurrentCognitionPAT(t *testing.T) {
-	a := devinTestAdapter(t, "no-catalog")
+	a := devinTestAdapter(t, "normal")
 	cr := devinTestCredential()
 	cr.APIKey = "cog_synthetic"
 	if status, err := a.Probe(context.Background(), cr); err != nil || status != http.StatusOK {
 		t.Fatalf("status=%d err=%v", status, err)
 	}
 	models, err := a.DiscoverModels(context.Background(), cr)
-	if err != nil || len(models) != 1 || models[0].ID != "adaptive" || len(models[0].SupportedReasoningLevels) != 0 {
+	if err != nil || len(models) != 2 || models[0].ID != "future-model" || len(models[0].SupportedReasoningLevels) != 2 {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
-	r, err := a.Send(context.Background(), cr, "adaptive", []byte(`{"messages":[{"role":"user","content":"synthetic"}]}`))
+	r, err := a.Send(context.Background(), cr, "future-model", []byte(`{"messages":[{"role":"user","content":"synthetic"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +295,7 @@ func TestDevinCLIHealthAndDiscoveryWithoutInference(t *testing.T) {
 		if err != nil || len(models) != 2 {
 			t.Fatalf("count=%d err=%v", len(models), err)
 		}
-		if models[0].ID != "future-model" || len(models[0].SupportedReasoningLevels) != 2 || models[0].SupportedReasoningLevels[1].Effort != "ultra-next" {
+		if models[0].ID != "future-model" || len(models[0].SupportedReasoningLevels) != 2 || models[0].SupportedReasoningLevels[1].Effort != "high" {
 			t.Fatal("did not retain fresh upstream efforts")
 		}
 		if models[1].DefaultReasoningLevel != "off" || len(models[1].SupportedReasoningLevels) != 1 {
@@ -253,7 +308,7 @@ func TestDevinCLIHealthAndDiscoveryWithoutInference(t *testing.T) {
 	}
 }
 func TestDevinCLIFailsClosed(t *testing.T) {
-	for _, scenario := range []string{"no-catalog", "timeout"} {
+	for _, scenario := range []string{"no-catalog", "timeout", "catalog-oversize", "catalog-malformed"} {
 		t.Run(scenario, func(t *testing.T) {
 			a := devinTestAdapter(t, scenario)
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
@@ -289,7 +344,7 @@ func TestDevinCLIChatSelectsModelAndReasoning(t *testing.T) {
 	for _, scenario := range []string{"selected", "reasoning"} {
 		t.Run(scenario, func(t *testing.T) {
 			a := devinTestAdapter(t, scenario)
-			model, effort := "future-model", "ultra-next"
+			model, effort := "future-model", "high"
 			if scenario == "selected" {
 				model, effort = "next-model", "off"
 			}
@@ -309,12 +364,14 @@ func TestDevinCLIChatSelectsModelAndReasoning(t *testing.T) {
 }
 func TestDevinCLIIncrementalStream(t *testing.T) {
 	a := devinTestAdapter(t, "slow")
-	start := time.Now()
 	r, err := a.Send(context.Background(), devinTestCredential(), "future-model", []byte(`{"stream":true,"messages":[{"role":"user","content":"synthetic"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Body.Close()
+	// Catalog/startup subprocess cost is not streaming buffering; measure only
+	// delivery after Send returns the streaming body.
+	start := time.Now()
 	reader := bufio.NewReader(r.Body)
 	line, err := reader.ReadString('\n')
 	if err != nil || !strings.Contains(line, "reasoning_content") || !strings.Contains(line, `"finish_reason":null`) {
@@ -417,8 +474,8 @@ func TestDevinCLIBooleanConfigAlongsideModel(t *testing.T) {
 }
 
 // Optional compatibility check with the checksum-verified official binary. Only
-// an invalid synthetic key is sent, and session/new must reject it before any
-// inference. Never read account tokens from environment or local login files.
+// an invalid synthetic key is sent; authenticated catalog discovery must
+// reject it before any inference. Never read account tokens from environment or local login files.
 func TestDevinCLIRealBinaryProtocol(t *testing.T) {
 	binary := os.Getenv("TEST_DEVIN_CLI_BINARY")
 	if binary == "" {
@@ -429,7 +486,7 @@ func TestDevinCLIRealBinaryProtocol(t *testing.T) {
 	defer cancel()
 	status, err := a.Probe(ctx, &entities.CredentialRuntime{APIKey: "apk_user_synthetic"})
 	if status != 401 || err == nil {
-		t.Fatalf("official CLI did not reject synthetic key at authenticated session setup: status=%d err=%v", status, err)
+		t.Fatalf("official CLI did not reject synthetic key at authenticated catalog discovery: status=%d err=%v", status, err)
 	}
 }
 
@@ -454,7 +511,7 @@ func TestDevinRPCErrorClassification(t *testing.T) {
 		code    int
 		message string
 		status  int
-	}{{-32000, "SENSITIVE", 401}, {-32603, "invalid api key SENSITIVE", 401}, {-32603, "quota exceeded SENSITIVE", 429}, {-32602, "SENSITIVE", 400}, {-32603, "SENSITIVE", 502}} {
+	}{{-32000, "SENSITIVE", 502}, {-32603, "invalid service key SENSITIVE", 401}, {-32603, "permission denied SENSITIVE", 403}, {-32603, "invalid api key SENSITIVE", 401}, {-32603, "quota exceeded SENSITIVE", 429}, {-32602, "SENSITIVE", 400}, {-32603, "SENSITIVE", 502}} {
 		err := classifyDevinError(&devinRPCError{tc.code, tc.message})
 		if devinStatus(err) != tc.status || strings.Contains(err.Error(), "SENSITIVE") {
 			t.Fatalf("status=%d error=%v", devinStatus(err), err)
@@ -472,4 +529,56 @@ func TestDevinCLIDeniesAgentHostAccess(t *testing.T) {
 	if r.StatusCode != 200 {
 		t.Fatalf("denial exchange failed: status=%d", r.StatusCode)
 	}
+}
+
+func TestDevinNoSelectorDoesNotIgnoreModelOrReasoning(t *testing.T) {
+	a := devinTestAdapter(t, "no-selector")
+	for _, key := range []string{"apk_user_synthetic", "cog_synthetic"} {
+		cr := devinTestCredential()
+		cr.APIKey = key
+		result, err := a.Send(context.Background(), cr, "future-model", []byte(`{"messages":[{"role":"user","content":"synthetic"}],"reasoning":{"effort":"high"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Body.Close()
+		if result.StatusCode != 400 {
+			t.Fatal("missing selector silently selected a default")
+		}
+	}
+}
+
+func TestDevinChatReasoningEffortAliasAndRejection(t *testing.T) {
+	a := devinTestAdapter(t, "reasoning")
+	for _, tc := range []struct {
+		raw    string
+		status int
+	}{
+		{`{"messages":[{"role":"user","content":"synthetic"}],"reasoning_effort":"high"}`, 200},
+		{`{"messages":[{"role":"user","content":"synthetic"}],"reasoning_effort":"high","reasoning":{"effort":"low"}}`, 400},
+		{`{"messages":[{"role":"user","content":"synthetic"}],"reasoning_effort":"priority"}`, 400},
+	} {
+		r, err := a.Send(context.Background(), devinTestCredential(), "future-model", []byte(tc.raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode != tc.status {
+			t.Fatalf("status=%d want=%d", r.StatusCode, tc.status)
+		}
+	}
+}
+
+func TestDevinRetiredProvidersFailClosed(t *testing.T) {
+	a := &RetiredDevinAdapter{}
+	if code, err := a.Probe(context.Background(), nil); code != 400 || err == nil {
+		t.Fatal("retired probe")
+	}
+	if _, err := a.DiscoverModels(context.Background(), nil); err == nil {
+		t.Fatal("invented catalog")
+	}
+	r, err := a.Send(context.Background(), nil, "devin", nil)
+	if err != nil || r.StatusCode != 400 {
+		t.Fatal("retired inference")
+	}
+	r.Body.Close()
 }

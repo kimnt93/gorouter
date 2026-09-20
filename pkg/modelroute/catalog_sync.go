@@ -87,6 +87,9 @@ func (s *CatalogSync) refreshLocked(ctx context.Context) error {
 	for _, connection := range connections {
 		state := &catalogCredential{definition: connection, provider: connection.Provider}
 		states[connection.ID] = state
+		if provider.IsRetired(connection.Provider) {
+			continue
+		}
 		if connection.Status != "" && connection.Status != entities.StatusActive {
 			continue
 		}
@@ -183,7 +186,7 @@ func (s *CatalogSync) refreshLocked(ctx context.Context) error {
 		routes := make([]entities.ModelRoute, 0, len(model.Routes))
 		for _, route := range model.Routes {
 			state, exists := states[route.CredentialID]
-			if !exists {
+			if !exists || provider.IsRetired(state.provider) {
 				continue
 			}
 			canonical := provider.PublicModelID(state.provider, model.UpstreamModel)
