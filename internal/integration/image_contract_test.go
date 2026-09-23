@@ -25,7 +25,7 @@ func TestStandardImageIncludesDevinRuntime(t *testing.T) {
 		t.Fatal("missing runtime stage")
 	}
 	runtime := dockerfile[lastStage:]
-	for _, required := range []string{"COPY --from=build /out/gorouter /usr/local/bin/gorouter", "COPY --from=devin-download /out/devin /usr/local/bin/devin", "USER 65532:65532", "RUN devin --version"} {
+	for _, required := range []string{"COPY --from=build /out/gorouter /usr/local/bin/gorouter", "COPY --from=devin-download /out/devin /usr/local/bin/devin", "USER 65532:65532", "RUN devin --version", "mkdir -p /var/lib/gorouter/provider-runtimes", "chown -R 65532:65532 /var/lib/gorouter"} {
 		if !strings.Contains(runtime, required) {
 			t.Errorf("standard image missing %s", required)
 		}
@@ -57,6 +57,9 @@ func TestStandardImageIncludesDevinRuntime(t *testing.T) {
 		cfg := read("docker-compose." + profile + ".yml")
 		if !strings.Contains(cfg, "build: .") || strings.Contains(cfg, "target:") {
 			t.Errorf("%s profile does not use the standard image", profile)
+		}
+		if profile != "local" && (!strings.Contains(cfg, "provider_runtimes:/var/lib/gorouter/provider-runtimes") || !strings.Contains(cfg, "  provider_runtimes:")) {
+			t.Errorf("%s profile does not persist verified provider runtimes", profile)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "docker-compose.devin-cli.yml")); !os.IsNotExist(err) {

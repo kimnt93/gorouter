@@ -72,6 +72,7 @@ type Config struct {
 	AntigravityClientID     string
 	AntigravityClientSecret string
 	FlowTTL                 time.Duration
+	ClaudeVersion           func(context.Context) string
 }
 
 type StartResult struct {

@@ -57,6 +57,22 @@ func TestCodexAdapterTranslatesRequestAndNonStreamingResponse(t *testing.T) {
 	}
 }
 
+func TestCodexClientVersionControlsCatalogCompatibilityHeaders(t *testing.T) {
+	var query, userAgent, version string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query().Get("client_version")
+		userAgent = r.Header.Get("User-Agent")
+		version = r.Header.Get("Version")
+		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-6-sol","minimal_client_version":"0.155.0"},{"slug":"gpt-6-luna","minimal_client_version":"0.155.0"}]}`)
+	}))
+	defer server.Close()
+	adapter := &CodexAdapter{HTTP: server.Client(), ClientVersion: func(context.Context) string { return "0.156.0" }}
+	models, err := adapter.DiscoverModels(context.Background(), &entities.CredentialRuntime{BaseURL: server.URL})
+	if err != nil || len(models) != 2 || query != "0.156.0" || userAgent != "codex_cli_rs/0.156.0" || version != "0.156.0" {
+		t.Fatalf("models=%+v query=%s agent=%s version=%s err=%v", models, query, userAgent, version, err)
+	}
+}
+
 func TestCodexAdapterStreamingAndModelDiscovery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

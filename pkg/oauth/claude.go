@@ -50,7 +50,13 @@ func (s *Service) claudeMetadata(ctx context.Context, token string) entities.OAu
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "claude-cli/"+providerpkg.ClaudeCodeClientVersion+" (external, cli)")
+	version := providerpkg.ClaudeCodeClientVersion
+	if s.config.ClaudeVersion != nil {
+		if resolved := strings.TrimSpace(s.config.ClaudeVersion(ctx)); resolved != "" {
+			version = resolved
+		}
+	}
+	req.Header.Set("User-Agent", "claude-cli/"+version+" (external, cli)")
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 	resp, err := s.client.Do(req)
 	if err != nil {

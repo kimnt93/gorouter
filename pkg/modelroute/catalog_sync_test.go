@@ -3,6 +3,7 @@ package modelroute
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kimnt93/gorouter/pkg/credential"
@@ -199,5 +200,45 @@ func TestCatalogSyncRetiresDevinRoutesWithoutReadingSecrets(t *testing.T) {
 	}
 	if len(repo.upserts) != 1 || repo.upserts[0].Name != "blend" || len(repo.upserts[0].Routes) != 0 {
 		t.Fatal("old blend still routes retired credential")
+	}
+}
+
+type refreshCatalogDiscoverer struct {
+	discoveries, refreshes int
+	version                int
+}
+
+func (d *refreshCatalogDiscoverer) DiscoverModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	d.discoveries++
+	return []credential.ProviderModel{{ID: "old"}}, nil
+}
+func (d *refreshCatalogDiscoverer) RefreshModels(context.Context, *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
+	d.refreshes++
+	d.version++
+	return []credential.ProviderModel{{ID: fmt.Sprintf("new-%d", d.version)}}, nil
+}
+func TestCatalogSchedulerForcesUpstreamRefreshEachCycle(t *testing.T) {
+	credentials := []entities.Credential{{ID: "cred", Provider: "codex", Status: entities.StatusActive}}
+	d := &refreshCatalogDiscoverer{}
+	repo := &syncModelRepo{}
+	sync := &CatalogSync{Credentials: credential.NewService(syncCredentialRepo{credentials: credentials, runtime: &entities.CredentialRuntime{ID: "cred", Provider: "codex"}}, nil), Models: NewService(repo), Discoverer: func(string) credential.ModelDiscoverer { return d }}
+	if err := sync.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if d.discoveries != 0 || d.refreshes != 2 {
+		t.Fatalf("discoveries=%d refreshes=%d", d.discoveries, d.refreshes)
+	}
+	if len(repo.deletes) != 1 || repo.deletes[0] != "cx/new-1" {
+		t.Fatalf("old managed model not pruned after successful refresh: %v", repo.deletes)
+	}
+	found := false
+	for _, m := range repo.upserts {
+		found = found || m.Name == "cx/new-2"
+	}
+	if !found {
+		t.Fatal("new release model not imported")
 	}
 }

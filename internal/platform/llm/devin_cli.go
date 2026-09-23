@@ -21,15 +21,16 @@ import (
 // CLI installed. Its semaphore bounds local OS processes, not authorization or
 // quota; credentials/catalog caching remain scoped by the existing services.
 type DevinCLIAdapter struct {
-	Binary        string
-	WorkDir       string
-	MaxProcesses  int
-	CatalogCache  DevinCatalogCache
-	CatalogLocker DevinCatalogLocker
-	CatalogTTL    time.Duration
-	catalogGroup  singleflight.Group
-	once          sync.Once
-	slots         chan struct{}
+	Binary         string
+	BinaryResolver func() (string, string)
+	WorkDir        string
+	MaxProcesses   int
+	CatalogCache   DevinCatalogCache
+	CatalogLocker  DevinCatalogLocker
+	CatalogTTL     time.Duration
+	catalogGroup   singleflight.Group
+	once           sync.Once
+	slots          chan struct{}
 }
 
 var devinModelID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)

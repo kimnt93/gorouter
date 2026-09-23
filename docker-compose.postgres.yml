@@ -51,6 +51,8 @@ services:
       MODEL_CATALOG_CACHE_TTL: "${MODEL_CATALOG_CACHE_TTL:-1h}"
     ports:
       - "${ROUTER_PORT:-8090}:8090"
+    volumes:
+      - provider_runtimes:/var/lib/gorouter/provider-runtimes
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,5 +105,6 @@ services:
       retries: 10
 
 volumes:
+  provider_runtimes:
   postgres_data:
   redis_data:

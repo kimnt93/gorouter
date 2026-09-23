@@ -1,8 +1,7 @@
 # Devin: live models and separate reasoning levels
 
 GoRouter now has **one connectable Devin provider**, `devin-cli` (dashboard name
-**Devin**, public prefix `dv`). The standard all-provider Docker image includes
-the checksum-pinned official CLI, currently **3000.10.31**. No sidecar, host login,
+**Devin**, public prefix `dv`). The standard all-provider Docker image includes a checksum-pinned fallback CLI, currently **3000.10.31**. GoRouter checks the official manifest at startup and every 12 hours and atomically activates a newer checksum-verified version for new requests. No sidecar, host login,
 shared HOME, or provider-specific image is needed.
 
 ## Connect and discover

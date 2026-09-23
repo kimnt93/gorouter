@@ -18,7 +18,7 @@ FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/gorouter /usr/local/bin/gorouter
 COPY --from=devin-download /out/devin /usr/local/bin/devin
-RUN mkdir -p /var/lib/gorouter && chown 65532:65532 /var/lib/gorouter
+RUN mkdir -p /var/lib/gorouter/provider-runtimes && chown -R 65532:65532 /var/lib/gorouter
 WORKDIR /var/lib/gorouter
 EXPOSE 8090
 USER 65532:65532

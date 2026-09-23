@@ -302,10 +302,20 @@ type AnthropicAdapter struct {
 	HTTP          *http.Client
 	OAuthClientID string
 	Refresh       func(ctx context.Context, cr *entities.CredentialRuntime) error
+	ClaudeVersion func(context.Context) string
 }
 
 // Send translates an OpenAI request to the Anthropic Messages API and relays it.
 // OAuth credentials transparently refresh once on 401 before failing.
+func (a *AnthropicAdapter) claudeVersion(ctx context.Context) string {
+	if a != nil && a.ClaudeVersion != nil {
+		if value := strings.TrimSpace(a.ClaudeVersion(ctx)); value != "" {
+			return value
+		}
+	}
+	return providerpkg.ClaudeCodeClientVersion
+}
+
 func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime, upstreamModel string, rawBody []byte) (*entities.UpstreamResult, error) {
 	var req ChatRequest
 	if err := json.Unmarshal(rawBody, &req); err != nil {
@@ -334,7 +344,7 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 		translated.Metadata = &AnthropicMetadata{UserID: string(identity)}
 		if cr.Provider == "claude" {
 			claudeSessionID = sessionID
-			prependClaudeCodeSystem(translated)
+			prependClaudeCodeSystem(translated, a.claudeVersion(ctx))
 		}
 	}
 	body, err := json.Marshal(translated)
@@ -347,7 +357,7 @@ func (a *AnthropicAdapter) Send(ctx context.Context, cr *entities.CredentialRunt
 	}
 
 	send := func() (*entities.UpstreamResult, error) {
-		headers, headerErr := anthropicHeaders(cr)
+		headers, headerErr := anthropicHeaders(cr, a.claudeVersion(ctx))
 		if headerErr != nil {
 			return nil, headerErr
 		}
@@ -393,7 +403,7 @@ func (a *AnthropicAdapter) probeModel(ctx context.Context, cr *entities.Credenti
 		return 0, err
 	}
 	base := anthropicBase(cr.BaseURL)
-	headers, err := anthropicHeaders(cr)
+	headers, err := anthropicHeaders(cr, a.claudeVersion(ctx))
 	if err != nil {
 		return 0, err
 	}
@@ -429,7 +439,7 @@ func (a *AnthropicAdapter) httpClient() *http.Client {
 
 func int64Ptr(v int64) *int64 { return &v }
 
-func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error) {
+func anthropicHeaders(cr *entities.CredentialRuntime, claudeVersion string) (map[string]string, error) {
 	headers := map[string]string{"anthropic-version": anthropicVersion}
 	if cr.Provider == "kimi-code" && cr.Kind == entities.KindOAuth {
 		headers["x-api-key"] = cr.OAuthAccess
@@ -456,19 +466,19 @@ func anthropicHeaders(cr *entities.CredentialRuntime) (map[string]string, error)
 		}
 		headers["anthropic-dangerous-direct-browser-access"] = "true"
 		headers["x-app"] = "cli"
-		headers["User-Agent"] = "claude-cli/" + providerpkg.ClaudeCodeClientVersion + " (external, cli)"
+		headers["User-Agent"] = "claude-cli/" + claudeVersion + " (external, cli)"
 	default:
 		return nil, fmt.Errorf("unsupported credential kind %q", cr.Kind)
 	}
 	return headers, nil
 }
 
-func prependClaudeCodeSystem(body *AnthropicRequest) {
+func prependClaudeCodeSystem(body *AnthropicRequest, claudeVersion string) {
 	if body == nil {
 		return
 	}
 	identity := []AnthropicContentBlock{
-		{Type: "text", Text: "x-anthropic-billing-header: cc_version=" + providerpkg.ClaudeCodeClientVersion + "; cc_entrypoint=cli;"},
+		{Type: "text", Text: "x-anthropic-billing-header: cc_version=" + claudeVersion + "; cc_entrypoint=cli;"},
 		{Type: "text", Text: "You are Claude Code, Anthropic's official CLI for Claude."},
 	}
 	body.System = append(identity, body.System...)

@@ -45,6 +45,11 @@ func (a *DevinCLIAdapter) workspace(parent context.Context, key string) (*devinW
 	}
 	release := func() { cancel(); <-a.slots }
 	binary := a.Binary
+	if a.BinaryResolver != nil {
+		if resolved, _ := a.BinaryResolver(); strings.TrimSpace(resolved) != "" {
+			binary = resolved
+		}
+	}
 	if binary == "" {
 		binary = "devin"
 	}

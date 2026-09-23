@@ -12,6 +12,7 @@ import (
 
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 )
 
 const maxModelCatalogBytes = 4 << 20
@@ -255,7 +256,7 @@ func (a *AnthropicAdapter) DiscoverModels(ctx context.Context, cr *entities.Cred
 		return modelsFor("kimi-code", "k3", "kimi-for-coding", "kimi-for-coding-highspeed"), nil
 	}
 	base := anthropicBase(cr.BaseURL)
-	headers, err := anthropicHeaders(cr)
+	headers, err := anthropicHeaders(cr, providerpkg.ClaudeCodeClientVersion)
 	if err != nil {
 		return nil, err
 	}

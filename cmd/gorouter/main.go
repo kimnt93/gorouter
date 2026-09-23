@@ -25,7 +25,10 @@ import (
 
 	"github.com/kimnt93/gorouter/internal/api/handlers"
 	"github.com/kimnt93/gorouter/internal/api/routes"
+	"github.com/kimnt93/gorouter/internal/platform/cliversion"
+	"github.com/kimnt93/gorouter/internal/platform/codexversion"
 	"github.com/kimnt93/gorouter/internal/platform/database"
+	"github.com/kimnt93/gorouter/internal/platform/devinruntime"
 	"github.com/kimnt93/gorouter/internal/platform/llm"
 	"github.com/kimnt93/gorouter/internal/platform/modeldiscovery"
 	"github.com/kimnt93/gorouter/internal/platform/observability"
@@ -47,6 +50,7 @@ import (
 	"github.com/kimnt93/gorouter/pkg/oauthmaintenance"
 	"github.com/kimnt93/gorouter/pkg/orgmodel"
 	"github.com/kimnt93/gorouter/pkg/pricing"
+	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"github.com/kimnt93/gorouter/pkg/providerquota"
 	"github.com/kimnt93/gorouter/pkg/quota"
 	"github.com/kimnt93/gorouter/pkg/seal"
@@ -258,8 +262,29 @@ func main() {
 		return oauthRefresh.Refresh(ctx, cr, true)
 	}
 	oauthRefresh.Refreshers["claude"] = refresher.Refresh
+	var compatibilityVersionStore cliversion.Cache
+	if redisClient != nil {
+		compatibilityVersionStore = modeldiscovery.NewSnapshots(redisClient)
+	} else if cfg.DatabaseBackend == "local" {
+		compatibilityVersionStore = modeldiscovery.NewMemorySnapshots(4)
+	}
+	claudeVersion := cliversion.NewNPM(client, compatibilityVersionStore, 12*time.Hour, "@anthropic-ai/claude-code", providerpkg.ClaudeCodeClientVersion)
+	anthropic.ClaudeVersion = claudeVersion.Resolve
+	claudeVersion.Start(ctx, 12*time.Hour, func(version string) {
+		log.Debug().Str("version", version).Msg("checked Claude Code compatibility version")
+	})
 	claudeCode := &llm.ClaudeCodeAdapter{AnthropicAdapter: anthropic}
-	codex := &llm.CodexAdapter{HTTP: client}
+	// The resolver is shared through Redis in distributed mode; local mode uses a
+	// bounded process cache. It checks at most once per twelve hours.
+	var codexVersionStore codexversion.Cache
+	if redisClient != nil {
+		codexVersionStore = modeldiscovery.NewSnapshots(redisClient)
+	} else if cfg.DatabaseBackend == "local" {
+		codexVersionStore = modeldiscovery.NewMemorySnapshots(2)
+	}
+	codexVersion := codexversion.New(client, codexVersionStore, 12*time.Hour)
+	codex := &llm.CodexAdapter{HTTP: client, ClientVersion: codexVersion.Resolve}
+	codexVersion.Start(ctx, 12*time.Hour, func(version string) { log.Debug().Str("version", version).Msg("checked Codex compatibility version") })
 	codexRefresher := &llm.CodexOAuthRefresher{HTTP: client, TokenURL: cfg.CodexOAuthTokenURL, ClientID: cfg.CodexOAuthClientID, Persister: credSvc}
 	codex.Refresh = func(ctx context.Context, cr *entities.CredentialRuntime) error {
 		return oauthRefresh.Refresh(ctx, cr, true)
@@ -294,7 +319,17 @@ func main() {
 	registerRefresh("antigravity", antigravity.RefreshToken, &antigravity.Refresh)
 	oauthRefresh.Start(ctx, 5*time.Minute, func(err error) { log.Warn().Err(err).Msg("OAuth maintenance failed") })
 	devinRetired := &llm.RetiredDevinAdapter{}
-	devinCLI := &llm.DevinCLIAdapter{CatalogTTL: cfg.ModelCatalog.CacheTTL}
+	devinRuntime := devinruntime.New(&http.Client{Timeout: 5 * time.Minute}, "/var/lib/gorouter/provider-runtimes/devin", "/usr/local/bin/devin", "3000.10.31")
+	devinRuntime.Start(ctx, 12*time.Hour, func(updated bool, version string, err error) {
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to check Devin CLI update")
+			return
+		}
+		if updated {
+			log.Info().Str("version", version).Msg("activated verified Devin CLI update")
+		}
+	})
+	devinCLI := &llm.DevinCLIAdapter{CatalogTTL: cfg.ModelCatalog.CacheTTL, BinaryResolver: devinRuntime.Current}
 	if redisClient != nil {
 		devinCLI.CatalogCache = modeldiscovery.NewSnapshots(redisClient)
 		devinCLI.CatalogLocker = distributedRefreshLock
@@ -342,7 +377,7 @@ func main() {
 		CodexClientID: cfg.CodexOAuthClientID, CodexTokenURL: cfg.CodexOAuthTokenURL,
 		GitHubClientID: cfg.GitHubOAuthClientID, GrokClientID: cfg.GrokOAuthClientID,
 		KimiClientID: cfg.KimiOAuthClientID, AntigravityClientID: antigravityClientID,
-		AntigravityClientSecret: antigravityClientSecret,
+		AntigravityClientSecret: antigravityClientSecret, ClaudeVersion: claudeVersion.Resolve,
 	})
 	if redisClient != nil {
 		oauthSvc.SetFlowStore(oauthpkg.NewRedisFlowStore(redisClient))

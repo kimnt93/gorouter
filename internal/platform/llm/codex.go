@@ -17,16 +17,25 @@ import (
 	"github.com/kimnt93/gorouter/pkg/entities"
 )
 
-// Keep the backend fingerprint aligned with the current Codex CLI protocol.
-// OpenAI's model catalog can return an empty list for stale client versions.
-const codexClientVersion = "0.153.4"
+// Baseline matches the currently implemented Codex protocol. The resolver may
+// advance this compatibility fingerprint after an official stable CLI release.
+const codexClientVersion = "0.156.0"
 const codexChatInstructions = "You are a ChatGPT agent."
 
 type CodexAdapter struct {
-	HTTP    *http.Client
-	Refresh func(context.Context, *entities.CredentialRuntime) error
+	HTTP          *http.Client
+	Refresh       func(context.Context, *entities.CredentialRuntime) error
+	ClientVersion func(context.Context) string
 }
 
+func (a *CodexAdapter) clientVersion(ctx context.Context) string {
+	if a != nil && a.ClientVersion != nil {
+		if value := strings.TrimSpace(a.ClientVersion(ctx)); value != "" {
+			return value
+		}
+	}
+	return codexClientVersion
+}
 func (a *CodexAdapter) refresh(ctx context.Context, cr *entities.CredentialRuntime) error {
 	if a.Refresh == nil {
 		return fmt.Errorf("Codex OAuth refresh is unavailable")
@@ -87,15 +96,15 @@ func codexBase(baseURL string) string {
 	return base + "/codex"
 }
 
-func codexHeaders(cr *entities.CredentialRuntime) map[string]string {
+func codexHeaders(cr *entities.CredentialRuntime, version string) map[string]string {
 	headers := map[string]string{
 		"Authorization":         "Bearer " + cr.OAuthAccess,
 		"Accept":                "text/event-stream",
 		"Openai-Beta":           "responses=experimental",
 		"X-Codex-Beta-Features": "responses_websockets",
 		"originator":            "codex_cli_rs",
-		"User-Agent":            "codex_cli_rs/" + codexClientVersion,
-		"Version":               codexClientVersion,
+		"User-Agent":            "codex_cli_rs/" + version,
+		"Version":               version,
 	}
 	if cr.OAuthAccount != "" {
 		headers["chatgpt-account-id"] = cr.OAuthAccount
@@ -293,7 +302,8 @@ func (a *CodexAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime,
 	if client == nil {
 		client = NewHTTPClient()
 	}
-	headers := codexHeaders(cr)
+	version := a.clientVersion(ctx)
+	headers := codexHeaders(cr, version)
 	if sessionID := ProviderPromptCacheKey(&request); sessionID != "" {
 		headers["session_id"] = sessionID
 	}
@@ -309,7 +319,7 @@ func (a *CodexAdapter) Send(ctx context.Context, cr *entities.CredentialRuntime,
 		if err := a.Refresh(ctx, cr); err != nil {
 			return nil, fmt.Errorf("Codex OAuth refresh failed: %w", err)
 		}
-		headers = codexHeaders(cr)
+		headers = codexHeaders(cr, version)
 		if sessionID := ProviderPromptCacheKey(&request); sessionID != "" {
 			headers["session_id"] = sessionID
 		}
@@ -694,7 +704,8 @@ func (a *CodexAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime
 	if client == nil {
 		client = NewHTTPClient()
 	}
-	headers := codexHeaders(cr)
+	version := a.clientVersion(ctx)
+	headers := codexHeaders(cr, version)
 	headers["Accept"] = "application/json"
 	send := func() (*entities.UpstreamResult, error) {
 		return postJSON(ctx, client, codexBase(cr.BaseURL)+"/responses", headers, payload)
@@ -708,7 +719,7 @@ func (a *CodexAdapter) Probe(ctx context.Context, cr *entities.CredentialRuntime
 		if err := a.refresh(ctx, cr); err != nil {
 			return 0, err
 		}
-		headers = codexHeaders(cr)
+		headers = codexHeaders(cr, version)
 		headers["Accept"] = "application/json"
 		result, err = send()
 		if err != nil {
@@ -728,8 +739,9 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 	if client == nil {
 		client = NewHTTPClient()
 	}
-	endpoint := codexBase(cr.BaseURL) + "/models?client_version=" + url.QueryEscape(codexClientVersion)
-	headers := codexHeaders(cr)
+	version := a.clientVersion(ctx)
+	endpoint := codexBase(cr.BaseURL) + "/models?client_version=" + url.QueryEscape(version)
+	headers := codexHeaders(cr, version)
 	headers["Accept"] = "application/json"
 	headers["Content-Type"] = "application/json"
 	load := func() (*entities.UpstreamResult, error) {
@@ -744,7 +756,7 @@ func (a *CodexAdapter) DiscoverModels(ctx context.Context, cr *entities.Credenti
 		if err := a.refresh(ctx, cr); err != nil {
 			return nil, err
 		}
-		headers = codexHeaders(cr)
+		headers = codexHeaders(cr, version)
 		headers["Accept"] = "application/json"
 		headers["Content-Type"] = "application/json"
 		result, err = load()

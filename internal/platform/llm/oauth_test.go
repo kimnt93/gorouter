@@ -297,3 +297,28 @@ func (t headerTransport) RoundTrip(request *http.Request) (*http.Response, error
 	clone.Header.Set(t.key, t.value)
 	return t.base.RoundTrip(clone)
 }
+
+func TestClaudeCodeDynamicCompatibilityVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User-Agent") != "claude-cli/2.1.280 (external, cli)" {
+			t.Fatalf("agent=%q", r.Header.Get("User-Agent"))
+		}
+		var request AnthropicRequest
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			t.Fatal("body")
+		}
+		if len(request.System) < 1 || request.System[0].Text != "x-anthropic-billing-header: cc_version=2.1.280; cc_entrypoint=cli;" {
+			t.Fatalf("system=%+v", request.System)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"model\":\"claude\",\"usage\":{\"input_tokens\":1}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+	a := &ClaudeCodeAdapter{AnthropicAdapter: &AnthropicAdapter{HTTP: server.Client(), ClaudeVersion: func(context.Context) string { return "2.1.280" }}}
+	cr := &entities.CredentialRuntime{Provider: "claude", Kind: entities.KindOAuth, BaseURL: server.URL, OAuthAccess: "token", OAuthMeta: entities.OAuthMetadata{AccountID: "a", DeviceID: "d"}}
+	result, err := a.Send(context.Background(), cr, "claude", []byte(`{"messages":[{"role":"user","content":"synthetic"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Body.Close()
+}

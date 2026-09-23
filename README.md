@@ -10,6 +10,8 @@ GoRouter is a small multi-user LLM gateway with OpenAI-compatible APIs,
 ownership-aware routing, quotas, usage attribution, pricing, and caching.
 Connect accounts from `/dashboard/providers`.
 
+Codex subscription catalogs [refresh automatically with a bounded delay](docs/codex-model-catalog.md).
+
 Explore the generated [Swaggo API documentation](http://localhost:8090/docs)
 at `http://<your-router-host>:8090/docs` (or `/docs` on your configured
 port). Protected API operations still require authentication.
@@ -136,6 +138,7 @@ Detailed configuration and API examples are in the [integration guide](docs/inte
 | `ROUTE_RETRIES` | No | `2` | Per-connection retry budget for transient failures before moving to the next route/account; quota failures advance immediately. |
 | `AUTO_MAX_TRIES` | No | `3` | Maximum distinct route attempts for the virtual `auto` model (1-20). |
 | `USAGE_WRITE_CONCURRENCY`, `USAGE_WRITE_QUEUE_SIZE` | No | `4`, `100000` | Asynchronous usage writer controls. |
+| `MODEL_CATALOG_SYNC_ENABLED`, `MODEL_CATALOG_SYNC_INTERVAL`, `MODEL_CATALOG_CACHE_TTL` | No | `true`, `15m`, `1h` | Upstream account catalog synchronization. Codex/Claude compatibility and verified Devin runtime metadata are checked every 12 hours. |
 | `ENABLE_STORE_COMPLLETIONS` | No | `false` | Opt in to bounded, encrypted request/completion capture for the Logs detail popup. Applies only to future requests. |
 
 Examples:

@@ -114,7 +114,7 @@ func (s *CatalogSync) refreshLocked(ctx context.Context) error {
 		if discoverer == nil {
 			continue
 		}
-		discovered, discoverErr := s.Credentials.DiscoverModels(ctx, runtime.ID, discoverer)
+		discovered, discoverErr := s.Credentials.RefreshDiscoveredModels(ctx, runtime.ID, discoverer)
 		if discoverErr != nil {
 			failures++
 			continue

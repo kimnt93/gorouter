@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/kimnt93/gorouter/pkg/credential"
 	"github.com/kimnt93/gorouter/pkg/entities"
+	providerpkg "github.com/kimnt93/gorouter/pkg/provider"
 	"io"
 	"net/http"
 )
@@ -31,7 +32,7 @@ func (a *KimiCodeAdapter) Send(c context.Context, r *entities.CredentialRuntime,
 	return a.delegate().Send(c, r, m, b)
 }
 func (a *KimiCodeAdapter) Probe(c context.Context, r *entities.CredentialRuntime) (int, error) {
-	headers, err := anthropicHeaders(r)
+	headers, err := anthropicHeaders(r, providerpkg.ClaudeCodeClientVersion)
 	if err != nil {
 		return 0, err
 	}
@@ -44,7 +45,7 @@ func (a *KimiCodeAdapter) Probe(c context.Context, r *entities.CredentialRuntime
 	return result.StatusCode, nil
 }
 func (a *KimiCodeAdapter) DiscoverModels(ctx context.Context, runtime *entities.CredentialRuntime) ([]credential.ProviderModel, error) {
-	headers, err := anthropicHeaders(runtime)
+	headers, err := anthropicHeaders(runtime, providerpkg.ClaudeCodeClientVersion)
 	if err != nil {
 		return modelsFor("kimi-code", "k3", "kimi-for-coding", "kimi-for-coding-highspeed"), nil
 	}
