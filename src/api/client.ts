@@ -143,6 +143,7 @@ export const getProviders = (): Promise<{ data: ProviderDefinition[] }> => reque
 export const getCredentials = (): Promise<Credential[]> => request<Credential[]>('/admin/credentials').then((items) => items ?? [])
 export const createCredential = (body: object): Promise<Credential> => request('/admin/credentials', { method: 'POST', body: JSON.stringify(body) })
 export const updateCredential = (id: string, body: object): Promise<Credential> => request(`/admin/credentials/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) })
+export const selectCredentialAccount = (id: string): Promise<ProviderQuotaSnapshot> => request<ProviderQuotaSnapshot>(`/admin/credentials/${encodeURIComponent(id)}/select`, { method: 'POST' })
 export const deleteCredential = (id: string): Promise<{ ok: boolean }> => request(`/admin/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const testCredential = (id: string): Promise<ConnectivityResult> => request(`/admin/credentials/${encodeURIComponent(id)}/test`, { method: 'POST' })
 export const getCredentialQuota = (id: string): Promise<ProviderQuotaSnapshot> => request(`/admin/credentials/${encodeURIComponent(id)}/quota`, { cache: 'no-store' })

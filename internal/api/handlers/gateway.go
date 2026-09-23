@@ -514,217 +514,226 @@ func (g *Gateway) Chat(c fiber.Ctx) error {
 	lastCredential := ""
 	quotaFailures := quotaBlocked
 	onlyQuotaFailures := fillFirstProvider != "" && healthBlocked == 0
-	// Attempt every eligible account in one bounded circle. Quota-aware provider
-	// accounts get exactly one attempt so a slow or failing account cannot consume
-	// the request budget before routing reaches the next account.
-	for _, candidate := range candidates {
-		credentialID := credentialIDs[candidate.ID]
-		lastCredential = credentialID
-		runtime := runtimes[candidate.ID]
-		adapter, ok := g.adapter(runtime.Provider)
-		if !ok || adapter == nil {
-			onlyQuotaFailures = false
-			g.Health.Report(credentialID, false)
-			if fillFirstProvider != "" && g.ProviderQuotas != nil {
-				g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+	// Retries are ring passes, not same-account retries: with A/B/C and a
+	// budget of three, the order is A,B,C,A,B,C,A,B,C. This lets every
+	// account receive one attempt before any account is attempted again.
+	passes := g.routeAttempts("")
+	for pass := 0; pass < passes; pass++ {
+		for _, candidate := range candidates {
+			credentialID := credentialIDs[candidate.ID]
+			// A quota response permanently removes this account for the current
+			// request; the provider quota state will re-enable it after reset.
+			if pass > 0 && g.ProviderQuotas != nil && !g.ProviderQuotas.Available(credentialID) {
+				continue
 			}
-			continue
-		}
-		upstreamModel := upstreamModels[candidate.ID]
-		if upstreamModel == "" {
-			upstreamModel = model.UpstreamModel
-		}
-		if upstreamModel == "" {
-			upstreamModel = model.Name
-		}
-		var (
-			result          *entities.UpstreamResult
-			transportErr    bool
-			exhausted       bool
-			accountLocal    bool
-			transientStatus int
-			budgetBlocked   bool
-		)
-		attempts := g.routeAttempts(runtime.Provider)
-		for attempt := 0; attempt < attempts; attempt++ {
-			if grant, ok := grants[req.Model]; ok {
-				chosen := candidateOrgRoutes[candidate.ID]
-				if chosen == nil {
-					return orgModelError(c, orgmodel.ErrForbidden)
-				}
-				sourcePrice, _, priceErr := g.resolvePrice(c.Context(), &chosen.Model)
-				if priceErr != nil {
-					return orgModelError(c, priceErr)
-				}
-				estimate := entities.CalculateCost(&sourcePrice, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
-				hold, reserveErr := g.OrgModels.Reserve(c.Context(), key.Actor.UserID, grant, *chosen, estimate.USD, started)
-				if errors.Is(reserveErr, orgmodel.ErrBudget) {
-					lastStatus = 429
-					budgetBlocked = true
-					break
-				}
-				if reserveErr != nil {
-					return orgModelError(c, reserveErr)
-				}
-				key.ModelBudget = hold
-			}
-
-			sent, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
-			if rerr != nil {
-				result, transportErr = nil, true
-				if attempt < attempts-1 && !sleepCtx(c.Context(), retryBackoff(attempt+1)) {
-					break
+			lastCredential = credentialID
+			runtime := runtimes[candidate.ID]
+			adapter, ok := g.adapter(runtime.Provider)
+			if !ok || adapter == nil {
+				onlyQuotaFailures = false
+				g.Health.Report(credentialID, false)
+				if fillFirstProvider != "" && g.ProviderQuotas != nil {
+					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
 				}
 				continue
 			}
-			transportErr = false
-			if sent.StatusCode >= 400 && sent.StatusCode < 500 {
-				if err := g.settleOrganization(c.Context(), key, 0); err != nil {
-					drainAndClose(sent.Body)
-					return orgModelError(c, err)
-				}
+			upstreamModel := upstreamModels[candidate.ID]
+			if upstreamModel == "" {
+				upstreamModel = model.UpstreamModel
 			}
-			if sent.StatusCode == fiber.StatusTooManyRequests || sent.StatusCode == fiber.StatusPaymentRequired {
-				lastStatus = sent.StatusCode
-				wait := retryAfter(sent.Header)
-				drainAndClose(sent.Body)
-				result = nil
-				exhausted = true
-				// Quota-aware subscription accounts move immediately to the next
-				// account on a provider limit. Retrying an exhausted account only
-				// delays reaching the remaining account in the configured circle.
-				definition, quotaAware := providerpkg.Lookup(runtime.Provider)
-				if quotaAware && definition.QuotaSupported {
-					break
-				}
-				if attempt < attempts-1 {
-					delay := retryBackoff(attempt + 1)
-					if wait > 0 && wait <= maxRetryAfter {
-						delay = wait
+			if upstreamModel == "" {
+				upstreamModel = model.Name
+			}
+			var (
+				result          *entities.UpstreamResult
+				transportErr    bool
+				exhausted       bool
+				accountLocal    bool
+				transientStatus int
+				budgetBlocked   bool
+			)
+			// The outer ring pass owns the retry budget.
+			attempts := 1
+			for attempt := 0; attempt < attempts; attempt++ {
+				if grant, ok := grants[req.Model]; ok {
+					chosen := candidateOrgRoutes[candidate.ID]
+					if chosen == nil {
+						return orgModelError(c, orgmodel.ErrForbidden)
 					}
-					if !sleepCtx(c.Context(), delay) {
+					sourcePrice, _, priceErr := g.resolvePrice(c.Context(), &chosen.Model)
+					if priceErr != nil {
+						return orgModelError(c, priceErr)
+					}
+					estimate := entities.CalculateCost(&sourcePrice, entities.TokenUsage{PromptTokens: req.EstimatePromptTokens(), CompletionTokens: req.EstimateOutputTokens()})
+					hold, reserveErr := g.OrgModels.Reserve(c.Context(), key.Actor.UserID, grant, *chosen, estimate.USD, started)
+					if errors.Is(reserveErr, orgmodel.ErrBudget) {
+						lastStatus = 429
+						budgetBlocked = true
+						break
+					}
+					if reserveErr != nil {
+						return orgModelError(c, reserveErr)
+					}
+					key.ModelBudget = hold
+				}
+
+				sent, rerr := adapter.Send(c.Context(), runtime, upstreamModel, raw)
+				if rerr != nil {
+					result, transportErr = nil, true
+					if attempt < attempts-1 && !sleepCtx(c.Context(), retryBackoff(attempt+1)) {
 						break
 					}
 					continue
 				}
-				break
-			}
-			if sent.StatusCode < 200 || sent.StatusCode >= 300 {
-				lastStatus = sent.StatusCode
-				if retryableStatus(sent.StatusCode) {
-					transientStatus = sent.StatusCode
+				transportErr = false
+				if sent.StatusCode >= 400 && sent.StatusCode < 500 {
+					if err := g.settleOrganization(c.Context(), key, 0); err != nil {
+						drainAndClose(sent.Body)
+						return orgModelError(c, err)
+					}
 				}
-			}
-			if accountLocalStatus(runtime.Provider, sent.StatusCode) {
-				drainAndClose(sent.Body)
-				result = nil
-				accountLocal = true
+				if sent.StatusCode == fiber.StatusTooManyRequests || sent.StatusCode == fiber.StatusPaymentRequired {
+					lastStatus = sent.StatusCode
+					wait := retryAfter(sent.Header)
+					drainAndClose(sent.Body)
+					result = nil
+					exhausted = true
+					// Quota-aware subscription accounts move immediately to the next
+					// account on a provider limit. Retrying an exhausted account only
+					// delays reaching the remaining account in the configured circle.
+					definition, quotaAware := providerpkg.Lookup(runtime.Provider)
+					if quotaAware && definition.QuotaSupported {
+						break
+					}
+					if attempt < attempts-1 {
+						delay := retryBackoff(attempt + 1)
+						if wait > 0 && wait <= maxRetryAfter {
+							delay = wait
+						}
+						if !sleepCtx(c.Context(), delay) {
+							break
+						}
+						continue
+					}
+					break
+				}
+				if sent.StatusCode < 200 || sent.StatusCode >= 300 {
+					lastStatus = sent.StatusCode
+					if retryableStatus(sent.StatusCode) {
+						transientStatus = sent.StatusCode
+					}
+				}
+				if accountLocalStatus(runtime.Provider, sent.StatusCode) {
+					drainAndClose(sent.Body)
+					result = nil
+					accountLocal = true
+					break
+				}
+				if (sent.StatusCode < 200 || sent.StatusCode >= 300) && !retryableStatus(sent.StatusCode) {
+					status := sent.StatusCode
+					drainAndClose(sent.Body)
+					g.recordError(key, model, runtime.ID, status, started, "upstream rejected request")
+					c.Set("X-Cache", "bypass")
+					return responseapi.For(c).Error(status, "upstream rejected the request", "upstream_error", "upstream_rejected").Send()
+				}
+				if sent.StatusCode < 200 || sent.StatusCode >= 300 {
+					lastStatus = sent.StatusCode
+					drainAndClose(sent.Body)
+					result = nil
+					if attempt < attempts-1 && !sleepCtx(c.Context(), retryBackoff(attempt+1)) {
+						break
+					}
+					continue
+				}
+				result = sent
 				break
 			}
-			if (sent.StatusCode < 200 || sent.StatusCode >= 300) && !retryableStatus(sent.StatusCode) {
-				status := sent.StatusCode
-				drainAndClose(sent.Body)
-				g.recordError(key, model, runtime.ID, status, started, "upstream rejected request")
-				c.Set("X-Cache", "bypass")
-				return responseapi.For(c).Error(status, "upstream rejected the request", "upstream_error", "upstream_rejected").Send()
-			}
-			if sent.StatusCode < 200 || sent.StatusCode >= 300 {
-				lastStatus = sent.StatusCode
-				drainAndClose(sent.Body)
-				result = nil
-				if attempt < attempts-1 && !sleepCtx(c.Context(), retryBackoff(attempt+1)) {
-					break
+			if result == nil {
+				if exhausted {
+					quotaFailures++
+				} else {
+					onlyQuotaFailures = false
+				}
+				if fillFirstProvider != "" && g.ProviderQuotas != nil {
+					if exhausted {
+						g.ProviderQuotas.ExhaustAndAdvance(fillFirstProvider, credentialID, eligibleAccountIDs)
+					} else {
+						g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+					}
+				} else if exhausted && g.ProviderQuotas != nil {
+					g.ProviderQuotas.MarkExhausted(credentialID)
+				}
+				// A quota-aware account must be advanced after a transient upstream
+				// 5xx, but a provider-wide overload response is not proof that this
+				// credential is unhealthy. Do not ban the account after three busy
+				// responses; otherwise a burst of 502s makes the whole ring disappear
+				// for a minute and later requests stop before trying the ring again.
+				if !budgetBlocked && !accountLocal && (!exhausted || transportErr) && !transientQuotaProviderFailure(runtime.Provider, transientStatus) {
+					g.Health.Report(credentialID, false)
 				}
 				continue
 			}
-			result = sent
-			break
-		}
-		if result == nil {
-			if exhausted {
-				quotaFailures++
-			} else {
-				onlyQuotaFailures = false
+			selectedModel := candidateModels[candidate.ID]
+			if selectedModel == nil {
+				selectedModel = model
 			}
-			if fillFirstProvider != "" && g.ProviderQuotas != nil {
-				if exhausted {
-					g.ProviderQuotas.ExhaustAndAdvance(fillFirstProvider, credentialID, eligibleAccountIDs)
-				} else {
-					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+			routedModel := *selectedModel
+			routedModel.UpstreamModel = upstreamModel
+			routedModel.Metadata = cloneModelMetadata(selectedModel.Metadata)
+			if routedModel.Metadata == nil {
+				routedModel.Metadata = &entities.ModelMetadata{}
+			}
+			routedModel.Metadata.Provider = runtime.Provider
+			selectedPrice := pricePtr
+			if chosen := candidateOrgRoutes[candidate.ID]; chosen != nil {
+				p, _, err := g.resolvePrice(c.Context(), &chosen.Model)
+				if err != nil {
+					return orgModelError(c, err)
 				}
-			} else if exhausted && g.ProviderQuotas != nil {
-				g.ProviderQuotas.MarkExhausted(credentialID)
+				selectedPrice = &p
 			}
-			// A quota-aware account must be advanced after a transient upstream
-			// 5xx, but a provider-wide overload response is not proof that this
-			// credential is unhealthy. Do not ban the account after three busy
-			// responses; otherwise a burst of 502s makes the whole ring disappear
-			// for a minute and later requests stop before trying the ring again.
-			if !budgetBlocked && !accountLocal && (!exhausted || transportErr) && !transientQuotaProviderFailure(runtime.Provider, transientStatus) {
-				g.Health.Report(credentialID, false)
-			}
-			continue
-		}
-		selectedModel := candidateModels[candidate.ID]
-		if selectedModel == nil {
-			selectedModel = model
-		}
-		routedModel := *selectedModel
-		routedModel.UpstreamModel = upstreamModel
-		routedModel.Metadata = cloneModelMetadata(selectedModel.Metadata)
-		if routedModel.Metadata == nil {
-			routedModel.Metadata = &entities.ModelMetadata{}
-		}
-		routedModel.Metadata.Provider = runtime.Provider
-		selectedPrice := pricePtr
-		if chosen := candidateOrgRoutes[candidate.ID]; chosen != nil {
-			p, _, err := g.resolvePrice(c.Context(), &chosen.Model)
-			if err != nil {
-				return orgModelError(c, err)
-			}
-			selectedPrice = &p
-		}
 
-		if autoRequested {
-			if resolved, ok, e := g.resolvePrice(c.Context(), selectedModel); e == nil && ok {
-				selectedPrice = &resolved
-			} else if e == nil {
-				selectedPrice = nil
-			}
-		}
-		if req.Stream {
-			streamOwnsReservation = true
-			onStreamDone := func(providerSucceeded bool) {
-				if providerSucceeded {
-					g.Health.Report(credentialID, true)
-					if strategy == chat.StrategyRoundRobin {
-						g.Selector.BindAffinity(context.Background(), routeAffinity, candidate.ID)
-					}
-					if g.ProviderQuotas != nil {
-						g.ProviderQuotas.MarkInUse(credentialID)
-					}
-					return
-				}
-				// An interrupted accepted stream is not evidence of invalid
-				// credentials. Quota-aware accounts advance without accumulating
-				// a provider-wide ban (the same rule as explicit transient 5xx).
-				if !transientQuotaProviderFailure(runtime.Provider, fiber.StatusBadGateway) {
-					g.Health.Report(credentialID, false)
-				}
-				if fillFirstProvider != "" && g.ProviderQuotas != nil {
-					g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+			if autoRequested {
+				if resolved, ok, e := g.resolvePrice(c.Context(), selectedModel); e == nil && ok {
+					selectedPrice = &resolved
+				} else if e == nil {
+					selectedPrice = nil
 				}
 			}
-			return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation, onStreamDone)
+			if req.Stream {
+				streamOwnsReservation = true
+				onStreamDone := func(providerSucceeded bool) {
+					if providerSucceeded {
+						g.Health.Report(credentialID, true)
+						if strategy == chat.StrategyRoundRobin {
+							g.Selector.BindAffinity(context.Background(), routeAffinity, candidate.ID)
+						}
+						if g.ProviderQuotas != nil {
+							g.ProviderQuotas.MarkInUse(credentialID)
+						}
+						return
+					}
+					// An interrupted accepted stream is not evidence of invalid
+					// credentials. Quota-aware accounts advance without accumulating
+					// a provider-wide ban (the same rule as explicit transient 5xx).
+					if !transientQuotaProviderFailure(runtime.Provider, fiber.StatusBadGateway) {
+						g.Health.Report(credentialID, false)
+					}
+					if fillFirstProvider != "" && g.ProviderQuotas != nil {
+						g.ProviderQuotas.AdvanceAccount(fillFirstProvider, credentialID, eligibleAccountIDs)
+					}
+				}
+				return g.stream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation, onStreamDone)
+			}
+			g.Health.Report(credentialID, true)
+			if strategy == chat.StrategyRoundRobin {
+				g.Selector.BindAffinity(c.Context(), routeAffinity, candidate.ID)
+			}
+			if g.ProviderQuotas != nil {
+				g.ProviderQuotas.MarkInUse(credentialID)
+			}
+			return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation)
 		}
-		g.Health.Report(credentialID, true)
-		if strategy == chat.StrategyRoundRobin {
-			g.Selector.BindAffinity(c.Context(), routeAffinity, candidate.ID)
-		}
-		if g.ProviderQuotas != nil {
-			g.ProviderQuotas.MarkInUse(credentialID)
-		}
-		return g.nonStream(c, key, &routedModel, runtime, result, raw, deterministic, started, selectedPrice, reservation)
 	}
 	c.Set("X-Cache", "bypass")
 	if organizationRequest && lastStatus == 429 {

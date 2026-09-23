@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ProvidersPage } from './ProvidersPage'
 
 const api = vi.hoisted(() => ({
-  getProviders: vi.fn(), getCredentials: vi.fn(), getOrganizations: vi.fn(), createCredential: vi.fn(), deleteCredential: vi.fn(), discoverModels: vi.fn(), importModels: vi.fn(), requestStream: vi.fn(), startOAuth: vi.fn(), completeOAuth: vi.fn(), testCredential: vi.fn(), updateCredential: vi.fn(), getCredentialQuota: vi.fn(), refreshCredentialQuota: vi.fn(), getCodexResetCredits: vi.fn(), redeemCodexResetCredit: vi.fn(),
+  getProviders: vi.fn(), getCredentials: vi.fn(), getOrganizations: vi.fn(), createCredential: vi.fn(), deleteCredential: vi.fn(), discoverModels: vi.fn(), importModels: vi.fn(), requestStream: vi.fn(), startOAuth: vi.fn(), completeOAuth: vi.fn(), testCredential: vi.fn(), updateCredential: vi.fn(), getCredentialQuota: vi.fn(), refreshCredentialQuota: vi.fn(), selectCredentialAccount: vi.fn(), getCodexResetCredits: vi.fn(), redeemCodexResetCredit: vi.fn(),
 }))
 vi.mock('../api/client', () => api)
 

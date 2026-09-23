@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getProviders, importModels, refreshCredentialQuota, getCodexResetCredits, redeemCodexResetCredit, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
+import { completeOAuth, createCredential, deleteCredential, discoverModels, getCredentialQuota, getCredentials, getProviders, importModels, refreshCredentialQuota, getCodexResetCredits, redeemCodexResetCredit, selectCredentialAccount, requestStream, startOAuth, testCredential, updateCredential } from '../api/client'
 import type { CodexResetCredit, Credential, OAuthStartResponse, ProviderDefinition, ProviderModel, ProviderQuotaSnapshot, Session } from '../api/contracts'
 import { Badge, Empty, ErrorBanner, Field, SuccessBanner } from '../components/Management'
 import { Modal } from '../components/Modal'
@@ -100,6 +100,7 @@ function ConnectionRow({ credential, quotaSupported, quotaReloadVersion, onModel
     {quotaSupported && <QuotaPanel quota={quota} accountFallback={credential.label || credential.name} busy={quotaBusy} onReload={() => void reloadQuota()} />}
     {credential.provider === 'codex' && credential.kind === 'oauth' && <div className="reset-credit-panel"><button disabled={quotaBusy} onClick={() => void loadResetCredits()}>{quotaBusy ? 'Loading resets…' : 'Reset credits'}</button></div>}
     <div className="compact-actions">
+    <button disabled={busy} onClick={() => void run(async () => { const response = await selectCredentialAccount(credential.id); setQuota(response); setResult('Selected as current ring account') })}>Use account</button>
     <button disabled={busy} onClick={() => void run(async () => { const response = await testCredential(credential.id); setResult(response.ok ? `Healthy · ${response.status ?? 'OK'} · ${response.latency_ms} ms` : 'Health check failed') })}>Test</button>
     <button onClick={onModels}>Models</button><button onClick={onChat}>Chat</button>
     <button disabled={busy} onClick={() => void run(async () => { await updateCredential(credential.id, { name: credential.name, base_url: credential.base_url, status: credential.status === 'active' ? 'disabled' : 'active', api_key: '', oauth_access: '', oauth_refresh: '' }); await onRefresh() })}>{credential.status === 'active' ? 'Disable' : 'Enable'}</button>

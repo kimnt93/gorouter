@@ -1562,6 +1562,67 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/credentials/{id}/select": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Makes this active provider account the next account used by the distributed ring.",
+                "tags": [
+                    "credentials"
+                ],
+                "summary": "Select provider account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Credential ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Snapshot"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/credentials/{id}/test": {
             "post": {
                 "security": [

@@ -121,6 +121,12 @@ redis.call("SET", KEYS[2], ARGV[1])
 return 1
 `)
 
+// SetActive is an explicit operator action and may replace the current
+// checkpoint. Unlike MarkActive it is not subject to stale-request protection.
+func (r *RedisState) SetActive(ctx context.Context, provider, id string) error {
+	return r.client.Set(ctx, quotaStatePrefix+"active:"+provider, id, 0).Err()
+}
+
 // MarkActive atomically rejects stale successes for an account another replica
 // has already exhausted. This prevents a slower in-flight request from moving
 // the shared cursor backwards after failover selected a new account.

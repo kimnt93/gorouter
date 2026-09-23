@@ -56,6 +56,7 @@ type StateCache interface {
 	ClearExhausted(ctx context.Context, credentialID string) error
 	ActiveCredential(ctx context.Context, provider string) (string, error)
 	MarkActive(ctx context.Context, provider, credentialID string) (bool, error)
+	SetActive(ctx context.Context, provider, credentialID string) error
 	SyncAccountRing(ctx context.Context, provider string, credentialIDs []string) error
 	AlignAccount(ctx context.Context, provider string, eligible []string) error
 	AccountRing(ctx context.Context, provider string) ([]string, string, error)
@@ -404,6 +405,39 @@ func (s *Service) ExhaustAndAdvance(providerID, credentialID string, eligible []
 		return
 	}
 	s.AdvanceAccount(providerID, credentialID, eligible)
+}
+
+// SelectAccount makes an operator-selected account the next ring checkpoint.
+// It clears a stale local exhaustion marker first, then atomically publishes the
+// checkpoint through Redis so every router replica observes the same choice.
+func (s *Service) SelectAccount(ctx context.Context, credentialID string) error {
+	runtime, err := s.credentials.Runtime(ctx, credentialID)
+	if err != nil {
+		return err
+	}
+	if !Supported(runtime.Provider) {
+		return fmt.Errorf("provider %s does not support account rings", runtime.Provider)
+	}
+	s.mu.Lock()
+	delete(s.exhausted, credentialID)
+	s.active[runtime.Provider] = credentialID
+	for id, snapshot := range s.snapshots {
+		if snapshot.Provider == runtime.Provider {
+			snapshot.InUse = id == credentialID
+			s.snapshots[id] = snapshot
+		}
+	}
+	s.mu.Unlock()
+	if s.state != nil {
+		if err := s.state.ClearExhausted(ctx, credentialID); err != nil {
+			return err
+		}
+		if err := s.state.SetActive(ctx, runtime.Provider, credentialID); err != nil {
+			return err
+		}
+	}
+	s.MarkInUse(credentialID)
+	return nil
 }
 
 // MarkInUse records the credential that most recently accepted a gateway

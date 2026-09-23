@@ -3171,6 +3171,46 @@ paths:
       summary: Manage Codex reset credits
       tags:
       - credentials
+  /admin/credentials/{id}/select:
+    post:
+      description: Makes this active provider account the next account used by the
+        distributed ring.
+      parameters:
+      - description: Credential ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_pkg_providerquota.Snapshot'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_kimnt93_gorouter_internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Select provider account
+      tags:
+      - credentials
   /admin/credentials/{id}/test:
     post:
       description: Probes a credential without exposing its secret or provider error

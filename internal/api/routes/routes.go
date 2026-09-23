@@ -216,6 +216,7 @@ func New(d Dependencies) *fiber.App {
 	mgmt.Post("/credentials/:id/test", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Test)
 	mgmt.Get("/credentials/:id/quota", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Quota)
 	mgmt.Post("/credentials/:id/quota", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Quota)
+	mgmt.Post("/credentials/:id/select", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.SelectAccount)
 	mgmt.Get("/credentials/:id/reset-credits", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.CodexResetCredits)
 	mgmt.Post("/credentials/:id/reset-credits", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.CodexResetCredits)
 	mgmt.Get("/credentials/:id/models", handlers.Require(d.Auth, entities.ScopeCredentialsManage), connectivity.Models)

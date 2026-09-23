@@ -77,6 +77,41 @@ func (h *CredentialConnectivity) Quota(c fiber.Ctx) error {
 	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(snapshot).Send()
 }
 
+// SelectAccount changes the shared provider-ring checkpoint to this credential.
+// @Summary Select provider account
+// @Description Makes this active provider account the next account used by the distributed ring.
+// @Tags credentials
+// @Security BearerAuth
+// @Param id path string true "Credential ID"
+// @Success 200 {object} providerquota.Snapshot
+// @Failure 401,403,404,500,502 {object} responseapi.ErrorResponse
+// @Router /admin/credentials/{id}/select [post]
+func (h *CredentialConnectivity) SelectAccount(c fiber.Ctx) error {
+	if !h.authorize(c) {
+		return responseapi.For(c).NotFound("credential not found").Send()
+	}
+	if h.Quotas == nil {
+		return responseapi.For(c).InternalError("provider quota service is unavailable").Send()
+	}
+	id := c.Params("id")
+	if err := h.Quotas.SelectAccount(c.Context(), id); err != nil {
+		if errors.Is(err, entities.ErrNotFound) {
+			return responseapi.For(c).NotFound("credential not found").Send()
+		}
+		return responseapi.For(c).Error(fiber.StatusBadGateway, "failed to select provider account", "upstream_error", "account_select_failed").Send()
+	}
+	snapshot, ok := h.Quotas.Cached(id)
+	if !ok {
+		runtime, err := h.Credentials.Runtime(c.Context(), id)
+		if err != nil {
+			return responseapi.For(c).NotFound("credential not found").Send()
+		}
+		snapshot = providerquota.Snapshot{CredentialID: id, Provider: runtime.Provider, Account: "connected account", Available: true}
+	}
+	snapshot.InUse = true
+	return responseapi.For(c).Response().Status(fiber.StatusOK).Data(snapshot).Send()
+}
+
 // ImportModels imports selected upstream models into ownership-aware routes.
 // @Summary Import provider models
 // @Description Imports selected models discovered from a provider credential into model route definitions.

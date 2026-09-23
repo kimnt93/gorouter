@@ -988,7 +988,7 @@ func TestGatewayCodexFailoverStartsAtActiveAccountAndTriesOneCircle(t *testing.T
 	}
 }
 
-func TestGatewayQuotaAwareProviderRetriesTransientFailureBeforeNextAccount(t *testing.T) {
+func TestGatewayQuotaAwareProviderUsesRingPasses(t *testing.T) {
 	key := &entities.ApiKey{ID: "key-1", TenantID: "tenant-1", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 2}, {CredentialID: "cred-b", Priority: 1}, {CredentialID: "cred-c", Priority: 0}}
 	runtimes := map[string]*entities.CredentialRuntime{
@@ -1017,12 +1017,12 @@ func TestGatewayQuotaAwareProviderRetriesTransientFailureBeforeNextAccount(t *te
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d calls=%v", response.StatusCode, upstream.calls)
 	}
-	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-a,cred-a,cred-b,cred-b,cred-b,cred-c"; got != want {
+	if got, want := strings.Join(upstream.calls, ","), "cred-a,cred-b,cred-c"; got != want {
 		t.Fatalf("calls=%s want=%s", got, want)
 	}
 }
 
-func TestGatewayQuotaAwareProvider502MovesImmediatelyToNextAccount(t *testing.T) {
+func TestGatewayQuotaAwareProvider502MovesToNextAccount(t *testing.T) {
 	key := &entities.ApiKey{ID: "key-502", TenantID: "tenant-502", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
 	runtimes := map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth}, "cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth}}
@@ -1039,7 +1039,7 @@ func TestGatewayQuotaAwareProvider502MovesImmediatelyToNextAccount(t *testing.T)
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK || strings.Join(upstream.calls, ",") != "cred-a,cred-a,cred-a,cred-b" {
+	if response.StatusCode != http.StatusOK || strings.Join(upstream.calls, ",") != "cred-a,cred-b" {
 		t.Fatalf("status=%d calls=%v", response.StatusCode, upstream.calls)
 	}
 }
@@ -1321,7 +1321,7 @@ func TestGatewayQuotaAwareTransient502DoesNotBanRingAccounts(t *testing.T) {
 	}
 }
 
-func TestGatewayCodexAcceptedStreamRetriesCurrentAccountBeforeAdvancing(t *testing.T) {
+func TestGatewayCodexAcceptedStreamUsesRingOrder(t *testing.T) {
 	key := &entities.ApiKey{ID: "key-502", TenantID: "tenant-502", Models: []string{"model-a"}, Scopes: []string{entities.ScopeChat}, Enabled: true}
 	routes := []entities.RouteCandidate{{CredentialID: "cred-a", Priority: 1}, {CredentialID: "cred-b", Priority: 0}}
 	runtimes := map[string]*entities.CredentialRuntime{"cred-a": {ID: "cred-a", Provider: "codex", Kind: entities.KindOAuth}, "cred-b": {ID: "cred-b", Provider: "codex", Kind: entities.KindOAuth}}
@@ -1355,7 +1355,7 @@ func TestGatewayCodexAcceptedStreamRetriesCurrentAccountBeforeAdvancing(t *testi
 	}
 	io.Copy(io.Discard, response.Body)
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK || strings.Join(calls, ",") != "cred-b,cred-b,cred-b,cred-a" {
+	if response.StatusCode != http.StatusOK || strings.Join(calls, ",") != "cred-b,cred-a" {
 		t.Fatalf("status=%d calls=%v", response.StatusCode, calls)
 	}
 }
